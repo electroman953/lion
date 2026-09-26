@@ -1,0 +1,6 @@
+// Constructions that Lion 0.1 does not define are refused (docs/implementation-notes.md)
+let t = "a" + "b"
+let b = 1 == "1"
+let c = "a" < "b"
+let q = 7.5 div 2
+let m = 7 mod 2.0

@@ -1,0 +1,5 @@
+let a = not 1
+let b = 1 and true
+let c = -"text"
+let d = true as Int
+let f = 1 < true

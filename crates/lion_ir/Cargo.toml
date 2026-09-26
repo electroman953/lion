@@ -1,0 +1,9 @@
+[package]
+name = "lion_ir"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lion_diagnostics.workspace = true
+lion_runtime.workspace = true

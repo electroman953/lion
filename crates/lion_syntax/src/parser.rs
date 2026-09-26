@@ -1,0 +1,831 @@
+//! Builds the syntax tree from tokens, following the grammar of spec §26.
+//!
+//! Expressions are parsed by recursive descent, one function per precedence level
+//! of the table in §9.1, from the weakest (`or`) to the strongest (postfix).
+//! Constructions that this version does not support yet are rejected with an explicit
+//! "not implemented yet" error naming the spec section, never silently accepted.
+
+use lion_diagnostics::{Diagnostic, Span};
+
+use crate::ast::*;
+use crate::token::{Keyword, Token, TokenKind};
+
+pub struct Parsed {
+    pub module: Module,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Parses the tokens of one file, which must end with [`TokenKind::Eof`].
+pub fn parse(tokens: &[Token]) -> Parsed {
+    assert!(matches!(tokens.last().map(|t| &t.kind), Some(TokenKind::Eof)));
+    let mut parser = Parser { tokens, pos: 0, diagnostics: Vec::new(), annotation_ends_expr: false };
+    let module = parser.module();
+    Parsed { module, diagnostics: parser.diagnostics }
+}
+
+/// The problem has been reported; the caller recovers.
+struct Reported;
+
+type PResult<T> = Result<T, Reported>;
+
+struct Parser<'t> {
+    tokens: &'t [Token],
+    pos: usize,
+    diagnostics: Vec<Diagnostic>,
+    /// Set while parsing the value of a `let` or `var`: a top-level `in` followed by a
+    /// type then starts the type annotation, not a membership test (§6.2, §26 rule 1).
+    annotation_ends_expr: bool,
+}
+
+impl Parser<'_> {
+    fn module(&mut self) -> Module {
+        let mut stmts = Vec::new();
+        loop {
+            while self.eat(&TokenKind::Newline) {}
+            if self.at(&TokenKind::Eof) {
+                return Module { stmts };
+            }
+            match self.statement().and_then(|stmt| self.end_of_statement().map(|()| stmt)) {
+                Ok(stmt) => stmts.push(stmt),
+                Err(Reported) => self.skip_statement(),
+            }
+        }
+    }
+
+    // ----- Statements -----
+
+    fn statement(&mut self) -> PResult<Stmt> {
+        let start = self.span();
+        if let Some((what, section)) = self.unsupported_statement() {
+            return Err(self.not_implemented(start, what, section));
+        }
+        match self.peek() {
+            TokenKind::Keyword(Keyword::Let | Keyword::Var) => self.let_statement(),
+            TokenKind::Semicolon => Err(self.stray_semicolon()),
+            kind if is_operator(kind) => Err(self.error(
+                Diagnostic::error("a line cannot start with an operator").with_primary(start, "").with_help(
+                    "to continue an expression on the next line, keep it inside parentheses (§5.1)",
+                ),
+            )),
+            _ => self.expr_statement(),
+        }
+    }
+
+    fn unsupported_statement(&self) -> Option<(&'static str, &'static str)> {
+        if let TokenKind::UpperIdent(_) = self.peek()
+            && self.kind_at(self.pos + 1) == &TokenKind::Assign
+        {
+            return Some(("type definitions (enumerations and named unions)", "§13"));
+        }
+        let TokenKind::Keyword(keyword) = self.peek() else { return None };
+        Some(match keyword {
+            Keyword::Fun | Keyword::Infix => ("functions", "§11"),
+            Keyword::If => ("`if` blocks", "§5.2, §10.1"),
+            Keyword::While | Keyword::For | Keyword::Break | Keyword::Continue => ("loops", "§10.2"),
+            Keyword::Match => ("`match`", "§10.3"),
+            Keyword::Return => ("`return`", "§11.4, §20.1"),
+            Keyword::Struct => ("structures", "§12"),
+            Keyword::Trait => ("traits", "§14"),
+            Keyword::Use => ("modules", "§20"),
+            Keyword::Private => ("`private`", "§20.3"),
+            Keyword::Test | Keyword::Expect => ("tests", "§24.1"),
+            Keyword::Foreign | Keyword::Unsafe => ("calling C code", "§21.2"),
+            Keyword::Parallel => ("parallelism", "§19"),
+            _ => return None,
+        })
+    }
+
+    /// `let x = value`, `var x = value in T`, `var x in T` (§6.1).
+    fn let_statement(&mut self) -> PResult<Stmt> {
+        let keyword = self.bump().clone();
+        let mutable = keyword.kind == TokenKind::Keyword(Keyword::Var);
+        let name = self.binding_name()?;
+        let value = if self.eat(&TokenKind::Assign) { Some(self.declaration_value()?) } else { None };
+        let annotation = if self.eat_keyword(Keyword::In) { Some(self.type_expr()?) } else { None };
+        if value.is_none() && annotation.is_none() {
+            let word = if mutable { "var" } else { "let" };
+            let error = Diagnostic::error(format!("`{word} {}` needs a value or a type", name.name))
+                .with_primary(name.span, "")
+                .with_help(format!(
+                    "write `{word} {0} = value`, or `{word} {0} in Type` to give it a value later (§6.1)",
+                    name.name
+                ));
+            return Err(self.error(error));
+        }
+        let span = keyword.span.to(self.previous_span());
+        Ok(Stmt { kind: StmtKind::Let(LetStmt { mutable, name, value, annotation }), span })
+    }
+
+    fn binding_name(&mut self) -> PResult<Ident> {
+        let span = self.span();
+        match self.peek() {
+            TokenKind::LowerIdent(name) => {
+                let name = name.clone();
+                self.bump();
+                Ok(Ident { name, span })
+            }
+            TokenKind::UpperIdent(name) => {
+                let error = Diagnostic::error(format!("`{name}` cannot name a value"))
+                    .with_primary(span, "names starting with an uppercase letter are types")
+                    .with_help(format!("write `{}` (§4.2)", lowercase_first(name)));
+                Err(self.error(error))
+            }
+            TokenKind::Keyword(keyword) => {
+                let error = Diagnostic::error(format!("`{}` is a reserved keyword", keyword.as_str()))
+                    .with_primary(span, "")
+                    .with_help("choose another name (§4.4)");
+                Err(self.error(error))
+            }
+            _ => Err(self.expected("a name")),
+        }
+    }
+
+    fn declaration_value(&mut self) -> PResult<Expr> {
+        let saved = std::mem::replace(&mut self.annotation_ends_expr, true);
+        let value = self.expr();
+        self.annotation_ends_expr = saved;
+        value
+    }
+
+    fn expr_statement(&mut self) -> PResult<Stmt> {
+        let target = self.expr()?;
+        let op = match self.peek() {
+            TokenKind::Assign => AssignOp::Set,
+            TokenKind::PlusAssign => AssignOp::Add,
+            TokenKind::MinusAssign => AssignOp::Sub,
+            TokenKind::StarAssign => AssignOp::Mul,
+            _ => return Ok(Stmt { span: target.span, kind: StmtKind::Expr(target) }),
+        };
+        let op_span = self.bump().span;
+        let value = self.expr()?;
+        let span = target.span.to(value.span);
+        Ok(Stmt { kind: StmtKind::Assign { target, op, op_span, value }, span })
+    }
+
+    fn end_of_statement(&mut self) -> PResult<()> {
+        let span = self.span();
+        match self.peek() {
+            TokenKind::Newline => {
+                self.bump();
+                Ok(())
+            }
+            TokenKind::Eof => Ok(()),
+            TokenKind::Semicolon => Err(self.stray_semicolon()),
+            TokenKind::Assign => Err(self.error(
+                Diagnostic::error("unexpected `=`")
+                    .with_primary(span, "")
+                    .with_help("to compare two values, use `==`"),
+            )),
+            other => {
+                let message = format!("expected the end of the line, found {}", other.describe());
+                Err(self.error(
+                    Diagnostic::error(message)
+                        .with_primary(span, "")
+                        .with_note("a line holds a single statement (§5.1)"),
+                ))
+            }
+        }
+    }
+
+    fn stray_semicolon(&mut self) -> Reported {
+        let error = Diagnostic::error("unexpected `;`")
+            .with_primary(self.span(), "this `;` does not close any block")
+            .with_help(
+                "the end of the line already ends the statement; `;` only closes a block opened by `:` (§5)",
+            );
+        self.error(error)
+    }
+
+    /// Skips the rest of a statement after an error, including the blocks it opens,
+    /// so that the lines of a block are not read as statements of their own.
+    fn skip_statement(&mut self) {
+        let (mut blocks, mut brackets) = (0usize, 0usize);
+        loop {
+            match self.peek() {
+                TokenKind::Eof => return,
+                TokenKind::Newline if blocks == 0 => {
+                    self.bump();
+                    return;
+                }
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => brackets += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    brackets = brackets.saturating_sub(1)
+                }
+                TokenKind::Colon if brackets == 0 => blocks += 1,
+                // `elif` and `else` close the previous branch before opening theirs (§5.2).
+                TokenKind::Semicolon | TokenKind::Keyword(Keyword::Elif | Keyword::Else) if brackets == 0 => {
+                    blocks = blocks.saturating_sub(1)
+                }
+                _ => {}
+            }
+            self.bump();
+        }
+    }
+
+    // ----- Expressions, from the weakest to the strongest binding (§9.1) -----
+
+    fn expr(&mut self) -> PResult<Expr> {
+        if let TokenKind::Keyword(keyword) = self.peek() {
+            let unsupported = match keyword {
+                Keyword::If => Some(("`if ... then ... else` expressions", "§10.1")),
+                Keyword::Match => Some(("`match`", "§10.3")),
+                Keyword::Fun => Some(("anonymous functions", "§11.1")),
+                Keyword::Try => Some(("`try`", "§18.3")),
+                Keyword::Task | Keyword::Wait => Some(("tasks", "§19.1")),
+                Keyword::Parallel => Some(("parallelism", "§19.2")),
+                Keyword::Compile => Some(("`compile`", "§21.1")),
+                Keyword::Shared | Keyword::Synced => Some(("shared values", "§17.2")),
+                _ => None,
+            };
+            if let Some((what, section)) = unsupported {
+                return Err(self.not_implemented(self.span(), what, section));
+            }
+        }
+        self.or_expr()
+    }
+
+    fn or_expr(&mut self) -> PResult<Expr> {
+        self.left_associative(Self::and_expr, |kind| match kind {
+            TokenKind::Keyword(Keyword::Or) => Some(BinaryOp::Or),
+            _ => None,
+        })
+    }
+
+    fn and_expr(&mut self) -> PResult<Expr> {
+        self.left_associative(Self::not_expr, |kind| match kind {
+            TokenKind::Keyword(Keyword::And) => Some(BinaryOp::And),
+            _ => None,
+        })
+    }
+
+    fn not_expr(&mut self) -> PResult<Expr> {
+        if !self.at_keyword(Keyword::Not) {
+            return self.comparison();
+        }
+        let start = self.bump().span;
+        let operand = self.not_expr()?;
+        Ok(Expr {
+            span: start.to(operand.span),
+            kind: ExprKind::Unary { op: UnaryOp::Not, operand: Box::new(operand) },
+        })
+    }
+
+    /// Chainable comparisons, or a single `in`, `subset` or `same` (§9.3).
+    fn comparison(&mut self) -> PResult<Expr> {
+        let first = self.as_expr()?;
+        let expr = if self.compare_op().is_some() {
+            let mut rest = Vec::new();
+            while let Some(op) = self.compare_op() {
+                let op_span = self.bump().span;
+                rest.push(Comparison { op, op_span, rhs: self.as_expr()? });
+            }
+            let span = first.span.to(rest.last().expect("one comparison").rhs.span);
+            Expr { kind: ExprKind::Compare { first: Box::new(first), rest }, span }
+        } else if let Some(op) = self.membership_op() {
+            let op_span = self.bump().span;
+            let rhs = self.as_expr()?;
+            binary(op, op_span, first, rhs)
+        } else {
+            return Ok(first);
+        };
+        if self.compare_op().is_some() || self.membership_op().is_some() {
+            let error = Diagnostic::error("these comparisons cannot be combined without parentheses")
+                .with_primary(self.span(), "")
+                .with_note("only `==`, `!=`, `<`, `>`, `<=` and `>=` can be chained; `in`, `subset` and `same` need parentheses (§9.3)");
+            return Err(self.error(error));
+        }
+        Ok(expr)
+    }
+
+    fn compare_op(&self) -> Option<CompareOp> {
+        Some(match self.peek() {
+            TokenKind::EqEq => CompareOp::Eq,
+            TokenKind::NotEq => CompareOp::Ne,
+            TokenKind::Lt => CompareOp::Lt,
+            TokenKind::Gt => CompareOp::Gt,
+            TokenKind::Le => CompareOp::Le,
+            TokenKind::Ge => CompareOp::Ge,
+            _ => return None,
+        })
+    }
+
+    fn membership_op(&self) -> Option<BinaryOp> {
+        match self.peek() {
+            TokenKind::Keyword(Keyword::In)
+                if !(self.annotation_ends_expr && self.type_starts_at(self.pos + 1)) =>
+            {
+                Some(BinaryOp::In)
+            }
+            TokenKind::Keyword(Keyword::Subset) => Some(BinaryOp::Subset),
+            TokenKind::Keyword(Keyword::Same) => Some(BinaryOp::Same),
+            _ => None,
+        }
+    }
+
+    fn as_expr(&mut self) -> PResult<Expr> {
+        let mut value = self.union_expr()?;
+        while self.eat_keyword(Keyword::As) {
+            let ty = self.type_expr()?;
+            value = Expr { span: value.span.to(ty.span), kind: ExprKind::As { value: Box::new(value), ty } };
+        }
+        Ok(value)
+    }
+
+    fn union_expr(&mut self) -> PResult<Expr> {
+        self.left_associative(Self::inter_expr, |kind| match kind {
+            TokenKind::Keyword(Keyword::Union) => Some(BinaryOp::Union),
+            TokenKind::Keyword(Keyword::Minus) => Some(BinaryOp::Minus),
+            _ => None,
+        })
+    }
+
+    fn inter_expr(&mut self) -> PResult<Expr> {
+        self.left_associative(Self::range_expr, |kind| match kind {
+            TokenKind::Keyword(Keyword::Inter) => Some(BinaryOp::Inter),
+            _ => None,
+        })
+    }
+
+    /// `a..b`, which does not associate (§9.1).
+    fn range_expr(&mut self) -> PResult<Expr> {
+        let start = self.additive()?;
+        if !self.at(&TokenKind::DotDot) {
+            return Ok(start);
+        }
+        let op_span = self.bump().span;
+        let end = self.additive()?;
+        if self.at(&TokenKind::DotDot) {
+            let error = Diagnostic::error("`..` cannot be chained")
+                .with_primary(self.span(), "")
+                .with_note("an interval has one start and one end: `a..b` (§16.3)");
+            return Err(self.error(error));
+        }
+        Ok(binary(BinaryOp::Range, op_span, start, end))
+    }
+
+    fn additive(&mut self) -> PResult<Expr> {
+        self.left_associative(Self::multiplicative, |kind| match kind {
+            TokenKind::Plus => Some(BinaryOp::Add),
+            TokenKind::Minus => Some(BinaryOp::Sub),
+            _ => None,
+        })
+    }
+
+    fn multiplicative(&mut self) -> PResult<Expr> {
+        self.left_associative(Self::unary, |kind| match kind {
+            TokenKind::Star => Some(BinaryOp::Mul),
+            TokenKind::Slash => Some(BinaryOp::Div),
+            TokenKind::Keyword(Keyword::Div) => Some(BinaryOp::IntDiv),
+            TokenKind::Keyword(Keyword::Mod) => Some(BinaryOp::Mod),
+            TokenKind::Keyword(Keyword::Over) => Some(BinaryOp::Over),
+            _ => None,
+        })
+    }
+
+    /// Unary minus binds less tightly than `^`: `-2 ^ 2` is -4 (§8.4).
+    fn unary(&mut self) -> PResult<Expr> {
+        if !self.at(&TokenKind::Minus) {
+            return self.power();
+        }
+        let start = self.bump().span;
+        let operand = self.unary()?;
+        Ok(Expr {
+            span: start.to(operand.span),
+            kind: ExprKind::Unary { op: UnaryOp::Neg, operand: Box::new(operand) },
+        })
+    }
+
+    /// `^` is right-associative, and its exponent may be negated: `2 ^ -1` (§8.4).
+    fn power(&mut self) -> PResult<Expr> {
+        let base = self.postfix()?;
+        if !self.at(&TokenKind::Caret) {
+            return Ok(base);
+        }
+        let op_span = self.bump().span;
+        let exponent = self.unary()?;
+        Ok(binary(BinaryOp::Pow, op_span, base, exponent))
+    }
+
+    fn postfix(&mut self) -> PResult<Expr> {
+        let mut expr = self.primary()?;
+        loop {
+            match self.peek() {
+                TokenKind::LParen => {
+                    self.bump();
+                    let args = self.nested(Self::args)?;
+                    let end = self.expect(&TokenKind::RParen, "`)`")?;
+                    expr = Expr {
+                        span: expr.span.to(end),
+                        kind: ExprKind::Call { callee: Box::new(expr), args },
+                    };
+                }
+                TokenKind::LBracket => {
+                    self.bump();
+                    let index = self.nested(Self::expr)?;
+                    let end = self.expect(&TokenKind::RBracket, "`]`")?;
+                    expr = Expr {
+                        span: expr.span.to(end),
+                        kind: ExprKind::Index { object: Box::new(expr), index: Box::new(index) },
+                    };
+                }
+                TokenKind::Dot => {
+                    self.bump();
+                    let span = self.span();
+                    let name = match self.peek() {
+                        TokenKind::LowerIdent(name) | TokenKind::UpperIdent(name) => name.clone(),
+                        _ => return Err(self.expected("a field or method name")),
+                    };
+                    self.bump();
+                    expr = Expr {
+                        span: expr.span.to(span),
+                        kind: ExprKind::Field { object: Box::new(expr), name: Ident { name, span } },
+                    };
+                }
+                _ => return Ok(expr),
+            }
+        }
+    }
+
+    /// Call arguments: `[var] [name:] value`, separated by commas (§11.2).
+    fn args(&mut self) -> PResult<Vec<Arg>> {
+        let mut args = Vec::new();
+        if self.at(&TokenKind::RParen) {
+            return Ok(args);
+        }
+        loop {
+            let var_marker = if self.at_keyword(Keyword::Var) { Some(self.bump().span) } else { None };
+            let name = match self.peek() {
+                TokenKind::LowerIdent(name) if self.kind_at(self.pos + 1) == &TokenKind::Colon => {
+                    let ident = Ident { name: name.clone(), span: self.span() };
+                    self.bump();
+                    self.bump();
+                    Some(ident)
+                }
+                _ => None,
+            };
+            let value = self.expr()?;
+            args.push(Arg { var_marker, name, value });
+            if !self.eat(&TokenKind::Comma) {
+                return Ok(args);
+            }
+        }
+    }
+
+    fn primary(&mut self) -> PResult<Expr> {
+        let span = self.span();
+        let kind = match self.peek() {
+            TokenKind::Int(value) => ExprKind::Int(*value),
+            TokenKind::Float(value) => ExprKind::Float(*value),
+            TokenKind::Keyword(Keyword::True) => ExprKind::Bool(true),
+            TokenKind::Keyword(Keyword::False) => ExprKind::Bool(false),
+            TokenKind::Keyword(Keyword::NoneValue) => ExprKind::None,
+            TokenKind::LowerIdent(name) => ExprKind::Name(name.clone()),
+            TokenKind::UpperIdent(name) => ExprKind::TypeName(name.clone()),
+            TokenKind::TextStart => return self.text(),
+            TokenKind::LParen => return self.parenthesized(),
+            TokenKind::LBracket => return Err(self.not_implemented(span, "lists", "§16")),
+            TokenKind::LBrace => {
+                return Err(self.not_implemented(span, "sets and comprehensions", "§16"));
+            }
+            TokenKind::Keyword(Keyword::SelfValue) => {
+                return Err(self.not_implemented(span, "methods and `self`", "§12.4"));
+            }
+            _ => return Err(self.expected("an expression")),
+        };
+        self.bump();
+        Ok(Expr { kind, span })
+    }
+
+    fn parenthesized(&mut self) -> PResult<Expr> {
+        let start = self.bump().span;
+        if self.at(&TokenKind::RParen) {
+            return Err(self.not_implemented(start.to(self.span()), "tuples", "§16"));
+        }
+        let inner = self.nested(Self::expr)?;
+        if self.at(&TokenKind::Comma) {
+            return Err(self.not_implemented(start.to(self.span()), "tuples", "§16"));
+        }
+        let end = self.expect(&TokenKind::RParen, "`)`")?;
+        Ok(Expr { kind: ExprKind::Paren(Box::new(inner)), span: start.to(end) })
+    }
+
+    /// A text literal with its interpolations (§4.5, D24).
+    fn text(&mut self) -> PResult<Expr> {
+        let start = self.bump().span;
+        let mut parts = Vec::new();
+        let mut failed = false;
+        loop {
+            match self.peek() {
+                TokenKind::TextChunk(chunk) => {
+                    parts.push(TextPart::Literal(chunk.clone()));
+                    self.bump();
+                }
+                TokenKind::InterpStart => {
+                    let open = self.bump().span;
+                    if self.at(&TokenKind::InterpEnd) {
+                        let error = Diagnostic::error("empty interpolation")
+                            .with_primary(open.to(self.span()), "")
+                            .with_help("put a value between the braces, or write `\\{` for a literal brace");
+                        self.error(error);
+                        self.bump();
+                        failed = true;
+                        continue;
+                    }
+                    match self.nested(Self::expr) {
+                        Ok(value) if self.at(&TokenKind::InterpEnd) => {
+                            self.bump();
+                            parts.push(TextPart::Interpolation(value));
+                        }
+                        result => {
+                            if result.is_ok() {
+                                self.expected("`}` to end the interpolation");
+                            }
+                            failed = true;
+                            self.skip_interpolation();
+                        }
+                    }
+                }
+                TokenKind::TextEnd => {
+                    let end = self.bump().span;
+                    if failed {
+                        return Err(Reported);
+                    }
+                    return Ok(Expr { kind: ExprKind::Text(parts), span: start.to(end) });
+                }
+                _ => {
+                    let error = Diagnostic::internal("unbalanced text tokens").with_primary(self.span(), "");
+                    return Err(self.error(error));
+                }
+            }
+        }
+    }
+
+    /// Skips to the `}` closing the current interpolation, past nested ones.
+    fn skip_interpolation(&mut self) {
+        let mut depth = 0usize;
+        loop {
+            match self.peek() {
+                TokenKind::InterpStart => depth += 1,
+                TokenKind::InterpEnd if depth == 0 => {
+                    self.bump();
+                    return;
+                }
+                TokenKind::InterpEnd => depth -= 1,
+                TokenKind::Eof => return,
+                _ => {}
+            }
+            self.bump();
+        }
+    }
+
+    // ----- Types (§7, §15) -----
+
+    /// `A or B or ...`; `of` binds more tightly than `or` (D34).
+    fn type_expr(&mut self) -> PResult<TypeExpr> {
+        let first = self.maybe_type()?;
+        if !self.union_continues() {
+            return Ok(first);
+        }
+        let mut members = vec![first];
+        while self.union_continues() {
+            self.bump();
+            members.push(self.maybe_type()?);
+        }
+        let span = members[0].span.to(members.last().expect("two members").span);
+        Ok(TypeExpr { kind: TypeExprKind::Union(members), span })
+    }
+
+    /// In `x as Int or ok`, the `or` joins expressions: a type must follow it to join types.
+    fn union_continues(&self) -> bool {
+        self.at_keyword(Keyword::Or)
+            && (self.type_starts_at(self.pos + 1) || self.kind_at(self.pos + 1) == &TokenKind::LParen)
+    }
+
+    fn maybe_type(&mut self) -> PResult<TypeExpr> {
+        if !self.at_keyword(Keyword::Maybe) {
+            return self.applied_type();
+        }
+        let start = self.bump().span;
+        let inner = self.maybe_type()?;
+        Ok(TypeExpr { span: start.to(inner.span), kind: TypeExprKind::Maybe(Box::new(inner)) })
+    }
+
+    fn applied_type(&mut self) -> PResult<TypeExpr> {
+        let start = self.span();
+        match self.peek() {
+            TokenKind::UpperIdent(_) | TokenKind::LowerIdent(_) => {
+                let (module, name) = self.qualified_type_name()?;
+                let mut args = Vec::new();
+                if self.eat_keyword(Keyword::Of) {
+                    if self.eat(&TokenKind::LParen) {
+                        args = self.nested(Self::type_list)?;
+                        self.expect(&TokenKind::RParen, "`)`")?;
+                    } else {
+                        args.push(self.applied_type()?);
+                    }
+                }
+                let span = start.to(self.previous_span());
+                Ok(TypeExpr { kind: TypeExprKind::Named { module, name, args }, span })
+            }
+            TokenKind::LParen => {
+                self.bump();
+                let mut members = self.nested(Self::type_list)?;
+                let end = self.expect(&TokenKind::RParen, "`)`")?;
+                if members.len() == 1 {
+                    return Ok(members.pop().expect("one member"));
+                }
+                Ok(TypeExpr { kind: TypeExprKind::Tuple(members), span: start.to(end) })
+            }
+            TokenKind::Keyword(Keyword::Fun) => {
+                self.bump();
+                self.expect(&TokenKind::LParen, "`(`")?;
+                let params =
+                    if self.at(&TokenKind::RParen) { Vec::new() } else { self.nested(Self::type_list)? };
+                let mut end = self.expect(&TokenKind::RParen, "`)`")?;
+                let ret = if self.eat_keyword(Keyword::In) {
+                    let ret = self.type_expr()?;
+                    end = ret.span;
+                    Some(Box::new(ret))
+                } else {
+                    None
+                };
+                Ok(TypeExpr { kind: TypeExprKind::Fun { params, ret }, span: start.to(end) })
+            }
+            _ => Err(self.expected("a type")),
+        }
+    }
+
+    fn type_list(&mut self) -> PResult<Vec<TypeExpr>> {
+        let mut types = vec![self.type_expr()?];
+        while self.eat(&TokenKind::Comma) {
+            types.push(self.type_expr()?);
+        }
+        Ok(types)
+    }
+
+    /// `Student` or `notes_data.Student` (§26 `qual_type`).
+    fn qualified_type_name(&mut self) -> PResult<(Vec<Ident>, Ident)> {
+        let mut module = Vec::new();
+        loop {
+            let span = self.span();
+            match self.peek() {
+                TokenKind::UpperIdent(name) => {
+                    let name = name.clone();
+                    self.bump();
+                    return Ok((module, Ident { name, span }));
+                }
+                TokenKind::LowerIdent(name) if self.kind_at(self.pos + 1) == &TokenKind::Dot => {
+                    module.push(Ident { name: name.clone(), span });
+                    self.bump();
+                    self.bump();
+                }
+                TokenKind::LowerIdent(name) => {
+                    let error = Diagnostic::error(format!("`{name}` is not a type"))
+                        .with_primary(span, "type names start with an uppercase letter (§4.2)");
+                    return Err(self.error(error));
+                }
+                _ => return Err(self.expected("a type name")),
+            }
+        }
+    }
+
+    /// Whether a type starts at token `index`: an uppercase name, `maybe`, `fun`, or a
+    /// module path ending with an uppercase name.
+    fn type_starts_at(&self, mut index: usize) -> bool {
+        loop {
+            match self.kind_at(index) {
+                TokenKind::UpperIdent(_) | TokenKind::Keyword(Keyword::Maybe | Keyword::Fun) => {
+                    return true;
+                }
+                TokenKind::LowerIdent(_) if self.kind_at(index + 1) == &TokenKind::Dot => index += 2,
+                _ => return false,
+            }
+        }
+    }
+
+    // ----- Helpers -----
+
+    fn left_associative(
+        &mut self,
+        operand: fn(&mut Self) -> PResult<Expr>,
+        operator: fn(&TokenKind) -> Option<BinaryOp>,
+    ) -> PResult<Expr> {
+        let mut lhs = operand(self)?;
+        while let Some(op) = operator(self.peek()) {
+            let op_span = self.bump().span;
+            let rhs = operand(self)?;
+            lhs = binary(op, op_span, lhs, rhs);
+        }
+        Ok(lhs)
+    }
+
+    /// Parses inside brackets, where `in` is never a type annotation.
+    fn nested<T>(&mut self, parse: fn(&mut Self) -> PResult<T>) -> PResult<T> {
+        let saved = std::mem::replace(&mut self.annotation_ends_expr, false);
+        let result = parse(self);
+        self.annotation_ends_expr = saved;
+        result
+    }
+
+    fn peek(&self) -> &TokenKind {
+        &self.tokens[self.pos].kind
+    }
+
+    fn kind_at(&self, index: usize) -> &TokenKind {
+        &self.tokens[index.min(self.tokens.len() - 1)].kind
+    }
+
+    fn span(&self) -> Span {
+        self.tokens[self.pos].span
+    }
+
+    fn previous_span(&self) -> Span {
+        self.tokens[self.pos.saturating_sub(1)].span
+    }
+
+    fn bump(&mut self) -> &Token {
+        let token = &self.tokens[self.pos];
+        if token.kind != TokenKind::Eof {
+            self.pos += 1;
+        }
+        token
+    }
+
+    fn at(&self, kind: &TokenKind) -> bool {
+        self.peek() == kind
+    }
+
+    fn at_keyword(&self, keyword: Keyword) -> bool {
+        self.peek() == &TokenKind::Keyword(keyword)
+    }
+
+    fn eat(&mut self, kind: &TokenKind) -> bool {
+        let found = self.at(kind);
+        if found {
+            self.bump();
+        }
+        found
+    }
+
+    fn eat_keyword(&mut self, keyword: Keyword) -> bool {
+        self.eat(&TokenKind::Keyword(keyword))
+    }
+
+    fn expect(&mut self, kind: &TokenKind, what: &str) -> PResult<Span> {
+        if self.at(kind) { Ok(self.bump().span) } else { Err(self.expected(what)) }
+    }
+
+    fn expected(&mut self, what: &str) -> Reported {
+        let token = &self.tokens[self.pos];
+        let error = Diagnostic::error(format!("expected {what}, found {}", token.kind.describe()))
+            .with_primary(token.span, "");
+        self.error(error)
+    }
+
+    fn not_implemented(&mut self, span: Span, what: &str, section: &str) -> Reported {
+        self.error(Diagnostic::not_implemented(span, what, section))
+    }
+
+    fn error(&mut self, diagnostic: Diagnostic) -> Reported {
+        self.diagnostics.push(diagnostic);
+        Reported
+    }
+}
+
+fn binary(op: BinaryOp, op_span: Span, lhs: Expr, rhs: Expr) -> Expr {
+    Expr {
+        span: lhs.span.to(rhs.span),
+        kind: ExprKind::Binary { op, op_span, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+    }
+}
+
+/// Tokens that can only continue an expression, never start a statement (§5.1).
+fn is_operator(kind: &TokenKind) -> bool {
+    use TokenKind::*;
+    match kind {
+        Plus | Minus | Star | Slash | Caret | EqEq | NotEq | Lt | Gt | Le | Ge | DotDot | Dot | Assign
+        | PlusAssign | MinusAssign | StarAssign => true,
+        Keyword(keyword) => matches!(
+            keyword,
+            crate::Keyword::And
+                | crate::Keyword::Or
+                | crate::Keyword::Not
+                | crate::Keyword::Div
+                | crate::Keyword::Mod
+                | crate::Keyword::Over
+                | crate::Keyword::Union
+                | crate::Keyword::Inter
+                | crate::Keyword::Minus
+                | crate::Keyword::Subset
+                | crate::Keyword::Same
+                | crate::Keyword::In
+                | crate::Keyword::As
+        ),
+        _ => false,
+    }
+}
+
+fn lowercase_first(name: &str) -> String {
+    let mut chars = name.chars();
+    chars.next().map_or_else(String::new, |first| first.to_lowercase().chain(chars).collect())
+}

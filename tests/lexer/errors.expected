@@ -1,0 +1,113 @@
+exit: 1
+----- stdout
+1:1     keyword let
+1:5     lower café
+1:10    =
+1:12    int 1
+1:13    newline
+2:1     keyword let
+2:5     lower ok
+2:8     =
+2:10    lower a
+2:14    lower b
+2:15    newline
+3:1     keyword let
+3:5     lower r
+3:7     =
+3:9     int 7
+3:13    int 2
+3:14    newline
+4:1     keyword let
+4:5     lower big
+4:9     =
+4:11    int 0
+4:30    newline
+5:1     keyword let
+5:5     lower e
+5:7     =
+5:9     int 0
+5:12    newline
+6:1     keyword let
+6:5     lower t
+6:7     =
+6:9     text-start
+6:10    text-chunk "unknown  escape"
+6:27    text-end
+6:28    newline
+7:1     keyword let
+7:5     lower u
+7:7     =
+7:9     text-start
+7:10    text-chunk "never closed"
+7:22    text-end
+7:22    newline
+8:1     keyword let
+8:5     lower z
+8:7     =
+8:9     int 0
+8:14    newline
+9:1     eof
+----- stderr
+error: the name `café` contains the non-ASCII character `é`
+  --> tests/lexer/errors.lion:1:5
+   |
+ 1 | let café = 1
+   |     ^^^^
+   |
+   = names use the letters a-z and A-Z, digits and `_`; other characters may appear only in texts and comments (§4.1)
+
+error: non-ASCII character `≤` outside a text or comment
+  --> tests/lexer/errors.lion:2:12
+   |
+ 2 | let ok = a ≤ b
+   |            ^
+   |
+   = help: write `<=`
+
+error: unexpected character `%`
+  --> tests/lexer/errors.lion:3:11
+   |
+ 3 | let r = 7 % 2
+   |           ^
+   |
+   = help: use `mod` for the remainder of a division (§8.1)
+
+error: this number is too large for an Int
+  --> tests/lexer/errors.lion:4:11
+   |
+ 4 | let big = 9223372036854775808
+   |           ^^^^^^^^^^^^^^^^^^^
+   |
+   = an Int is a 64-bit signed integer; the largest is 9223372036854775807 (§8.1)
+
+error: invalid number `1e5`
+  --> tests/lexer/errors.lion:5:9
+   |
+ 5 | let e = 1e5
+   |         ^^^
+   |
+   = help: a Float has a digit on each side of the point: write `1.0e5`
+
+error: unknown escape sequence `\q`
+  --> tests/lexer/errors.lion:6:18
+   |
+ 6 | let t = "unknown \q escape"
+   |                  ^^
+   |
+   = the escapes are `\n`, `\t`, `\\`, `\"`, `\{` and `\}`
+
+error: unterminated text
+  --> tests/lexer/errors.lion:7:9
+   |
+ 7 | let u = "never closed
+   |         ^ this text is never closed
+   |
+   = help: close the text with `"` on the same line; write `\n` for a line break inside a text
+
+error: invalid digit `2` in a binary number
+  --> tests/lexer/errors.lion:8:9
+   |
+ 8 | let z = 0b102
+   |         ^^^^^
+
+8 errors found

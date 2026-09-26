@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+
+[workspace.dependencies]
+lion_diagnostics = { path = "crates/lion_diagnostics" }
+lion_syntax = { path = "crates/lion_syntax" }
+lion_ir = { path = "crates/lion_ir" }
+lion_sema = { path = "crates/lion_sema" }
+lion_runtime = { path = "crates/lion_runtime" }
+lion_vm = { path = "crates/lion_vm" }

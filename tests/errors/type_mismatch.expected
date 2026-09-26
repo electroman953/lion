@@ -1,0 +1,47 @@
+exit: 1
+----- stdout
+----- stderr
+error: `+` cannot be applied to Int and Text
+  --> tests/errors/type_mismatch.lion:1:11
+   |
+ 1 | let x = 3 + "hello"
+   |           ^
+   |             ------- this is a Text
+   |
+   = `+` is defined for Int and Float values
+   = help: to join texts, use interpolation: "{a}{b}" (§4.5)
+
+error: mismatched types
+  --> tests/errors/type_mismatch.lion:3:9
+   |
+ 2 | var count = 0
+   |     ----- `count` is declared as an Int here
+ 3 | count = "zero"
+   |         ^^^^^^ this is a Text
+   |
+   = expected: Int
+   = found: Text
+   = help: to give `count` a value of another type, declare it again: `let count = ...` (§6.3)
+
+error: mismatched types
+  --> tests/errors/type_mismatch.lion:4:9
+   |
+ 4 | let y = 5.5 in Int
+   |         ^^^ this is a Float
+   |                --- expected because of this type
+   |
+   = expected: Int
+   = found: Float
+
+error: mismatched types
+  --> tests/errors/type_mismatch.lion:6:1
+   |
+ 5 | var n = 1
+   |     - `n` is declared as an Int here
+ 6 | n += 1.5
+   | ^^^^^^^^ the result is a Float
+   |
+   = expected: Int
+   = found: Float
+
+4 errors found

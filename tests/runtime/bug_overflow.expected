@@ -1,0 +1,13 @@
+exit: 2
+----- stdout
+before the bug
+----- stderr
+bug: integer overflow
+  --> tests/runtime/bug_overflow.lion:3:9
+   |
+ 3 | let y = big + 1
+   |         ^^^^^^^
+   |
+   = 9223372036854775807 + 1 exceeds the capacity of an Int (64 bits)
+   = help: use a Float, or check the value before the addition
+

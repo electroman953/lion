@@ -1,0 +1,40 @@
+exit: 1
+----- stdout
+----- stderr
+error: `show` takes exactly one value, not 2
+  --> tests/errors/show_arguments.lion:1:1
+   |
+ 1 | show(1, 2)
+   | ^^^^^^^^^^
+   |
+   = help: to show several values, use interpolation: show("{a} {b}")
+
+error: `show` takes exactly one value, not 0
+  --> tests/errors/show_arguments.lion:2:1
+   |
+ 2 | show()
+   | ^^^^^^
+
+error: `show` does not modify its argument
+  --> tests/errors/show_arguments.lion:3:6
+   |
+ 3 | show(var x)
+   |      ^^^ remove this `var`
+   |
+   = `var` at a call marks an argument that the function modifies (§11.2)
+
+error: cannot find `x` in this scope
+  --> tests/errors/show_arguments.lion:3:10
+   |
+ 3 | show(var x)
+   |          ^ not found
+
+error: `show` does not take named arguments
+  --> tests/errors/show_arguments.lion:4:6
+   |
+ 4 | show(value: 1)
+   |      ^^^^^
+   |
+   = Lion 0.1 does not name the parameters of the standard functions
+
+5 errors found

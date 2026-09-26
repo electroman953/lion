@@ -1,0 +1,8 @@
+exit: 0
+----- stdout
+(call show "plain")
+(call show "")
+(call show (text "x = " {x} ", sum = " {(+ a b)} "!"))
+(call show (text "nested " {(call f (text "inner " {y}))}))
+(call show "braces: \{ \}")
+----- stderr

@@ -1,0 +1,15 @@
+let a = 5
+let b = 5 in Float
+let c = 5 as Float
+var d in Float
+let e in Text
+// `in` + uppercase name annotates; + lowercase name tests membership (§6.2)
+let ok = 3 in primes
+let valid = (x in Student)
+let r = x in List of Int or Error
+count = 1
+count += 2
+count -= 3
+count *= 4
+show(area(width: 3, height: 4))
+add_grade(var mine, 15)

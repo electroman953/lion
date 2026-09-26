@@ -1,0 +1,11 @@
+var a in Int
+var b in maybe Int
+var c in Int or Error
+var d in List of Student or Error
+var e in maybe List of Int
+var f in List of (maybe Int)
+var g in Map of (Text, Int)
+var h in List of ((Text, Int))
+var i in List of List of Int
+var j in fun(Int, Text) in Bool
+var k in notes_data.Student

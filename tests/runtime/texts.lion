@@ -1,0 +1,9 @@
+let name = "Léa"
+let grade = 14.5
+show("Bonjour {name} !")
+show("{name} a {grade}/20, admise : {grade >= 10}")
+show("tab:\t| quote: \" | backslash: \\ | braces: \{\}")
+show("line one\nline two")
+show("{1 + 2} = {3.0}")
+show("")
+show("rien : {none}")

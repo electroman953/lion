@@ -1,0 +1,5 @@
+let exact = 9007199254740992
+show(exact as Float)
+let inexact = 9007199254740993
+show(inexact as Float)
+show(inexact + 0.0)

@@ -1,0 +1,10 @@
+// Growth of a savings account over five years, without loops yet.
+let capital = 1_000
+let rate = 0.03
+let after_one = capital * (1 + rate)
+let after_five = capital * (1 + rate) ^ 5
+show("Après 1 an : {after_one}")
+show("Après 5 ans : {after_five}")
+show("En euros entiers : {after_five as Int}")
+let doubled = after_five >= 2 * capital
+show("Doublé ? {doubled}")

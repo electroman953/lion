@@ -1,0 +1,60 @@
+exit: 0
+----- stdout
+2:1     keyword let
+2:5     lower a
+2:7     =
+2:9     int 42
+2:11    newline
+3:1     keyword let
+3:5     lower b
+3:7     =
+3:9     int 1000000
+3:18    newline
+4:1     keyword let
+4:5     lower c
+4:7     =
+4:9     int 255
+4:14    +
+4:16    int 10
+4:22    newline
+5:1     keyword let
+5:5     lower d
+5:7     =
+5:9     float 3.14
+5:14    +
+5:16    float 0.0025
+5:23    +
+5:25    float 100.0
+5:31    newline
+6:1     keyword let
+6:5     lower e
+6:7     =
+6:9     int 1
+6:10    ..
+6:12    int 9
+6:13    newline
+8:1     lower show
+8:5     (
+8:6     text-start
+8:7     text-chunk "Bonjour "
+8:15    interp-start
+8:16    lower name
+8:20    interp-end
+8:21    text-chunk " !\n\t\\ \" \{ \}"
+8:38    text-end
+8:39    )
+8:40    newline
+9:1     keyword let
+9:5     lower f
+9:7     =
+9:9     keyword true
+9:14    keyword or
+9:17    keyword false
+9:22    newline
+10:1    keyword let
+10:5    lower g
+10:7    =
+10:9    keyword none
+10:13   newline
+11:1    eof
+----- stderr

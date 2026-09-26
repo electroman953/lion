@@ -1,0 +1,52 @@
+exit: 1
+----- stdout
+----- stderr
+error: `+` cannot be applied to Text and Text
+  --> tests/errors/not_defined_by_spec.lion:2:13
+   |
+ 2 | let t = "a" + "b"
+   |         --- this is a Text
+   |             ^
+   |               --- this is a Text
+   |
+   = `+` is defined for Int and Float values
+   = help: to join texts, use interpolation: "{a}{b}" (§4.5)
+
+error: cannot compare an Int with a Text
+  --> tests/errors/not_defined_by_spec.lion:3:11
+   |
+ 3 | let b = 1 == "1"
+   |         - this is an Int
+   |           ^^
+   |              --- this is a Text
+   |
+   = Lion 0.1 does not define comparisons between values of different types
+
+error: `<` is not defined for Text values
+  --> tests/errors/not_defined_by_spec.lion:4:13
+   |
+ 4 | let c = "a" < "b"
+   |             ^
+   |
+   = `<`, `>`, `<=` and `>=` compare Int and Float values
+   = Lion 0.1 does not define an order on Text
+
+error: `div` is defined only for Int values
+  --> tests/errors/not_defined_by_spec.lion:5:9
+   |
+ 5 | let q = 7.5 div 2
+   |         ^^^ this is a Float
+   |
+   = Lion 0.1 defines `div` and `mod` on Int values only (§8.1)
+   = help: use `/` to divide Floats, or convert the value with `as Int`
+
+error: `mod` is defined only for Int values
+  --> tests/errors/not_defined_by_spec.lion:6:15
+   |
+ 6 | let m = 7 mod 2.0
+   |               ^^^ this is a Float
+   |
+   = Lion 0.1 defines `div` and `mod` on Int values only (§8.1)
+   = help: use `/` to divide Floats, or convert the value with `as Int`
+
+5 errors found

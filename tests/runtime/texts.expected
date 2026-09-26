@@ -1,0 +1,11 @@
+exit: 0
+----- stdout
+Bonjour Léa !
+Léa a 14.5/20, admise : true
+tab:	| quote: " | backslash: \ | braces: {}
+line one
+line two
+3 = 3.0
+
+rien : none
+----- stderr

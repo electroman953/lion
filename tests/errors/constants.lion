@@ -1,0 +1,8 @@
+let x = 1
+x = 2
+let e in Text
+e = "first"
+e = "second"
+let never in Int
+let unread in Text
+show(unread)

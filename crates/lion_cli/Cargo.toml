@@ -1,0 +1,17 @@
+[package]
+name = "lion_cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "lion"
+path = "src/main.rs"
+
+[dependencies]
+lion_diagnostics.workspace = true
+lion_syntax.workspace = true
+lion_ir.workspace = true
+lion_sema.workspace = true
+lion_runtime.workspace = true
+lion_vm.workspace = true

@@ -1,0 +1,7 @@
+exit: 0
+----- stdout
+Après 1 an : 1030.0
+Après 5 ans : 1159.2740743000002
+En euros entiers : 1159
+Doublé ? false
+----- stderr

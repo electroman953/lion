@@ -1,0 +1,14 @@
+exit: 1
+----- stdout
+----- stderr
+error: cannot compare a Float with a Bool
+  --> tests/errors/chained_types.lion:2:17
+   |
+ 2 | let c = 1 < 2.5 == true
+   |             --- this is a Float
+   |                 ^^
+   |                    ---- this is a Bool
+   |
+   = Lion 0.1 does not define comparisons between values of different types
+
+1 error found

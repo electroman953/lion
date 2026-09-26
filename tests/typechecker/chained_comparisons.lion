@@ -1,0 +1,5 @@
+// Each operand is evaluated once, left to right (§9.3, D69)
+let grade = 12
+let a = 0 <= grade <= 20
+let b = 0 < grade + 1 < grade * 2 < 100
+let c = 1 < 2.5 <= 3

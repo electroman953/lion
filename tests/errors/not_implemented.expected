@@ -1,0 +1,68 @@
+exit: 1
+----- stdout
+----- stderr
+error: not implemented yet: collections
+  --> tests/errors/not_implemented.lion:1:10
+   |
+ 1 | var l in List of Int
+   |          ^^^^^^^^^^^
+   |
+   = this part of Lion (spec §16) is not supported by this version of the implementation
+
+error: not implemented yet: union types (`or`, `maybe`)
+  --> tests/errors/not_implemented.lion:2:10
+   |
+ 2 | var m in maybe Int
+   |          ^^^^^^^^^
+   |
+   = this part of Lion (spec §7.3) is not supported by this version of the implementation
+
+error: not implemented yet: converting a Text to a number (its result, `Int or Error`, needs union types)
+  --> tests/errors/not_implemented.lion:3:9
+   |
+ 3 | let n = "12" as Int
+   |         ^^^^^^^^^^^
+   |
+   = this part of Lion (spec §8.5, §18) is not supported by this version of the implementation
+
+error: not implemented yet: Rational numbers (`over`)
+  --> tests/errors/not_implemented.lion:4:11
+   |
+ 4 | let r = 1 over 3
+   |           ^^^^
+   |
+   = this part of Lion (spec §8.3) is not supported by this version of the implementation
+
+error: not implemented yet: intervals (`..`)
+  --> tests/errors/not_implemented.lion:5:10
+   |
+ 5 | let s = 1..9
+   |          ^^
+   |
+   = this part of Lion (spec §16.3) is not supported by this version of the implementation
+
+error: not implemented yet: fields and methods
+  --> tests/errors/not_implemented.lion:6:9
+   |
+ 6 | let t = x.name
+   |         ^^^^^^
+   |
+   = this part of Lion (spec §12) is not supported by this version of the implementation
+
+error: not implemented yet: the standard function `sum`
+  --> tests/errors/not_implemented.lion:7:9
+   |
+ 7 | let u = sum(1)
+   |         ^^^
+   |
+   = this part of Lion (spec §23) is not supported by this version of the implementation
+
+error: not implemented yet: membership tests with `in`
+  --> tests/errors/not_implemented.lion:8:12
+   |
+ 8 | let v = (3 in Int)
+   |            ^^
+   |
+   = this part of Lion (spec §7.1, §16) is not supported by this version of the implementation
+
+8 errors found

@@ -1,0 +1,10 @@
+exit: 0
+----- stdout
+Élève : Léa
+Total : 33.5
+Moyenne : 11.166666666666666
+Admise : true
+2 h 15 min
+Avec bonus : 16.166666666666664
+Arrondi par troncature : 16
+----- stderr

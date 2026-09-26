@@ -1,0 +1,19 @@
+// The reading examples of §9.1
+x = 1..n - 1
+x = p + 2 in primes
+x = x + 1 as Text
+x = not x in S
+// Arithmetic: `^` is right-associative and binds more tightly than unary minus (§8.4)
+x = 1 + 2 * 3 - 4 / 5
+x = 7 div 2 * 3 mod 4
+x = -2 ^ 2
+x = 2 ^ 3 ^ 2
+x = 2 ^ -1
+x = 1 over 3 + 1
+// Logic, sets and comparisons
+x = a or b and not c
+x = a union b inter c minus d
+x = 0 <= grade <= 20
+x = a == b != c
+x = s.name
+x = f(1)(2)[3]

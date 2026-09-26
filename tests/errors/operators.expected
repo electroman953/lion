@@ -1,0 +1,42 @@
+exit: 1
+----- stdout
+----- stderr
+error: `not` expects a Bool
+  --> tests/errors/operators.lion:1:13
+   |
+ 1 | let a = not 1
+   |             ^ this is an Int
+
+error: `and` expects a Bool on each side
+  --> tests/errors/operators.lion:2:9
+   |
+ 2 | let b = 1 and true
+   |         ^ this is an Int
+
+error: `-` cannot be applied to a Text
+  --> tests/errors/operators.lion:3:10
+   |
+ 3 | let c = -"text"
+   |          ^^^^^^ this is a Text
+   |
+   = `-` negates an Int or a Float
+
+error: cannot convert a Bool to Int with `as`
+  --> tests/errors/operators.lion:4:9
+   |
+ 4 | let d = true as Int
+   |         ^^^^^^^^^^^
+   |
+   = Lion 0.1 defines `as` between Int and Float, from Text to a number, and from a number to Text (§8.5)
+
+error: cannot compare an Int with a Bool
+  --> tests/errors/operators.lion:5:11
+   |
+ 5 | let f = 1 < true
+   |         - this is an Int
+   |           ^
+   |             ---- this is a Bool
+   |
+   = Lion 0.1 does not define comparisons between values of different types
+
+5 errors found

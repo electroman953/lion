@@ -1,0 +1,12 @@
+exit: 2
+----- stdout
+----- stderr
+bug: negative exponent in an Int power
+  --> tests/runtime/bug_negative_exponent.lion:1:6
+   |
+ 1 | show(2 ^ -1)
+   |      ^^^^^^
+   |
+   = 2 ^ -1 is not an Int
+   = help: for a fractional result, use a Float base: `(x as Float) ^ n`
+

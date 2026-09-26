@@ -1,0 +1,16 @@
+exit: 1
+----- stdout
+(let a 1)
+(let b 2)
+(let total (+ a b))
+(let fine (paren (+ (+ a b) 3)))
+----- stderr
+error: a line cannot start with an operator
+  --> tests/parser/operator_at_line_start.lion:4:7
+   |
+ 4 |       + 3
+   |       ^
+   |
+   = help: to continue an expression on the next line, keep it inside parentheses (§5.1)
+
+1 error found

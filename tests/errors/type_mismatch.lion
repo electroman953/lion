@@ -1,0 +1,6 @@
+let x = 3 + "hello"
+var count = 0
+count = "zero"
+let y = 5.5 in Int
+var n = 1
+n += 1.5

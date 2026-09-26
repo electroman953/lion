@@ -1,0 +1,231 @@
+//! The abstract syntax tree: the program as written, before names and types are checked.
+
+use lion_diagnostics::Span;
+
+#[derive(Clone, Debug)]
+pub struct Ident {
+    pub name: String,
+    pub span: Span,
+}
+
+/// One source file.
+#[derive(Clone, Debug)]
+pub struct Module {
+    pub stmts: Vec<Stmt>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum StmtKind {
+    /// `let x = value`, `var x = value in T`, `var x in T` (§6.1).
+    Let(LetStmt),
+    /// `place = value`, `place += value`, ... (§6.3).
+    Assign {
+        target: Expr,
+        op: AssignOp,
+        op_span: Span,
+        value: Expr,
+    },
+    Expr(Expr),
+}
+
+#[derive(Clone, Debug)]
+pub struct LetStmt {
+    /// `var` rather than `let`.
+    pub mutable: bool,
+    pub name: Ident,
+    pub value: Option<Expr>,
+    /// The type after a final `in` (§6.2, §26 rule 1).
+    pub annotation: Option<TypeExpr>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssignOp {
+    Set,
+    Add,
+    Sub,
+    Mul,
+}
+
+impl AssignOp {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AssignOp::Set => "=",
+            AssignOp::Add => "+=",
+            AssignOp::Sub => "-=",
+            AssignOp::Mul => "*=",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum ExprKind {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    None,
+    Text(Vec<TextPart>),
+    /// A lowercase name: a variable, constant or function (§4.2).
+    Name(String),
+    /// An uppercase name used as a value, such as `Float` in `x in Float` (§4.2).
+    TypeName(String),
+    Paren(Box<Expr>),
+    Unary {
+        op: UnaryOp,
+        operand: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        op_span: Span,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    /// One comparison, or several chained ones sharing operands: `a < b <= c` (§9.3).
+    Compare {
+        first: Box<Expr>,
+        rest: Vec<Comparison>,
+    },
+    As {
+        value: Box<Expr>,
+        ty: TypeExpr,
+    },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Arg>,
+    },
+    Field {
+        object: Box<Expr>,
+        name: Ident,
+    },
+    Index {
+        object: Box<Expr>,
+        index: Box<Expr>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub enum TextPart {
+    Literal(String),
+    Interpolation(Expr),
+}
+
+#[derive(Clone, Debug)]
+pub struct Comparison {
+    pub op: CompareOp,
+    pub op_span: Span,
+    pub rhs: Expr,
+}
+
+#[derive(Clone, Debug)]
+pub struct Arg {
+    /// `var` written at the call site (§11.2).
+    pub var_marker: Option<Span>,
+    /// `name:` written at the call site (§11.2).
+    pub name: Option<Ident>,
+    pub value: Expr,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg,
+    Not,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    IntDiv,
+    Mod,
+    Over,
+    Pow,
+    Range,
+    Inter,
+    Union,
+    Minus,
+    In,
+    Subset,
+    Same,
+    And,
+    Or,
+}
+
+impl BinaryOp {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BinaryOp::Add => "+",
+            BinaryOp::Sub => "-",
+            BinaryOp::Mul => "*",
+            BinaryOp::Div => "/",
+            BinaryOp::IntDiv => "div",
+            BinaryOp::Mod => "mod",
+            BinaryOp::Over => "over",
+            BinaryOp::Pow => "^",
+            BinaryOp::Range => "..",
+            BinaryOp::Inter => "inter",
+            BinaryOp::Union => "union",
+            BinaryOp::Minus => "minus",
+            BinaryOp::In => "in",
+            BinaryOp::Subset => "subset",
+            BinaryOp::Same => "same",
+            BinaryOp::And => "and",
+            BinaryOp::Or => "or",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompareOp {
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+}
+
+impl CompareOp {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CompareOp::Eq => "==",
+            CompareOp::Ne => "!=",
+            CompareOp::Lt => "<",
+            CompareOp::Gt => ">",
+            CompareOp::Le => "<=",
+            CompareOp::Ge => ">=",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TypeExpr {
+    pub kind: TypeExprKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum TypeExprKind {
+    /// `Int`, `notes_data.Student`, `List of Int`, `Map of (Text, Int)` (§15.1).
+    Named { module: Vec<Ident>, name: Ident, args: Vec<TypeExpr> },
+    /// `maybe T` (§7.3).
+    Maybe(Box<TypeExpr>),
+    /// `A or B` (§7.3).
+    Union(Vec<TypeExpr>),
+    /// `(Text, Int)`.
+    Tuple(Vec<TypeExpr>),
+    /// `fun(Int, Text) in Bool` (§7.2, D63).
+    Fun { params: Vec<TypeExpr>, ret: Option<Box<TypeExpr>> },
+}

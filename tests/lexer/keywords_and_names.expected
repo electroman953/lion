@@ -1,0 +1,65 @@
+exit: 0
+----- stdout
+1:1     keyword let
+1:5     keyword var
+1:9     keyword fun
+1:13    keyword return
+1:20    keyword if
+1:23    keyword elif
+1:28    keyword else
+1:33    keyword then
+1:38    keyword match
+1:44    keyword otherwise
+1:54    keyword for
+1:58    keyword while
+1:64    keyword break
+1:70    keyword continue
+1:78    newline
+2:1     keyword in
+2:4     keyword as
+2:7     keyword and
+2:11    keyword or
+2:14    keyword not
+2:18    keyword same
+2:23    keyword union
+2:29    keyword inter
+2:35    keyword minus
+2:41    keyword subset
+2:48    keyword div
+2:52    keyword mod
+2:56    keyword over
+2:61    keyword true
+2:66    keyword false
+2:72    keyword none
+2:76    newline
+3:1     keyword maybe
+3:7     keyword of
+3:10    keyword struct
+3:17    keyword trait
+3:23    keyword use
+3:27    keyword private
+3:35    keyword shared
+3:42    keyword synced
+3:49    keyword task
+3:54    keyword wait
+3:59    keyword parallel
+3:68    keyword try
+3:72    keyword compile
+3:79    newline
+4:1     keyword modifies
+4:10    keyword infix
+4:16    keyword foreign
+4:24    keyword pure
+4:29    keyword unsafe
+4:36    keyword test
+4:41    keyword expect
+4:48    keyword self
+4:52    newline
+5:1     lower student
+5:9     upper Student
+5:17    upper HttpClient
+5:28    lower x_1
+5:32    upper T
+5:33    newline
+6:1     eof
+----- stderr

@@ -1,0 +1,20 @@
+show(7 + 3 * 2)
+show(7 / 2)
+show(7 div 2)
+// Euclidean division: the remainder is never negative (§8.1, D62)
+show(-7 div 3)
+show(-7 mod 3)
+show(7 div -2)
+show(7 mod -2)
+show(-2 ^ 2)
+show(2 ^ 3 ^ 2)
+show(2 ^ 62)
+show(2.0 ^ -1)
+show(9223372036854775807)
+show(-9223372036854775807 - 1)
+show(0xFF + 0b1010 + 1_000)
+var n = 10
+n += 5
+n -= 3
+n *= 2
+show(n)

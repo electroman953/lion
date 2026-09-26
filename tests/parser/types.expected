@@ -1,0 +1,14 @@
+exit: 0
+----- stdout
+(var a : Int)
+(var b : (maybe Int))
+(var c : (or Int Error))
+(var d : (or (List of Student) Error))
+(var e : (maybe (List of Int)))
+(var f : (List of (maybe Int)))
+(var g : (Map of Text Int))
+(var h : (List of (tuple Text Int)))
+(var i : (List of (List of Int)))
+(var j : (fun (Int Text) in Bool))
+(var k : notes_data.Student)
+----- stderr

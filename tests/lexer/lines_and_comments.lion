@@ -1,0 +1,9 @@
+/// A documentation comment
+let total = (1 +
+             2)      // continued inside parentheses
+
+
+/* a comment
+   over two lines */ show(total)
+let x = [a,
+  b]

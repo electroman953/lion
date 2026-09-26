@@ -1,0 +1,29 @@
+exit: 1
+----- stdout
+(let d (== x y))
+----- stderr
+error: these comparisons cannot be combined without parentheses
+  --> tests/parser/comparison_mixes.lion:1:15
+   |
+ 1 | let a = x < y in s
+   |               ^^
+   |
+   = only `==`, `!=`, `<`, `>`, `<=` and `>=` can be chained; `in`, `subset` and `same` need parentheses (§9.3)
+
+error: these comparisons cannot be combined without parentheses
+  --> tests/parser/comparison_mixes.lion:2:16
+   |
+ 2 | let b = x in s in t
+   |                ^^
+   |
+   = only `==`, `!=`, `<`, `>`, `<=` and `>=` can be chained; `in`, `subset` and `same` need parentheses (§9.3)
+
+error: `..` cannot be chained
+  --> tests/parser/comparison_mixes.lion:3:13
+   |
+ 3 | let c = 1..2..3
+   |             ^^
+   |
+   = an interval has one start and one end: `a..b` (§16.3)
+
+3 errors found

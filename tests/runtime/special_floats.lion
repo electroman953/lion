@@ -1,0 +1,11 @@
+// Infinity and NaN follow IEEE 754; interpreted mode reports them (§8.2, §22.3)
+let inf = 1.0 / 0.0
+show(inf)
+show(-inf)
+let nan = 0.0 / 0.0
+show(nan)
+show(nan == nan)
+show(nan != nan)
+show(inf + 1)
+// An Int division with `/` converts to Float first
+show(7 / 0)

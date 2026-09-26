@@ -1,0 +1,24 @@
+exit: 0
+----- stdout
+9007199254740992.0
+9007199254740992.0
+9007199254740992.0
+----- stderr
+alert: this Int has no exact Float value
+  --> tests/runtime/precision_alert.lion:4:6
+   |
+ 4 | show(inexact as Float)
+   |      ^^^^^^^^^^^^^^^^
+   |
+   = 9007199254740993 became 9007199254740992.0 when converted to Float (§8.5)
+   = alerts are reported only in interpreted mode, once per location (§22.3)
+
+alert: this Int has no exact Float value
+  --> tests/runtime/precision_alert.lion:5:6
+   |
+ 5 | show(inexact + 0.0)
+   |      ^^^^^^^
+   |
+   = 9007199254740993 became 9007199254740992.0 when converted to Float (§8.5)
+   = alerts are reported only in interpreted mode, once per location (§22.3)
+

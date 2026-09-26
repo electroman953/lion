@@ -1,0 +1,21 @@
+exit: 1
+----- stdout
+(let y 20)
+----- stderr
+error: unexpected `;`
+  --> tests/parser/semicolon.lion:1:11
+   |
+ 1 | let x = 10;
+   |           ^ this `;` does not close any block
+   |
+   = help: the end of the line already ends the statement; `;` only closes a block opened by `:` (§5)
+
+error: unexpected `;`
+  --> tests/parser/semicolon.lion:3:12
+   |
+ 3 | show(x + y);
+   |            ^ this `;` does not close any block
+   |
+   = help: the end of the line already ends the statement; `;` only closes a block opened by `:` (§5)
+
+2 errors found

@@ -1,0 +1,7 @@
+[package]
+name = "lion_runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]

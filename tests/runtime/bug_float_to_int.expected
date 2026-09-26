@@ -1,0 +1,12 @@
+exit: 2
+----- stdout
+----- stderr
+bug: cannot convert this Float to an Int
+  --> tests/runtime/bug_float_to_int.lion:1:6
+   |
+ 1 | show(1.0e30 as Int)
+   |      ^^^^^^^^^^^^^
+   |
+   = 1.0e30 is outside the range of an Int
+   = help: check the value before converting it with `as Int`
+

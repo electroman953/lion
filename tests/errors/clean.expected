@@ -1,0 +1,4 @@
+exit: 0
+----- stdout
+no errors in `tests/errors/clean.lion`
+----- stderr

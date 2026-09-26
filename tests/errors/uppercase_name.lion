@@ -1,0 +1,2 @@
+// Uppercase names are types (§4.2)
+let Count = 1

@@ -1,0 +1,12 @@
+// Int is converted to Float automatically, never the reverse (§6.3, §8.5)
+let a = 5 in Float
+let b = 5 as Float
+let c = 1 + 2.5
+let d = 7 / 2
+let e = 7 div 2
+let f = 2 ^ 0.5
+let g = 3.7 as Int
+let h = 12 as Text
+var i = 1.5
+i = 2
+i += 1

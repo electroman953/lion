@@ -1,0 +1,27 @@
+exit: 0
+----- stdout
+2:1     keyword let
+2:5     lower total
+2:11    =
+2:13    (
+2:14    int 1
+2:16    +
+3:14    int 2
+3:15    )
+3:53    newline
+7:22    lower show
+7:26    (
+7:27    lower total
+7:32    )
+7:33    newline
+8:1     keyword let
+8:5     lower x
+8:7     =
+8:9     [
+8:10    lower a
+8:11    ,
+9:3     lower b
+9:4     ]
+9:5     newline
+10:1    eof
+----- stderr

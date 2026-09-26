@@ -1,0 +1,12 @@
+exit: 1
+----- stdout
+----- stderr
+error: `Count` cannot name a value
+  --> tests/errors/uppercase_name.lion:2:5
+   |
+ 2 | let Count = 1
+   |     ^^^^^ names starting with an uppercase letter are types
+   |
+   = help: write `count` (§4.2)
+
+1 error found

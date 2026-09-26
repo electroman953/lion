@@ -1,0 +1,4 @@
+let a = x < y in s
+let b = x in s in t
+let c = 1..2..3
+let d = x == y

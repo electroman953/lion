@@ -1,0 +1,13 @@
+show(true and false)
+show(true or false)
+show(not true)
+// `and` and `or` stop as soon as the result is known (§9.2): no division by zero here
+show(false and 1 div 0 == 0)
+show(true or 1 div 0 == 0)
+let grade = 12
+show(0 <= grade <= 20)
+show(0 <= grade <= 10)
+show(1 < 2.5)
+show("a" == "a")
+show("a" != "b")
+show(none == none)

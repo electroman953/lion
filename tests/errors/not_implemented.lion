@@ -1,0 +1,8 @@
+var l in List of Int
+var m in maybe Int
+let n = "12" as Int
+let r = 1 over 3
+let s = 1..9
+let t = x.name
+let u = sum(1)
+let v = (3 in Int)

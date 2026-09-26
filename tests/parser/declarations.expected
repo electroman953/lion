@@ -1,0 +1,17 @@
+exit: 0
+----- stdout
+(let a 5)
+(let b 5 : Float)
+(let c (as 5 Float))
+(var d : Float)
+(let e : Text)
+(let ok (in 3 primes))
+(let valid (paren (in x Student)))
+(let r x : (or (List of Int) Error))
+(= count 1)
+(+= count 2)
+(-= count 3)
+(*= count 4)
+(call show (call area width: 3 height: 4))
+(call add_grade var mine 15)
+----- stderr

@@ -1,0 +1,12 @@
+exit: 2
+----- stdout
+----- stderr
+bug: integer division by zero
+  --> tests/runtime/bug_division_by_zero.lion:2:6
+   |
+ 2 | show(7 mod zero)
+   |      ^^^^^^^^^^
+   |
+   = 7 mod 0 has no value
+   = help: check that the divisor is not zero before dividing
+

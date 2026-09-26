@@ -1,0 +1,9 @@
+var count = 0
+let count = "zero"
+let x = 1
+let x = x + 1
+let e in Text
+e = "later"
+var d in Float
+d = 3
+show("{count} {x} {e} {d}")

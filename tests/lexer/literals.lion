@@ -1,0 +1,10 @@
+// Numbers (§4.5)
+let a = 42
+let b = 1_000_000
+let c = 0xFF + 0b1010
+let d = 3.14 + 2.5e-3 + 1.0E+2
+let e = 1..9
+// Texts, escapes and interpolation
+show("Bonjour {name} !\n\t\\ \" \{ \}")
+let f = true or false
+let g = none

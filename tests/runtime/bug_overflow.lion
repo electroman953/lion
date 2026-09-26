@@ -1,0 +1,4 @@
+let big = 9223372036854775807
+show("before the bug")
+let y = big + 1
+show("never shown")

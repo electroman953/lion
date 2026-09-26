@@ -1,0 +1,8 @@
+let café = 1
+let ok = a ≤ b
+let r = 7 % 2
+let big = 9223372036854775808
+let e = 1e5
+let t = "unknown \q escape"
+let u = "never closed
+let z = 0b102

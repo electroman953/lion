@@ -1,0 +1,2 @@
+// `a < b == c` means `a < b and b == c` (§9.3): here `2.5 == true` compares a Float with a Bool
+let c = 1 < 2.5 == true

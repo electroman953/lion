@@ -1,0 +1,19 @@
+exit: 0
+----- stdout
+(= x (.. 1 (- n 1)))
+(= x (in (+ p 2) primes))
+(= x (as (+ x 1) Text))
+(= x (not (in x S)))
+(= x (- (+ 1 (* 2 3)) (/ 4 5)))
+(= x (mod (* (div 7 2) 3) 4))
+(= x (neg (^ 2 2)))
+(= x (^ 2 (^ 3 2)))
+(= x (^ 2 (neg 1)))
+(= x (+ (over 1 3) 1))
+(= x (or a (and b (not c))))
+(= x (minus (union a (inter b c)) d))
+(= x (chain 0 <= grade <= 20))
+(= x (chain a == b != c))
+(= x (. s name))
+(= x (index (call (call f 1) 2) 3))
+----- stderr

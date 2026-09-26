@@ -1,0 +1,37 @@
+exit: 0
+----- stdout
+Infinity
+-Infinity
+NaN
+false
+true
+Infinity
+Infinity
+----- stderr
+alert: this operation produced Infinity
+  --> tests/runtime/special_floats.lion:2:11
+   |
+ 2 | let inf = 1.0 / 0.0
+   |           ^^^^^^^^^
+   |
+   = Float follows IEEE 754 (§8.2)
+   = alerts are reported only in interpreted mode, once per location (§22.3)
+
+alert: this operation produced NaN
+  --> tests/runtime/special_floats.lion:5:11
+   |
+ 5 | let nan = 0.0 / 0.0
+   |           ^^^^^^^^^
+   |
+   = Float follows IEEE 754 (§8.2)
+   = alerts are reported only in interpreted mode, once per location (§22.3)
+
+alert: this operation produced Infinity
+   --> tests/runtime/special_floats.lion:11:6
+    |
+ 11 | show(7 / 0)
+    |      ^^^^^
+    |
+    = Float follows IEEE 754 (§8.2)
+    = alerts are reported only in interpreted mode, once per location (§22.3)
+

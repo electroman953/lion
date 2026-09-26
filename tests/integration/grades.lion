@@ -1,0 +1,26 @@
+// A small analysis with the part of Lion implemented so far.
+let name = "Léa"
+let math = 14
+let physics = 11.5
+let history = 8
+
+let total = math + physics + history
+let average = total / 3
+let admitted = 10 <= average <= 20
+
+show("Élève : {name}")
+show("Total : {total}")
+show("Moyenne : {average}")
+show("Admise : {admitted}")
+
+// Integer arithmetic stays exact; `div` and `mod` are Euclidean.
+let minutes = 135
+show("{minutes div 60} h {minutes mod 60} min")
+
+var bonus = 0
+bonus += 2
+bonus *= 3
+let final = (average + bonus
+             - 1)
+show("Avec bonus : {final}")
+show("Arrondi par troncature : {final as Int}")

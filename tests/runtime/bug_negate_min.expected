@@ -1,0 +1,12 @@
+exit: 2
+----- stdout
+----- stderr
+bug: integer overflow
+  --> tests/runtime/bug_negate_min.lion:2:6
+   |
+ 2 | show(-low)
+   |      ^^^^
+   |
+   = -(-9223372036854775808) exceeds the capacity of an Int (64 bits)
+   = help: use a Float, or check the value before the negation
+
