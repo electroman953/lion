@@ -1,0 +1,15 @@
+exit: 2
+----- stdout
+----- stderr
+bug: too many nested calls
+  --> tests/runtime/bug_stack_overflow.lion:3:12
+   |
+ 3 |     return countdown(n + 1)
+   |            ^^^^^^^^^^^^^^^^
+  ...
+ 5 | show(countdown(5))
+   |      ------------ in the call made here
+   |
+   = more than 100000 calls are in progress
+   = help: check that the recursion reaches a case that does not call again
+

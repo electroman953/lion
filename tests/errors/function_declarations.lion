@@ -1,0 +1,13 @@
+fun area(width in Float, width in Float) = 1
+fun defaults(a in Int = 1, b in Int) = a
+fun by_reference(var a in Int = 1) = a
+fun generic(x) = x
+fun area2(w in Floot) = w
+fun twice() = 1
+fun twice() = 2
+var twice2 = 1
+fun twice2() = 1
+fun uses_self(self) = 1
+fun inner():
+    fun nested() = 1
+;

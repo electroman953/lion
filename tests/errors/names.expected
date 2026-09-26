@@ -25,13 +25,14 @@ error: cannot find `undeclared` in this scope
    |
    = help: a variable is declared before it is used: `var undeclared = ...` (§6)
 
-error: `show` is the name of a standard function
-  --> tests/errors/names.lion:5:5
+error: `show` is not a function
+  --> tests/errors/names.lion:6:1
    |
  5 | let show = 2
-   |     ^^^^
+   |     ---- declared here
+ 6 | show(show)
+   | ^^^^ `show` is an Int
    |
-   = Lion 0.1 does not define whether a declaration may hide a standard function, so it is refused
-   = help: choose another name
+   = this declaration hides the standard function `show`
 
 4 errors found

@@ -1,0 +1,23 @@
+fun half() in Int = total div 2
+show(half())
+var total = 10
+fun reset():
+    total = 0
+;
+let limit = 5
+fun raise() modifies limit:
+    limit = 6
+;
+fun wrong() modifies nothing:
+;
+let later in Int
+fun set_later():
+    later = 1
+;
+later = 2
+var twice = 1
+var twice = 2
+fun reads_twice() = twice
+fun early() = rate
+show(early())
+let rate = 3

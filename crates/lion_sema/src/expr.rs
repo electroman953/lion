@@ -7,8 +7,8 @@ use lion_diagnostics::{Diagnostic, Span};
 use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
-use crate::names::{IMPLEMENTED_FUNCTIONS, PLANNED_FUNCTIONS};
-use crate::{Checker, article, typed};
+use crate::names::{IMPLEMENTED_FUNCTIONS, PLANNED_FUNCTIONS, Resolved};
+use crate::{Checker, GlobalType, article, typed};
 
 /// A comparison between two operands, specialised to their types.
 #[derive(Clone, Copy)]
@@ -18,7 +18,7 @@ struct Comparison {
     on_floats: bool,
 }
 
-impl Checker {
+impl Checker<'_> {
     pub(crate) fn expr(&mut self, expr: &ast::Expr) -> Option<ir::Expr> {
         let span = expr.span;
         match &expr.kind {
@@ -149,17 +149,27 @@ impl Checker {
     }
 
     fn name(&mut self, name: &str, span: Span) -> Option<ir::Expr> {
-        let Some(local) = self.lookup(name) else {
-            if IMPLEMENTED_FUNCTIONS.contains(&name) || PLANNED_FUNCTIONS.contains(&name) {
-                self.not_implemented(span, "functions used as values", "§11.3");
-            } else {
-                let error = self.unknown_name_error(name, span);
-                self.diagnostics.push(error);
-            }
+        if name == "self" {
+            self.not_implemented(span, "methods and `self`", "§12.4");
             return None;
-        };
-        let ty = self.locals[local.index()].ty?;
-        self.check_has_value(local, span).then(|| typed(ir::ExprKind::Local(local), ty, span))
+        }
+        match self.resolve(name, span) {
+            Resolved::Local(local) => {
+                let ty = self.ctx.locals[local.index()].ty?;
+                self.check_has_value(local, span).then(|| typed(ir::ExprKind::Local(local), ty, span))
+            }
+            // Whether it has a value is checked at the calls of the script (C3).
+            Resolved::Global(local) => {
+                self.ctx.reads.push(local);
+                let GlobalType::Known(ty) = self.globals[&self.global_names[&local]].ty else { return None };
+                Some(typed(ir::ExprKind::Global(local), ty?, span))
+            }
+            Resolved::Function(_) | Resolved::Standard(_) => {
+                self.not_implemented(span, "functions used as values", "§11.3");
+                None
+            }
+            Resolved::Nothing => None,
+        }
     }
 
     fn unary(&mut self, op: ast::UnaryOp, operand: &ast::Expr, span: Span) -> Option<ir::Expr> {
@@ -474,29 +484,35 @@ impl Checker {
             self.not_implemented(callee.span, what, section);
             return None;
         };
-        if let Some(local) = self.lookup(name) {
-            let info = &self.locals[local.index()];
-            let mut error = Diagnostic::error(format!("`{name}` is not a function"))
-                .with_primary(callee.span, "")
-                .with_secondary(info.decl_span, "declared here");
-            if let Some(ty) = info.ty {
-                error.labels[0].message = format!("`{name}` is {}", article(ty));
+        let (decl_span, ty) = match self.resolve(name, callee.span) {
+            Resolved::Function(index) => return self.call_function(index, callee.span, args, span),
+            Resolved::Standard("show") => return self.show(args, span),
+            Resolved::Standard(standard) => {
+                self.not_implemented(callee.span, &format!("the standard function `{standard}`"), "§23");
+                return None;
             }
-            self.diagnostics.push(error);
-            return None;
+            Resolved::Nothing => return None,
+            Resolved::Local(local) => {
+                let info = &self.ctx.locals[local.index()];
+                (info.decl_span, info.ty)
+            }
+            Resolved::Global(local) => {
+                let global = &self.globals[&self.global_names[&local]];
+                let ty = match global.ty {
+                    GlobalType::Known(ty) => ty,
+                    GlobalType::Unknown => None,
+                };
+                (global.decl.name.span, ty)
+            }
+        };
+        let mut error = Diagnostic::error(format!("`{name}` is not a function"))
+            .with_primary(callee.span, ty.map_or(String::new(), |ty| format!("`{name}` is {}", article(ty))))
+            .with_secondary(decl_span, "declared here");
+        if IMPLEMENTED_FUNCTIONS.contains(&name.as_str()) || PLANNED_FUNCTIONS.contains(&name.as_str()) {
+            error = error.with_note(format!("this declaration hides the standard function `{name}`"));
         }
-        match name.as_str() {
-            "show" => self.show(args, span),
-            _ if PLANNED_FUNCTIONS.contains(&name.as_str()) => {
-                self.not_implemented(callee.span, &format!("the standard function `{name}`"), "§23");
-                None
-            }
-            _ => {
-                let error = self.unknown_name_error(name, callee.span);
-                self.diagnostics.push(error);
-                None
-            }
-        }
+        self.diagnostics.push(error);
+        None
     }
 
     /// `show(value)`: any value can be shown (§23, D29).

@@ -8,4 +8,4 @@ pub mod bug;
 pub mod format;
 pub mod ops;
 
-pub use bug::{BugKind, IntOp};
+pub use bug::{BugKind, IntOp, MAX_CALL_DEPTH};

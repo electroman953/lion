@@ -1,0 +1,13 @@
+fun area(width in Float, height in Float) in Float:
+    return width * height
+;
+fun square(x) = x * x
+fun f(a, c = 1, d in Int = 2): show(a) ;
+fun add_grade(var notes, n):
+    notes = n
+;
+fun reset() modifies total, count:
+;
+fun biggest(a in T, b in T) in T, T in Comparable = if b > a then b else a
+fun Student.passes() in Bool = self.grade >= 10
+infix fun Vector.dot(other in Vector) in Float = 0.0

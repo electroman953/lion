@@ -5,23 +5,24 @@ use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
 use crate::flow::{Assigned, Flow};
-use crate::{Checker, LoopExits, Scope, article, typed};
+use crate::names::Resolved;
+use crate::{Checker, ContextKind, GlobalType, LoopExits, Scope, article, typed};
 
-impl Checker {
+impl Checker<'_> {
     pub(crate) fn stmts(&mut self, stmts: &[ast::Stmt]) -> Vec<ir::Stmt> {
         stmts.iter().filter_map(|stmt| self.stmt(stmt)).collect()
     }
 
     /// A block has its own scope: its declarations end with it.
     fn block(&mut self, block: &ast::Block) -> Vec<ir::Stmt> {
-        self.scopes.push(Scope::default());
+        self.ctx.scopes.push(Scope::default());
         let stmts = self.stmts(&block.stmts);
         self.close_scope();
         stmts
     }
 
     pub(crate) fn close_scope(&mut self) {
-        let scope = self.scopes.pop().expect("a scope is open");
+        let scope = self.ctx.scopes.pop().expect("a scope is open");
         self.check_constants_assigned(&scope.declared);
     }
 
@@ -34,13 +35,27 @@ impl Checker {
             ast::StmtKind::While { cond, body } => self.while_stmt(cond, body),
             ast::StmtKind::Break => self.jump(stmt.span, true),
             ast::StmtKind::Continue => self.jump(stmt.span, false),
-            ast::StmtKind::Return(value) => self.return_stmt(value.as_ref()),
+            ast::StmtKind::Return(value) => match self.ctx.kind {
+                ContextKind::Function(index) => self.return_in_function(index, value.as_ref(), stmt.span),
+                ContextKind::Script => self.return_stmt(value.as_ref()),
+            },
+            // Top-level functions are registered beforehand and checked on their own.
+            ast::StmtKind::Fun(_) if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 => {
+                None
+            }
+            ast::StmtKind::Fun(decl) => {
+                self.not_implemented(
+                    decl.name.span,
+                    "functions declared inside a block or a function (closures)",
+                    "§11.5",
+                );
+                None
+            }
         }
     }
 
     /// `let x = value in T` and its variants (§6.1, §6.2).
     fn let_stmt(&mut self, decl: &ast::LetStmt) -> Option<ir::Stmt> {
-        self.check_not_standard_name(&decl.name);
         let annotation = decl.annotation.as_ref().map(|ty| (self.resolve_type(ty), ty.span));
         let mut ty = annotation.and_then(|(ty, _)| ty);
         let mut value = None;
@@ -61,7 +76,7 @@ impl Checker {
             };
         }
         let local = self.declare(&decl.name, ty, decl.mutable, decl.value.is_some());
-        value.map(|value| ir::Stmt::Assign { local, value })
+        value.map(|value| ir::Stmt::Assign { place: ir::Place::Local(local), value })
     }
 
     /// `x = value`, `x += value`, ... (§6.3, D44).
@@ -88,30 +103,58 @@ impl Checker {
             }
         };
         let value = self.expr(value);
-        let Some(local) = self.lookup(name) else {
+        if !self.is_known(name) {
             let error = self
                 .unknown_name_error(name, target.span)
                 .with_help(format!("a variable is declared before it is used: `var {name} = ...` (§6)"));
             self.diagnostics.push(error);
             return None;
+        }
+        let (place, ty, decl_span) = match self.resolve(name, target.span) {
+            Resolved::Local(local) => {
+                if op != ast::AssignOp::Set && !self.check_has_value(local, target.span) {
+                    return None;
+                }
+                let assignable = self.check_assignable(local, target.span);
+                // Even a refused assignment gives the variable a value, to report it only once.
+                self.ctx.locals[local.index()].first_assignment.get_or_insert(target.span);
+                self.ctx.flow.set(local, Assigned::Yes);
+                if !assignable {
+                    return None;
+                }
+                let info = &self.ctx.locals[local.index()];
+                (ir::Place::Local(local), info.ty?, info.decl_span)
+            }
+            Resolved::Global(local) => {
+                if !self.check_global_assignment(local, target.span) {
+                    return None;
+                }
+                if op != ast::AssignOp::Set {
+                    self.ctx.reads.push(local);
+                }
+                let global = &self.globals[&self.global_names[&local]];
+                let GlobalType::Known(ty) = global.ty else { return None };
+                (ir::Place::Global(local), ty?, global.decl.name.span)
+            }
+            Resolved::Function(_) | Resolved::Standard(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("cannot assign to the function `{name}`"))
+                        .with_primary(target.span, "")
+                        .with_note("the left side of an assignment is a variable"),
+                );
+                return None;
+            }
+            Resolved::Nothing => return None,
         };
-        if op != ast::AssignOp::Set && !self.check_has_value(local, target.span) {
-            return None;
-        }
-        let assignable = self.check_assignable(local, target.span);
-        // Even a refused assignment gives the variable a value, to report it only once.
-        self.locals[local.index()].first_assignment.get_or_insert(target.span);
-        self.flow.set(local, Assigned::Yes);
-        if !assignable {
-            return None;
-        }
-        let info = &self.locals[local.index()];
-        let (ty, decl_span, name) = (info.ty?, info.decl_span, info.name.clone());
         let value = value?;
         let value = match compound_operator(op) {
             None => value,
             Some(op) => {
-                let current = typed(ir::ExprKind::Local(local), ty, target.span);
+                let current = match place {
+                    ir::Place::Local(local) => ir::ExprKind::Local(local),
+                    ir::Place::Global(local) => ir::ExprKind::Global(local),
+                };
+                let current = typed(current, ty, target.span);
                 let result = self.arithmetic(op, span, current, value, span)?;
                 if result.ty != ty && !(result.ty == Type::Int && ty == Type::Float) {
                     self.diagnostics.push(
@@ -138,7 +181,7 @@ impl Checker {
             }
             return None;
         };
-        Some(ir::Stmt::Assign { local, value })
+        Some(ir::Stmt::Assign { place, value })
     }
 
     /// `if c: ... elif d: ... else: ... ;` (§5.2). Each branch starts from the flow
@@ -148,14 +191,14 @@ impl Checker {
         let mut checked = Vec::new();
         for branch in branches {
             let cond = self.condition(&branch.cond, "if");
-            let before = self.flow.clone();
+            let before = self.ctx.flow.clone();
             let body = self.block(&branch.body);
-            ends.push(std::mem::replace(&mut self.flow, before));
+            ends.push(std::mem::replace(&mut self.ctx.flow, before));
             checked.push((cond, body));
         }
         // Without `else`, the flow where every condition is false goes on.
         let mut result = otherwise.map(|block| self.block(block)).unwrap_or_default();
-        self.flow = ends.into_iter().fold(self.flow.clone(), Flow::join);
+        self.ctx.flow = ends.into_iter().fold(self.ctx.flow.clone(), Flow::join);
         for (cond, then) in checked.into_iter().rev() {
             result = vec![ir::Stmt::If { cond: cond?, then, otherwise: result }];
         }
@@ -167,25 +210,25 @@ impl Checker {
         // At the start of a turn, a local assigned in the body may hold a value from an
         // earlier turn.
         for local in self.assigned_in(&body.stmts) {
-            if self.flow.is_reachable() && self.flow.get(local) == Assigned::No {
-                self.flow.set(local, Assigned::Maybe);
+            if self.ctx.flow.is_reachable() && self.ctx.flow.get(local) == Assigned::No {
+                self.ctx.flow.set(local, Assigned::Maybe);
             }
         }
         let cond_ir = self.condition(cond, "while");
-        let head = self.flow.clone();
-        self.loops.push(LoopExits::default());
+        let head = self.ctx.flow.clone();
+        self.ctx.loops.push(LoopExits::default());
         let body_ir = self.block(body);
-        let exits = self.loops.pop().expect("the loop is open");
+        let exits = self.ctx.loops.pop().expect("the loop is open");
         // `while true` only ends through `break`: no path leaves it when the condition is false.
         let after = if matches!(cond.kind, ast::ExprKind::Bool(true)) { Flow::unreachable() } else { head };
-        self.flow = exits.breaks.into_iter().fold(after, Flow::join);
+        self.ctx.flow = exits.breaks.into_iter().fold(after, Flow::join);
         Some(ir::Stmt::While { cond: cond_ir?, body: body_ir })
     }
 
     /// `break` or `continue`, in the innermost loop (§10.2).
     fn jump(&mut self, span: Span, is_break: bool) -> Option<ir::Stmt> {
         let keyword = if is_break { "break" } else { "continue" };
-        let Some(exits) = self.loops.last_mut() else {
+        let Some(exits) = self.ctx.loops.last_mut() else {
             self.diagnostics.push(
                 Diagnostic::error(format!("`{keyword}` outside a loop"))
                     .with_primary(span, "")
@@ -195,7 +238,7 @@ impl Checker {
         };
         // After `continue`, the flow goes back to the start of the loop, whose state
         // already accounts for every assignment of the body.
-        let flow = std::mem::replace(&mut self.flow, Flow::unreachable());
+        let flow = std::mem::replace(&mut self.ctx.flow, Flow::unreachable());
         if is_break {
             exits.breaks.push(flow);
         }
@@ -212,8 +255,8 @@ impl Checker {
             );
             return None;
         }
-        self.flow = Flow::unreachable();
-        Some(ir::Stmt::Return)
+        self.ctx.flow = Flow::unreachable();
+        Some(ir::Stmt::Return(None))
     }
 
     /// The outer locals that `stmts` assigns, at any depth.

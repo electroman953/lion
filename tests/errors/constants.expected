@@ -22,16 +22,6 @@ error: the constant `e` already has a value
    = a `let` declared without a value receives exactly one assignment (§6.1)
    = help: to change `e`, declare it with `var`
 
-error: `unread` is used before it has a value
-  --> tests/errors/constants.lion:8:6
-   |
- 7 | let unread in Text
-   |     ------ declared here without a value
- 8 | show(unread)
-   |      ^^^^^^ used here
-   |
-   = help: give `unread` a value before this line (§6.1)
-
 error: the constant `never` never receives a value
   --> tests/errors/constants.lion:6:5
    |
@@ -47,5 +37,15 @@ error: the constant `unread` never receives a value
    |     ^^^^^^ declared here without a value
    |
    = a `let` declared without a value receives exactly one assignment (§6.1)
+
+error: `unread` is used before it has a value
+  --> tests/errors/constants.lion:8:6
+   |
+ 7 | let unread in Text
+   |     ------ declared here without a value
+ 8 | show(unread)
+   |      ^^^^^^ used here
+   |
+   = help: give `unread` a value before this line (§6.1)
 
 5 errors found

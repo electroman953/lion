@@ -1,0 +1,55 @@
+exit: 1
+----- stdout
+----- stderr
+error: `sign` does not return a value on every path
+  --> tests/errors/function_returns.lion:1:5
+   |
+ 1 | fun sign(x in Int) in Int:
+   |     ^^^^ this function can reach its end without `return`
+   |
+   = when a `return` of a function gives a value, every path must end with one (§11.4)
+
+error: this `return` has no value, but other returns of `mixed` give one
+  --> tests/errors/function_returns.lion:6:5
+   |
+ 5 |     if x > 0: return 1 ;
+   |                      - a value is returned here
+ 6 |     return
+   |     ^^^^^^
+   |
+   = when a `return` of a function gives a value, every path must end with one (§11.4)
+
+error: mismatched types
+  --> tests/errors/function_returns.lion:8:22
+   |
+ 8 | fun wrong() in Int = "one"
+   |                --- return type declared here
+   |                      ^^^^^ this is a Text
+   |
+   = expected: Int
+   = found: Text
+
+error: `nothing` returns an Int: this `return` needs a value
+   --> tests/errors/function_returns.lion:10:5
+    |
+ 10 |     return
+    |     ^^^^^^
+
+error: not implemented yet: functions that return values of different types (the result would be a union such as `Int or Text`)
+   --> tests/errors/function_returns.lion:12:5
+    |
+ 12 | fun different(x in Int):
+    |     ^^^^^^^^^
+    |
+    = this part of Lion (spec §7.3, §11.4) is not supported by this version of the implementation
+
+error: the return type of `loop_forever` must be written
+   --> tests/errors/function_returns.lion:16:30
+    |
+ 16 | fun loop_forever(n in Int) = loop_forever(n + 1)
+    |     ------------ declared here
+    |                              ^^^^^^^^^^^^ `loop_forever` is called here before its return type is known
+    |
+    = help: write it after the parameters: `fun loop_forever(...) in Type`
+
+6 errors found

@@ -23,6 +23,14 @@ error: `acc` may not have a value here
     |
     = it receives a value on some of the paths that lead here, not on all of them (§6.1)
 
+error: the constant `label` does not receive a value on every path
+   --> tests/errors/definite_assignment.lion:12:5
+    |
+ 12 | let label in Text
+    |     ^^^^^ declared here without a value
+    |
+    = a `let` declared without a value receives exactly one assignment (§6.1)
+
 error: the constant `label` may already have a value
    --> tests/errors/definite_assignment.lion:14:5
     |
@@ -31,6 +39,14 @@ error: the constant `label` may already have a value
     |
     = a `let` declared without a value receives exactly one assignment (§6.1)
     = help: to change `label`, declare it with `var`
+
+error: the constant `partial` does not receive a value on every path
+   --> tests/errors/definite_assignment.lion:16:5
+    |
+ 16 | let partial in Text
+    |     ^^^^^^^ declared here without a value
+    |
+    = a `let` declared without a value receives exactly one assignment (§6.1)
 
 error: the constant `both` already has a value
    --> tests/errors/definite_assignment.lion:26:1
@@ -43,21 +59,5 @@ error: the constant `both` already has a value
     |
     = a `let` declared without a value receives exactly one assignment (§6.1)
     = help: to change `both`, declare it with `var`
-
-error: the constant `label` does not receive a value on every path
-   --> tests/errors/definite_assignment.lion:12:5
-    |
- 12 | let label in Text
-    |     ^^^^^ declared here without a value
-    |
-    = a `let` declared without a value receives exactly one assignment (§6.1)
-
-error: the constant `partial` does not receive a value on every path
-   --> tests/errors/definite_assignment.lion:16:5
-    |
- 16 | let partial in Text
-    |     ^^^^^^^ declared here without a value
-    |
-    = a `let` declared without a value receives exactly one assignment (§6.1)
 
 6 errors found

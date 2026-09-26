@@ -1,12 +1,13 @@
 exit: 0
 ----- stdout
-locals
-  x#0 let Int
-  y#1 let Int
-  z#2 let Int
-body
-  x#0 = 10
-  y#1 = 20
-  z#2 = (add_int x#0 y#1)
-  (show z#2)
+script
+  locals
+    x#0 let Int
+    y#1 let Int
+    z#2 let Int
+  body
+    x#0 = 10
+    y#1 = 20
+    z#2 = (add_int x#0 y#1)
+    (show z#2)
 ----- stderr

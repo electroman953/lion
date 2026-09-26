@@ -1,10 +1,10 @@
-//! Names that are not declared by the program: the standard library, and
-//! suggestions for misspelt names.
+//! Resolution of names: variables, globals, functions and the standard library,
+//! with suggestions for misspelt names.
 
 use lion_diagnostics::{Diagnostic, Span};
-use lion_syntax::ast;
+use lion_ir as ir;
 
-use crate::Checker;
+use crate::{Checker, ContextKind, GlobalType};
 
 /// Standard functions available without `use` (spec §23).
 pub(crate) const IMPLEMENTED_FUNCTIONS: &[&str] = &["show"];
@@ -13,29 +13,97 @@ pub(crate) const IMPLEMENTED_FUNCTIONS: &[&str] = &["show"];
 pub(crate) const PLANNED_FUNCTIONS: &[&str] =
     &["ask", "error", "exit", "sum", "reverse", "floor", "ceil", "round", "isqrt"];
 
-impl Checker {
-    /// Declaring a name of the standard library is refused: Lion 0.1 does not say
-    /// whether the declaration would hide the function (see docs/implementation-notes.md).
-    pub(crate) fn check_not_standard_name(&mut self, name: &ast::Ident) {
-        let name_text = name.name.as_str();
-        if !IMPLEMENTED_FUNCTIONS.contains(&name_text) && !PLANNED_FUNCTIONS.contains(&name_text) {
-            return;
+/// What a name designates at some point of the program.
+pub(crate) enum Resolved {
+    /// A variable or parameter of the function being checked, or of the script.
+    Local(ir::LocalId),
+    /// A top-level variable of the script, seen from a function.
+    Global(ir::LocalId),
+    /// A function declared at the top level of the file.
+    Function(usize),
+    /// A function of the standard library.
+    Standard(&'static str),
+    /// Nothing, or something already reported.
+    Nothing,
+}
+
+impl Checker<'_> {
+    /// Looks a name up, innermost first: the blocks of the current function, then (from
+    /// a function) the globals of the script, then the functions of the file, then the
+    /// standard library. Declarations may hide standard functions (C2).
+    pub(crate) fn resolve(&mut self, name: &str, span: Span) -> Resolved {
+        if let Some(local) = self.lookup(name) {
+            return Resolved::Local(local);
         }
-        self.diagnostics.push(
-            Diagnostic::error(format!("`{name_text}` is the name of a standard function"))
-                .with_primary(name.span, "")
-                .with_note("Lion 0.1 does not define whether a declaration may hide a standard function, so it is refused")
-                .with_help("choose another name"),
-        );
+        if self.ctx.kind != ContextKind::Script && self.globals.contains_key(name) {
+            return match self.global(name, span) {
+                Some(local) => Resolved::Global(local),
+                None => Resolved::Nothing,
+            };
+        }
+        if let Some(&index) = self.function_names.get(name) {
+            return Resolved::Function(index);
+        }
+        if let Some(&standard) = IMPLEMENTED_FUNCTIONS.iter().chain(PLANNED_FUNCTIONS).find(|n| **n == name) {
+            return Resolved::Standard(standard);
+        }
+        let error = self.unknown_name_error(name, span);
+        self.diagnostics.push(error);
+        Resolved::Nothing
+    }
+
+    /// Whether `name` designates anything here, without reporting.
+    pub(crate) fn is_known(&self, name: &str) -> bool {
+        self.lookup(name).is_some()
+            || (self.ctx.kind != ContextKind::Script && self.globals.contains_key(name))
+            || self.function_names.contains_key(name)
+            || IMPLEMENTED_FUNCTIONS.contains(&name)
+            || PLANNED_FUNCTIONS.contains(&name)
+    }
+
+    /// A global seen from a function: declared exactly once (C5), and already reached
+    /// by the script when the function body is checked early (C17).
+    fn global(&mut self, name: &str, span: Span) -> Option<ir::LocalId> {
+        let global = &self.globals[name];
+        let decl_span = global.decl.name.span;
+        let Some(local) = global.local else {
+            self.diagnostics.push(
+                Diagnostic::error(format!(
+                    "`{name}` is declared several times at the top level of the script"
+                ))
+                .with_primary(span, "a function cannot tell which declaration this is")
+                .with_secondary(decl_span, "first declaration")
+                .with_help("give the top-level declarations different names"),
+            );
+            return None;
+        };
+        match global.ty {
+            GlobalType::Known(ty) => ty.map(|_| local),
+            GlobalType::Unknown => {
+                let mut error = Diagnostic::error(format!("`{name}` is used before the script declares it"))
+                    .with_primary(span, "used here")
+                    .with_secondary(decl_span, "declared here");
+                if let Some(&call) = self.demands.first() {
+                    error =
+                        error.with_secondary(call, "the function is called here, before that declaration");
+                }
+                self.diagnostics.push(error.with_note(
+                    "a function may use a variable declared further down, but it can only be called once the variable has a value (§6.1, §6.5)",
+                ));
+                None
+            }
+        }
     }
 
     /// "cannot find `x`", with a suggestion when a close name exists.
     pub(crate) fn unknown_name_error(&self, name: &str, span: Span) -> Diagnostic {
-        let visible = self
-            .scopes
-            .iter()
-            .flat_map(|scope| scope.names.keys().map(String::as_str))
-            .chain(IMPLEMENTED_FUNCTIONS.iter().copied());
+        let mut visible: Vec<&str> =
+            self.ctx.scopes.iter().flat_map(|scope| scope.names.keys().map(String::as_str)).collect();
+        visible.extend(self.function_names.keys().map(String::as_str));
+        visible.extend(IMPLEMENTED_FUNCTIONS);
+        if self.ctx.kind != ContextKind::Script {
+            visible.extend(self.globals.keys().map(String::as_str));
+        }
         let mut error =
             Diagnostic::error(format!("cannot find `{name}` in this scope")).with_primary(span, "not found");
         if let Some(help) = other_language_help(name) {

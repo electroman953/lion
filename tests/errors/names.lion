@@ -3,3 +3,4 @@ show(totl)
 print(total)
 undeclared = 5
 let show = 2
+show(show)

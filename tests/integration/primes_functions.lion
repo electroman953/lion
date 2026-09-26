@@ -1,0 +1,33 @@
+// Prime numbers and twin primes, with functions.
+fun is_prime(n in Int) in Bool:
+    if n < 2: return false ;
+    var d = 2
+    while d * d <= n:
+        if n mod d == 0: return false ;
+        d += 1
+    ;
+    return true
+;
+
+fun count_primes(limit in Int) in Int:
+    var count = 0
+    var n = 2
+    while n <= limit:
+        if is_prime(n): count += 1 ;
+        n += 1
+    ;
+    return count
+;
+
+var twins = 0
+fun count_twins(limit in Int) modifies twins:
+    var p = 2
+    while p + 2 <= limit:
+        if is_prime(p) and is_prime(p + 2): twins += 1 ;
+        p += 1
+    ;
+;
+
+show("{count_primes(1000)} nombres premiers jusqu'à 1000")
+count_twins(1000)
+show("{twins} couples de premiers jumeaux")

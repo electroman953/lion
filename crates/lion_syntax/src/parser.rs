@@ -91,6 +91,7 @@ impl<'t> Parser<'t> {
                 Ok(Stmt { kind: StmtKind::Continue, span: self.bump().span })
             }
             TokenKind::Keyword(Keyword::Return) => self.return_statement(),
+            TokenKind::Keyword(Keyword::Fun | Keyword::Infix) => self.fun_statement(),
             TokenKind::Keyword(keyword @ (Keyword::Elif | Keyword::Else)) => {
                 let error = Diagnostic::error(format!("`{}` without `if`", keyword.as_str()))
                     .with_primary(start, "")
@@ -115,7 +116,6 @@ impl<'t> Parser<'t> {
         }
         let TokenKind::Keyword(keyword) = self.peek() else { return None };
         Some(match keyword {
-            Keyword::Fun | Keyword::Infix => ("functions", "§11"),
             Keyword::For => ("`for` loops, which need collections and intervals", "§10.2, §16"),
             Keyword::Match => ("`match`", "§10.3"),
             Keyword::Struct => ("structures", "§12"),
@@ -224,6 +224,106 @@ impl<'t> Parser<'t> {
         let body = self.block(opener)?;
         let end = self.close_block(opener)?;
         Ok(Stmt { kind: StmtKind::While { cond, body }, span: start.to(end) })
+    }
+
+    /// `[infix] fun [Type.]name(params) [in T] [, T in Trait] [modifies x, y]`, then
+    /// `: body ;` or `= expr` (§11.1, §26).
+    fn fun_statement(&mut self) -> PResult<Stmt> {
+        let index = self.pos;
+        let start = self.span();
+        let infix = self.eat_keyword(Keyword::Infix);
+        if !self.eat_keyword(Keyword::Fun) {
+            return Err(self.expected("`fun`"));
+        }
+        if self.at(&TokenKind::LParen) {
+            return Err(self.not_implemented(start.to(self.span()), "anonymous functions", "§11.1"));
+        }
+        let receiver = match (self.peek(), self.kind_at(self.pos + 1)) {
+            (TokenKind::UpperIdent(name), TokenKind::Dot) => {
+                let receiver = Ident { name: name.clone(), span: self.span() };
+                self.bump();
+                self.bump();
+                Some(receiver)
+            }
+            _ => None,
+        };
+        let name = self.binding_name()?;
+        if !self.eat(&TokenKind::LParen) {
+            return Err(self.expected("`(` and the parameters"));
+        }
+        let params = self.nested(Self::params)?;
+        self.expect(&TokenKind::RParen, "`)`")?;
+        let ret = if self.eat_keyword(Keyword::In) { Some(self.type_expr()?) } else { None };
+        let mut type_params = Vec::new();
+        while self.eat(&TokenKind::Comma) {
+            let span = self.span();
+            let TokenKind::UpperIdent(type_name) = self.peek() else {
+                return Err(self.expected("a type variable such as `T in Comparable`"));
+            };
+            let type_name = Ident { name: type_name.clone(), span };
+            self.bump();
+            if !self.eat_keyword(Keyword::In) {
+                return Err(self.expected("`in` and the set of types of the type variable"));
+            }
+            type_params.push((type_name, self.type_expr()?));
+        }
+        let mut modifies = Vec::new();
+        if self.eat_keyword(Keyword::Modifies) {
+            loop {
+                modifies.push(self.binding_name()?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+        let body = if self.eat(&TokenKind::Assign) {
+            let value = self.expr()?;
+            if matches!(
+                self.peek(),
+                TokenKind::Assign | TokenKind::PlusAssign | TokenKind::MinusAssign | TokenKind::StarAssign
+            ) {
+                let error =
+                    Diagnostic::error("the short form of a function takes a value, not an assignment")
+                        .with_primary(self.span(), "")
+                        .with_help(format!(
+                            "write the body as a block: `fun {}(...): ... ;` (§11.1)",
+                            name.name
+                        ));
+                return Err(self.error(error));
+            }
+            FunBody::Expr(value)
+        } else if self.at(&TokenKind::Colon) {
+            let opener = Opener { keyword: "fun", index, branch: index };
+            let block = self.block(opener)?;
+            self.close_block(opener)?;
+            FunBody::Block(block)
+        } else {
+            return Err(self.expected("`:` and the body of the function, or `=` and its value"));
+        };
+        let decl = FunDecl { infix, receiver, name, params, ret, type_params, modifies, body };
+        Ok(Stmt { kind: StmtKind::Fun(decl), span: start.to(self.previous_span()) })
+    }
+
+    /// `[var] name [in T] [= default]`, separated by commas (§11.2).
+    fn params(&mut self) -> PResult<Vec<Param>> {
+        let mut params = Vec::new();
+        if self.at(&TokenKind::RParen) {
+            return Ok(params);
+        }
+        loop {
+            let var = if self.at_keyword(Keyword::Var) { Some(self.bump().span) } else { None };
+            let name = if self.at_keyword(Keyword::SelfValue) {
+                Ident { name: "self".to_string(), span: self.bump().span }
+            } else {
+                self.binding_name()?
+            };
+            let ty = if self.eat_keyword(Keyword::In) { Some(self.type_expr()?) } else { None };
+            let default = if self.eat(&TokenKind::Assign) { Some(self.expr()?) } else { None };
+            params.push(Param { var, name, ty, default });
+            if !self.eat(&TokenKind::Comma) {
+                return Ok(params);
+            }
+        }
     }
 
     fn return_statement(&mut self) -> PResult<Stmt> {
@@ -767,9 +867,7 @@ impl<'t> Parser<'t> {
             TokenKind::LBrace => {
                 return Err(self.not_implemented(span, "sets and comprehensions", "§16"));
             }
-            TokenKind::Keyword(Keyword::SelfValue) => {
-                return Err(self.not_implemented(span, "methods and `self`", "§12.4"));
-            }
+            TokenKind::Keyword(Keyword::SelfValue) => ExprKind::Name("self".to_string()),
             _ => return Err(self.expected("an expression")),
         };
         self.bump();

@@ -1,0 +1,19 @@
+exit: 2
+----- stdout
+5
+----- stderr
+bug: integer division by zero
+  --> tests/runtime/bug_in_function.lion:1:40
+   |
+ 1 | fun ratio(a in Int, b in Int) in Int = a div b
+   |                                        ^^^^^^^
+ 2 | fun average_ratio(values in Int, count in Int) in Int = ratio(values, count)
+   |                                                         -------------------- in the call made here
+  ...
+ 4 | show(average_ratio(10, 0))
+   |      -------------------- in the call made here
+   |
+   = 2 calls were in progress
+   = 10 div 0 has no value
+   = help: check that the divisor is not zero before dividing
+

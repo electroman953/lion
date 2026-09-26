@@ -1,0 +1,56 @@
+fun square(x in Int) = x * x
+fun fact(n in Int) in Int = if n <= 1 then 1 else n * fact(n - 1)
+fun fib(n in Int) in Int:
+    if n < 2: return n ;
+    return fib(n - 1) + fib(n - 2)
+;
+fun greet(name in Text, punctuation in Text = "!"):
+    show("Bonjour {name}{punctuation}")
+;
+fun describe(n in Int, unit in Text = "item", plural in Text = "{unit}s") in Text:
+    return if n == 1 then "1 {unit}" else "{n} {plural}"
+;
+show(square(12))
+show(fact(20))
+show(fib(20))
+greet("Léa")
+greet(name: "Tom", punctuation: " ?")
+show(describe(1))
+show(describe(3))
+show(describe(2, "box", "boxes"))
+
+// `var` parameters work on the caller's variable (§11.2)
+fun swap(var a in Int, var b in Int):
+    let t = a
+    a = b
+    b = t
+;
+fun increment(var n in Int): n += 1 ;
+var x = 1
+var y = 2
+swap(x, y)
+show("x = {x}, y = {y}")
+increment(var x)
+increment(3)
+show(x)
+
+// Globals read and modified by functions (§11.5)
+var counter = 0
+fun bump() in Int modifies counter:
+    counter += 10
+    return counter
+;
+// Operands are evaluated left to right, even when a call changes a variable (§9.2)
+show(counter + bump())
+show(counter)
+fun later() = rate * 2
+let rate = 21
+show(later())
+fun first_even_above(n in Int) in Int:
+    var m = n + 1
+    while true:
+        if m mod 2 == 0: return m ;
+        m += 1
+    ;
+;
+show(first_even_above(7))

@@ -1,0 +1,16 @@
+fun sign(x in Int) in Int:
+    if x > 0: return 1 ;
+;
+fun mixed(x in Int):
+    if x > 0: return 1 ;
+    return
+;
+fun wrong() in Int = "one"
+fun nothing() in Int:
+    return
+;
+fun different(x in Int):
+    if x > 0: return 1 ;
+    return "one"
+;
+fun loop_forever(n in Int) = loop_forever(n + 1)

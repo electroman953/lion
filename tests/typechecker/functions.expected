@@ -1,0 +1,40 @@
+exit: 0
+----- stdout
+script
+  locals
+    total#0 var Int
+    mine#1 var Int
+    %t#2 temp Int
+    %t#3 temp Int
+  body
+    total#0 = 0
+    mine#1 = 1
+    (call add &mine#1 2)
+    (call add &mine#1 3 4)
+    (let %t#2 10 (let %t#3 1 (call add &%t#2 %t#3)))
+    (show (add_float (call average mine#1 total#0) (call sign (neg_int 2))))
+fun add in None
+  locals
+    sum#0 var param Int
+    value#1 param Int
+    times#2 param Int
+  defaults
+    times#2 = 1
+  body
+    sum#0 = (add_int sum#0 (mul_int value#1 times#2))
+    @total#0 = (add_int @total#0 1)
+fun average in Float
+  locals
+    a#0 param Int
+    b#1 param Int
+  body
+    return (div_float (int_to_float (add_int a#0 b#1)) (int_to_float 2))
+fun sign in Float
+  locals
+    x#0 param Int
+  body
+    if (lt_int x#0 0)
+      return (int_to_float (neg_int 1))
+    end
+    return 1.5
+----- stderr

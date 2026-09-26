@@ -1,0 +1,11 @@
+exit: 0
+----- stdout
+(fun area ((width : Float) (height : Float)) in Float [(return (* width height))])
+(fun square ((x)) = (* x x))
+(fun f ((a) (c = 1) (d : Int = 2)) [(call show a)])
+(fun add_grade ((var notes) (n)) [(= notes n)])
+(fun reset () (modifies total count) [])
+(fun biggest ((a : T) (b : T)) in T (where T Comparable) = (if-expr (> b a) b else a))
+(fun Student.passes () in Bool = (>= (. self grade) 10))
+(infix-fun Vector.dot ((other : Vector)) in Float = 0.0)
+----- stderr

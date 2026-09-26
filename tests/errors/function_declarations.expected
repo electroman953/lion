@@ -1,0 +1,80 @@
+exit: 1
+----- stdout
+----- stderr
+error: the parameter `width` is declared twice
+  --> tests/errors/function_declarations.lion:1:26
+   |
+ 1 | fun area(width in Float, width in Float) = 1
+   |          ----- first declared here
+   |                          ^^^^^
+
+error: the parameter `b` needs a default value
+  --> tests/errors/function_declarations.lion:2:28
+   |
+ 2 | fun defaults(a in Int = 1, b in Int) = a
+   |                            ^
+   |
+   = parameters with a default value come last (§11.2)
+
+error: a `var` parameter cannot have a default value
+  --> tests/errors/function_declarations.lion:3:33
+   |
+ 3 | fun by_reference(var a in Int = 1) = a
+   |                  --- this parameter works on a variable of the caller
+   |                                 ^
+   |
+   = the caller always gives the variable of a `var` parameter (§11.2)
+
+error: not implemented yet: parameters without a type, which make the function generic
+  --> tests/errors/function_declarations.lion:4:13
+   |
+ 4 | fun generic(x) = x
+   |             ^
+   |
+   = this part of Lion (spec §11.1, §15.3) is not supported by this version of the implementation
+
+error: cannot find the type `Floot`
+  --> tests/errors/function_declarations.lion:5:16
+   |
+ 5 | fun area2(w in Floot) = w
+   |                ^^^^^ unknown type
+   |
+   = help: a similar type exists: `Float`
+
+error: the function `twice` is already declared
+  --> tests/errors/function_declarations.lion:7:5
+   |
+ 6 | fun twice() = 1
+   |     ----- first declared here
+ 7 | fun twice() = 2
+   |     ^^^^^ declared again here
+   |
+   = each function has its own name: Lion has no overloading
+
+error: `twice2` names both a function and a variable
+  --> tests/errors/function_declarations.lion:8:5
+   |
+ 8 | var twice2 = 1
+   |     ^^^^^^ variable declared here
+ 9 | fun twice2() = 1
+   |     ------ function declared here
+   |
+   = help: choose different names
+
+error: `self` is a parameter of methods only
+   --> tests/errors/function_declarations.lion:10:15
+    |
+ 10 | fun uses_self(self) = 1
+    |               ^^^^
+    |
+    = a method is declared `fun Type.name(...)` (§12.4)
+
+error: not implemented yet: functions declared inside a block or a function (closures)
+   --> tests/errors/function_declarations.lion:12:9
+    |
+ 12 |     fun nested() = 1
+    |         ^^^^^^
+    |
+    = this part of Lion (spec §11.5) is not supported by this version of the implementation
+
+9 errors found

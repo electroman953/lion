@@ -1,0 +1,114 @@
+exit: 1
+----- stdout
+----- stderr
+error: not implemented yet: partial application (a call that gives only some of the arguments)
+  --> tests/errors/function_calls.lion:3:1
+   |
+ 3 | area(1)
+   | ^^^^^^^
+   |
+   = this part of Lion (spec §11.3) is not supported by this version of the implementation
+
+error: `area` takes 2 arguments, not 0
+  --> tests/errors/function_calls.lion:4:1
+   |
+ 1 | fun area(width in Float, height in Float) in Float = width * height
+   |     ---- declared here
+  ...
+ 4 | area()
+   | ^^^^^^
+
+error: `area` takes 2 arguments, not 3
+  --> tests/errors/function_calls.lion:5:1
+   |
+ 1 | fun area(width in Float, height in Float) in Float = width * height
+   |     ---- declared here
+  ...
+ 5 | area(1, 2, 3)
+   | ^^^^^^^^^^^^^
+
+error: this argument is named `heigth`, but the parameter at this position is `width`
+  --> tests/errors/function_calls.lion:6:6
+   |
+ 1 | fun area(width in Float, height in Float) in Float = width * height
+   |          ----- parameter declared here
+  ...
+ 6 | area(heigth: 1, width: 2)
+   |      ^^^^^^
+   |
+   = named arguments keep the order of the parameters (§11.2)
+
+error: this argument is named `width`, but the parameter at this position is `height`
+  --> tests/errors/function_calls.lion:6:17
+   |
+ 1 | fun area(width in Float, height in Float) in Float = width * height
+   |                          ------ parameter declared here
+  ...
+ 6 | area(heigth: 1, width: 2)
+   |                 ^^^^^
+   |
+   = named arguments keep the order of the parameters (§11.2)
+
+error: the parameter `width` of `area` is not `var`
+  --> tests/errors/function_calls.lion:7:6
+   |
+ 1 | fun area(width in Float, height in Float) in Float = width * height
+   |          ----- parameter declared here
+  ...
+ 7 | area(var 1, 2)
+   |      ^^^ remove this `var`
+   |
+   = `var` at a call marks an argument that the function modifies (§11.2)
+
+error: the constant `fixed` cannot be given to the `var` parameter `n`
+  --> tests/errors/function_calls.lion:9:6
+   |
+ 8 | let fixed = 1
+   |     ----- declared with `let`
+ 9 | bump(fixed)
+   |      ^^^^^
+   |
+   = help: declare `fixed` with `var`, or give a copy: `(fixed)`
+
+error: mismatched types
+   --> tests/errors/function_calls.lion:11:6
+    |
+  2 | fun bump(var n in Int): n += 1 ;
+    |              - this `var` parameter is an Int
+   ...
+ 11 | bump(ratio)
+    |      ^^^^^ this is a Float
+    |
+    = a `var` parameter works on the caller's variable itself, so both have the same type (§11.2)
+
+error: `unset` is used before it has a value
+   --> tests/errors/function_calls.lion:13:6
+    |
+ 12 | var unset in Int
+    |     ----- declared here without a value
+ 13 | bump(unset)
+    |      ^^^^^ used here
+    |
+    = help: give `unset` a value before this line (§6.1)
+
+error: mismatched types
+   --> tests/errors/function_calls.lion:14:6
+    |
+  1 | fun area(width in Float, height in Float) in Float = width * height
+    |          ----- parameter declared here
+   ...
+ 14 | area("1", 2)
+    |      ^^^ this is a Text
+    |
+    = expected: Float
+    = found: Text
+
+error: not implemented yet: functions used as values
+   --> tests/errors/function_calls.lion:15:9
+    |
+ 15 | let v = area
+    |         ^^^^
+    |
+    = this part of Lion (spec §11.3) is not supported by this version of the implementation
+
+11 errors found

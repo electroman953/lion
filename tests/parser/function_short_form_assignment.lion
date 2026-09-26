@@ -1,0 +1,1 @@
+fun increment(var n in Int) = n += 1

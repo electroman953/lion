@@ -1,8 +1,9 @@
 //! Translation of the typed IR into bytecode.
 //!
-//! Every local of the program has its own register; temporaries are allocated above
+//! Every local of a function has its own register; temporaries are allocated above
 //! them like a stack and released as soon as the instruction that reads them is
-//! emitted.
+//! emitted. The globals are the registers of the script, whose frame is at the bottom
+//! of the stack.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -10,11 +11,23 @@ use std::rc::Rc;
 use lion_diagnostics::Span;
 use lion_ir::{self as ir, BinaryOp, Builtin, Conversion, ExprKind, UnaryOp};
 
-use crate::bytecode::{Chunk, Instr, Reg};
+use crate::bytecode::{Chunk, Instr, Program, Reg};
 
-pub fn compile(program: &ir::Program) -> Chunk {
-    let locals = program.locals.len() as u32;
+pub fn compile(program: &ir::Program) -> Program {
+    let functions = program
+        .functions
+        .iter()
+        .enumerate()
+        .map(|(index, function)| compile_function(function, index == program.main.index()))
+        .collect();
+    Program { functions, main: program.main.index() }
+}
+
+fn compile_function(function: &ir::Function, is_script: bool) -> Chunk {
+    let locals = function.locals.len() as u32;
     let mut compiler = Compiler {
+        function,
+        is_script,
         code: Vec::new(),
         spans: Vec::new(),
         texts: Vec::new(),
@@ -23,15 +36,30 @@ pub fn compile(program: &ir::Program) -> Chunk {
         registers: locals,
         loops: Vec::new(),
     };
-    compiler.block(&program.body);
-    compiler.emit(Instr::Halt, None);
-    Chunk { code: compiler.code, spans: compiler.spans, texts: compiler.texts, registers: compiler.registers }
+    // Omitted arguments take their default value, in the order of the parameters (§11.2).
+    for (index, value) in &function.defaults {
+        let skip = compiler.code.len();
+        compiler.emit(Instr::JumpIfArgs { count: index + 1, target: 0 }, None);
+        compiler.expr_into(value, *index);
+        compiler.patch(skip);
+    }
+    compiler.block(&function.body);
+    compiler.emit(if is_script { Instr::Halt } else { Instr::ReturnNone }, None);
+    Chunk {
+        name: function.name.clone(),
+        code: compiler.code,
+        spans: compiler.spans,
+        texts: compiler.texts,
+        registers: compiler.registers,
+    }
 }
 
-struct Compiler {
+struct Compiler<'f> {
+    function: &'f ir::Function,
+    is_script: bool,
     code: Vec<Instr>,
     spans: Vec<Option<Span>>,
-    texts: Vec<Rc<str>>,
+    texts: Vec<Rc<String>>,
     text_indices: HashMap<String, u32>,
     /// The first free temporary register.
     next_temp: Reg,
@@ -48,21 +76,11 @@ struct Loop {
     breaks: Vec<usize>,
 }
 
-impl Compiler {
+impl Compiler<'_> {
     fn stmt(&mut self, stmt: &ir::Stmt) {
         let mark = self.next_temp;
         match stmt {
-            ir::Stmt::Assign { local, value } => {
-                let dst = register(*local);
-                if writes_destination_early(value) {
-                    // `x = y and x` must read the old `x` after `y` is computed.
-                    let temp = self.temp();
-                    self.expr_into(value, temp);
-                    self.emit(Instr::Move { dst, src: temp }, Some(value.span));
-                } else {
-                    self.expr_into(value, dst);
-                }
-            }
+            ir::Stmt::Assign { place, value } => self.assign(*place, value),
             ir::Stmt::Expr(expr) => self.effect(expr),
             ir::Stmt::If { cond, then, otherwise } => {
                 let to_otherwise = self.jump_unless(cond);
@@ -96,9 +114,40 @@ impl Compiler {
                 let head = self.loops.last().expect("`continue` is inside a loop").head;
                 self.emit(Instr::Jump { target: head }, None);
             }
-            ir::Stmt::Return => self.emit(Instr::Halt, None),
+            ir::Stmt::Return(Some(value)) => {
+                let src = self.operand(value);
+                self.emit(Instr::Return { src }, Some(value.span));
+            }
+            ir::Stmt::Return(None) => {
+                self.emit(if self.is_script { Instr::Halt } else { Instr::ReturnNone }, None);
+            }
         }
         self.next_temp = mark;
+    }
+
+    fn assign(&mut self, place: ir::Place, value: &ir::Expr) {
+        let span = Some(value.span);
+        match place {
+            ir::Place::Local(local) if !self.by_reference(local) => {
+                let dst = register(local);
+                if writes_destination_early(value) {
+                    // `x = y and x` must read the old `x` after `y` is computed.
+                    let temp = self.temp();
+                    self.expr_into(value, temp);
+                    self.emit(Instr::Move { dst, src: temp }, span);
+                } else {
+                    self.expr_into(value, dst);
+                }
+            }
+            ir::Place::Local(local) => {
+                let src = self.operand(value);
+                self.emit(Instr::StoreRef { reference: register(local), src }, span);
+            }
+            ir::Place::Global(global) => {
+                let src = self.operand(value);
+                self.emit(Instr::StoreGlobal { global: global.0, src }, span);
+            }
+        }
     }
 
     fn block(&mut self, stmts: &[ir::Stmt]) {
@@ -150,11 +199,39 @@ impl Compiler {
                 let index = self.text(text);
                 self.emit(Instr::LoadText { dst, index }, span);
             }
+            ExprKind::Local(local) if self.by_reference(*local) => {
+                self.emit(Instr::LoadRef { dst, reference: register(*local) }, span);
+            }
             ExprKind::Local(local) => {
                 let src = register(*local);
                 if src != dst {
                     self.emit(Instr::Move { dst, src }, span);
                 }
+            }
+            ExprKind::Global(global) => self.emit(Instr::LoadGlobal { dst, global: global.0 }, span),
+            ExprKind::Call { function, args } => {
+                // The arguments go to consecutive registers, evaluated left to right (§9.2).
+                let start = self.next_temp;
+                for _ in args {
+                    self.temp();
+                }
+                for (offset, arg) in args.iter().enumerate() {
+                    let at = start + offset as u32;
+                    match arg {
+                        ir::Arg::Value(value) => self.expr_into(value, at),
+                        ir::Arg::Reference(ir::Place::Local(local)) if self.by_reference(*local) => {
+                            self.emit(Instr::Move { dst: at, src: register(*local) }, span);
+                        }
+                        ir::Arg::Reference(ir::Place::Local(local)) => {
+                            self.emit(Instr::RefLocal { dst: at, src: register(*local) }, span);
+                        }
+                        ir::Arg::Reference(ir::Place::Global(global)) => {
+                            self.emit(Instr::RefGlobal { dst: at, global: global.0 }, span);
+                        }
+                    }
+                }
+                let count = args.len() as u32;
+                self.emit(Instr::Call { function: function.0, dst, args: start, count }, span);
             }
             ExprKind::Let { local, value, body } => {
                 self.expr_into(value, register(*local));
@@ -171,12 +248,12 @@ impl Compiler {
             }
             ExprKind::Binary { op: op @ (BinaryOp::EqNone | BinaryOp::NeNone), lhs, rhs } => {
                 // `none` equals `none`; the operands are still evaluated for their effects.
-                self.operand(lhs);
+                self.operand_before(lhs, rhs);
                 self.operand(rhs);
                 self.emit(Instr::LoadBool { dst, value: *op == BinaryOp::EqNone }, span);
             }
             ExprKind::Binary { op, lhs, rhs } => {
-                let a = self.operand(lhs);
+                let a = self.operand_before(lhs, rhs);
                 let b = self.operand(rhs);
                 self.emit(binary_instr(*op, dst, a, b), span);
             }
@@ -230,12 +307,30 @@ impl Compiler {
     /// A register holding the value of `expr`: the register of a local, or a new
     /// temporary, which stays reserved until the caller releases its temporaries.
     fn operand(&mut self, expr: &ir::Expr) -> Reg {
-        if let ExprKind::Local(local) = expr.kind {
+        if let ExprKind::Local(local) = expr.kind
+            && !self.by_reference(local)
+        {
             return register(local);
         }
         let temp = self.temp();
         self.expr_into(expr, temp);
         temp
+    }
+
+    /// Like [`Compiler::operand`], for an operand evaluated before `later`: if `later`
+    /// calls a function, which may change the variable, its current value is copied, so
+    /// that operands keep the values they had from left to right (§9.2).
+    fn operand_before(&mut self, expr: &ir::Expr, later: &ir::Expr) -> Reg {
+        if matches!(expr.kind, ExprKind::Local(_)) && calls_function(later) {
+            let temp = self.temp();
+            self.expr_into(expr, temp);
+            return temp;
+        }
+        self.operand(expr)
+    }
+
+    fn by_reference(&self, local: ir::LocalId) -> bool {
+        self.function.local(local).by_reference
     }
 
     fn temp(&mut self) -> Reg {
@@ -250,7 +345,7 @@ impl Compiler {
             return index;
         }
         let index = self.texts.len() as u32;
-        self.texts.push(Rc::from(text));
+        self.texts.push(Rc::new(text.to_string()));
         self.text_indices.insert(text.to_string(), index);
         index
     }
@@ -264,9 +359,10 @@ impl Compiler {
     fn patch(&mut self, at: usize) {
         let here = self.code.len() as u32;
         match &mut self.code[at] {
-            Instr::Jump { target } | Instr::JumpIfFalse { target, .. } | Instr::JumpIfTrue { target, .. } => {
-                *target = here;
-            }
+            Instr::Jump { target }
+            | Instr::JumpIfFalse { target, .. }
+            | Instr::JumpIfTrue { target, .. }
+            | Instr::JumpIfArgs { target, .. } => *target = here,
             other => unreachable!("not a jump: {other:?}"),
         }
     }
@@ -286,6 +382,31 @@ fn writes_destination_early(expr: &ir::Expr) -> bool {
             writes_destination_early(then) || writes_destination_early(otherwise)
         }
         _ => false,
+    }
+}
+
+/// Whether evaluating `expr` may call a function of the program.
+fn calls_function(expr: &ir::Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Call { .. } => true,
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Text(_)
+        | ExprKind::None
+        | ExprKind::Local(_)
+        | ExprKind::Global(_) => false,
+        ExprKind::Let { value, body, .. } => calls_function(value) || calls_function(body),
+        ExprKind::Unary { operand, .. } => calls_function(operand),
+        ExprKind::Convert { value, .. } => calls_function(value),
+        ExprKind::Binary { lhs, rhs, .. } | ExprKind::And { lhs, rhs } | ExprKind::Or { lhs, rhs } => {
+            calls_function(lhs) || calls_function(rhs)
+        }
+        ExprKind::If { cond, then, otherwise } => {
+            calls_function(cond) || calls_function(then) || calls_function(otherwise)
+        }
+        ExprKind::Concat(parts) => parts.iter().any(calls_function),
+        ExprKind::CallBuiltin { args, .. } => args.iter().any(calls_function),
     }
 }
 

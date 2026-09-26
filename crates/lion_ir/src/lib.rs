@@ -14,13 +14,45 @@ pub use types::Type;
 
 use lion_diagnostics::Span;
 
-/// A checked script: the top-level statements of the file that is run (§20.1).
+/// A checked program: its functions, one of which is the script itself.
 pub struct Program {
-    pub locals: Vec<Local>,
-    pub body: Vec<Stmt>,
+    pub functions: Vec<Function>,
+    /// The top-level statements of the file that is run (§20.1). The locals declared
+    /// at its top level are the globals, which other functions reach with `Global`.
+    pub main: FunctionId,
 }
 
 impl Program {
+    pub fn function(&self, id: FunctionId) -> &Function {
+        &self.functions[id.index()]
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FunctionId(pub u32);
+
+impl FunctionId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+pub struct Function {
+    pub name: String,
+    /// The first `params` locals are the parameters, in order.
+    pub params: u32,
+    /// The values of omitted arguments. A call that gives fewer than `index + 1`
+    /// arguments gives parameter `index` this value, evaluated at the call, in the
+    /// order of the parameters (§11.2).
+    pub defaults: Vec<(u32, Expr)>,
+    pub ret: Type,
+    pub locals: Vec<Local>,
+    pub body: Vec<Stmt>,
+    /// The name in the declaration; `None` for the script.
+    pub span: Option<Span>,
+}
+
+impl Function {
     pub fn local(&self, id: LocalId) -> &Local {
         &self.locals[id.index()]
     }
@@ -42,13 +74,23 @@ pub struct Local {
     /// Introduced by the compiler, for instance to evaluate an operand of a chained
     /// comparison only once.
     pub temporary: bool,
+    /// A `var` parameter: it designates the caller's variable (§11.2). Reading and
+    /// assigning it go through the reference.
+    pub by_reference: bool,
     pub span: Span,
 }
 
+/// Where an assignment stores its value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    Local(LocalId),
+    /// A top-level variable of the script, from another function.
+    Global(LocalId),
+}
+
 pub enum Stmt {
-    /// Stores a value in a local.
     Assign {
-        local: LocalId,
+        place: Place,
         value: Expr,
     },
     /// Evaluates an expression for its effects and discards its value.
@@ -67,8 +109,8 @@ pub enum Stmt {
     Break,
     /// Goes to the next turn of the innermost loop.
     Continue,
-    /// Ends the script (§20.1).
-    Return,
+    /// Leaves the function with its value (§11.4); in the script, ends the program (§20.1).
+    Return(Option<Expr>),
 }
 
 #[derive(Clone)]
@@ -86,6 +128,13 @@ pub enum ExprKind {
     Text(String),
     None,
     Local(LocalId),
+    /// A top-level variable of the script, read from another function (§11.5).
+    Global(LocalId),
+    /// Arguments are evaluated left to right (§9.2); omitted ones take their default.
+    Call {
+        function: FunctionId,
+        args: Vec<Arg>,
+    },
     /// Stores `value` in `local`, then evaluates to `body`.
     Let {
         local: LocalId,
@@ -128,6 +177,14 @@ pub enum ExprKind {
         builtin: Builtin,
         args: Vec<Expr>,
     },
+}
+
+/// An argument of a call.
+#[derive(Clone)]
+pub enum Arg {
+    Value(Expr),
+    /// For a `var` parameter: the variable itself (§11.2).
+    Reference(Place),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

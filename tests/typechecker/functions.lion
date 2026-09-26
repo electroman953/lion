@@ -1,0 +1,15 @@
+var total = 0
+fun add(var sum in Int, value in Int, times in Int = 1) modifies total:
+    sum += value * times
+    total += 1
+;
+fun average(a in Int, b in Int) = (a + b) / 2
+fun sign(x in Int):
+    if x < 0: return -1 ;
+    return 1.5
+;
+var mine = 1
+add(mine, 2)
+add(var mine, 3, 4)
+add(10, 1)
+show(average(mine, total) + sign(-2))

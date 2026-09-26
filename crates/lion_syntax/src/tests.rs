@@ -160,9 +160,9 @@ fn errors_recover_at_the_next_line() {
 
 #[test]
 fn recovery_skips_the_blocks_of_a_failed_statement() {
-    let text = "fun f(a: 1):\n    let inner = 1\n    if a: x = 1 ;\n;\nlet after = 2\n";
+    let text = "struct S(a: 1):\n    let inner = 1\n    if a: x = 1 ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
-    assert_eq!(errors, ["not implemented yet: functions"]);
+    assert_eq!(errors, ["not implemented yet: structures"]);
     assert_eq!(tree, "(let after 2)\n");
     let text = "struct S:\n    if a:\n        b = 1\n    elif c:\n        d = 2\n    else:\n        e = 3\n    ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
@@ -173,7 +173,6 @@ fn recovery_skips_the_blocks_of_a_failed_statement() {
 #[test]
 fn unsupported_constructions_are_reported() {
     let cases = [
-        ("fun f() = 1", "not implemented yet: functions"),
         (
             "for i in 1..3: show(i) ;",
             "not implemented yet: `for` loops, which need collections and intervals",
@@ -296,4 +295,50 @@ fn a_forgotten_semicolon_is_located_with_indentation() {
         parse_diagnostic("if a:\n    show(1)\n"),
         ("the `if` block is never closed".to_string(), vec![1])
     );
+}
+
+#[test]
+fn function_declarations() {
+    assert_eq!(
+        ast("fun area(width in Float, height in Float) in Float:\n    return width * height\n;"),
+        "(fun area ((width : Float) (height : Float)) in Float [(return (* width height))])"
+    );
+    assert_eq!(ast("fun square(x) = x * x"), "(fun square ((x)) = (* x x))");
+    assert_eq!(
+        ast("fun add_grade(var notes, n):\n    notes = n\n;"),
+        "(fun add_grade ((var notes) (n)) [(= notes n)])"
+    );
+    assert_eq!(
+        ast("fun f(a, c = 1, d in Int = 2): show(a) ;"),
+        "(fun f ((a) (c = 1) (d : Int = 2)) [(call show a)])"
+    );
+    assert_eq!(ast("fun reset() modifies total, count:\n;"), "(fun reset () (modifies total count) [])");
+    assert_eq!(
+        ast("fun biggest(a in T, b in T) in T, T in Comparable = if b > a then b else a"),
+        "(fun biggest ((a : T) (b : T)) in T (where T Comparable) = (if-expr (> b a) b else a))"
+    );
+    assert_eq!(
+        ast("fun Student.passes() in Bool = self.grade >= 10"),
+        "(fun Student.passes () in Bool = (>= (. self grade) 10))"
+    );
+    assert_eq!(
+        ast("fun Student.add_bonus(var self, n): show(n) ;"),
+        "(fun Student.add_bonus ((var self) (n)) [(call show n)])"
+    );
+    assert_eq!(
+        ast("infix fun Vector.dot(other in Vector) in Float = 0.0"),
+        "(infix-fun Vector.dot ((other : Vector)) in Float = 0.0)"
+    );
+}
+
+#[test]
+fn function_declaration_errors() {
+    assert_eq!(first_error("fun f"), "expected `(` and the parameters, found end of file");
+    assert_eq!(
+        first_error("fun f() show(1)"),
+        "expected `:` and the body of the function, or `=` and its value, found name `show`"
+    );
+    assert_eq!(first_error("fun f():\n    show(1)\n"), "the `fun` block is never closed");
+    assert_eq!(first_error("fun Area() = 1"), "`Area` cannot name a value");
+    assert_eq!(first_error("fun(x) = x"), "not implemented yet: anonymous functions");
 }

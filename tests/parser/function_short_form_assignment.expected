@@ -1,0 +1,12 @@
+exit: 1
+----- stdout
+----- stderr
+error: the short form of a function takes a value, not an assignment
+  --> tests/parser/function_short_form_assignment.lion:1:33
+   |
+ 1 | fun increment(var n in Int) = n += 1
+   |                                 ^^
+   |
+   = help: write the body as a block: `fun increment(...): ... ;` (§11.1)
+
+1 error found

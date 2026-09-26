@@ -1,16 +1,17 @@
 exit: 0
 ----- stdout
-locals
-  grade#0 let Int
-  %t#1 temp Int
-  a#2 let Bool
-  %t#3 temp Int
-  %t#4 temp Int
-  b#5 let Bool
-  c#6 let Bool
-body
-  grade#0 = 12
-  a#2 = (let %t#1 grade#0 (and (le_int 0 %t#1) (le_int %t#1 20)))
-  b#5 = (let %t#3 (add_int grade#0 1) (and (lt_int 0 %t#3) (let %t#4 (mul_int grade#0 2) (and (lt_int %t#3 %t#4) (lt_int %t#4 100)))))
-  c#6 = (and (lt_float (int_to_float 1) 2.5) (le_float 2.5 (int_to_float 3)))
+script
+  locals
+    grade#0 let Int
+    a#1 let Bool
+    b#2 let Bool
+    c#3 let Bool
+    %t#4 temp Int
+    %t#5 temp Int
+    %t#6 temp Int
+  body
+    grade#0 = 12
+    a#1 = (let %t#4 grade#0 (and (le_int 0 %t#4) (le_int %t#4 20)))
+    b#2 = (let %t#5 (add_int grade#0 1) (and (lt_int 0 %t#5) (let %t#6 (mul_int grade#0 2) (and (lt_int %t#5 %t#6) (lt_int %t#6 100)))))
+    c#3 = (and (lt_float (int_to_float 1) 2.5) (le_float 2.5 (int_to_float 3)))
 ----- stderr

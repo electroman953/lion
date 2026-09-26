@@ -1,0 +1,15 @@
+fun area(width in Float, height in Float) in Float = width * height
+fun bump(var n in Int): n += 1 ;
+area(1)
+area()
+area(1, 2, 3)
+area(heigth: 1, width: 2)
+area(var 1, 2)
+let fixed = 1
+bump(fixed)
+var ratio = 1.5
+bump(ratio)
+var unset in Int
+bump(unset)
+area("1", 2)
+let v = area

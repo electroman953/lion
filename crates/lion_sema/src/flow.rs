@@ -75,14 +75,14 @@ impl Flow {
     }
 }
 
-impl Checker {
+impl Checker<'_> {
     /// Reports a read of `local` where it may have no value.
     pub(crate) fn check_has_value(&mut self, local: ir::LocalId, span: Span) -> bool {
-        let state = self.flow.get(local);
+        let state = self.ctx.flow.get(local);
         if state == Assigned::Yes {
             return true;
         }
-        let info = &self.locals[local.index()];
+        let info = &self.ctx.locals[local.index()];
         let name = &info.name;
         let error = if state == Assigned::No {
             Diagnostic::error(format!("`{name}` is used before it has a value"))
@@ -104,7 +104,7 @@ impl Checker {
     /// A constant changes at most once: a `let` with a value never, a `let` without a
     /// value exactly once on every path (§6.1).
     pub(crate) fn check_assignable(&mut self, local: ir::LocalId, span: Span) -> bool {
-        let info = &self.locals[local.index()];
+        let info = &self.ctx.locals[local.index()];
         if info.mutable {
             return true;
         }
@@ -118,10 +118,10 @@ impl Checker {
             );
             return false;
         }
-        let mut error = match self.flow.get(local) {
+        let mut error = match self.ctx.flow.get(local) {
             Assigned::No => return true,
             // Also the vacuous state of unreachable code.
-            Assigned::Yes if !self.flow.is_reachable() => return true,
+            Assigned::Yes if !self.ctx.flow.is_reachable() => return true,
             Assigned::Yes => Diagnostic::error(format!("the constant `{name}` already has a value"))
                 .with_primary(span, "second assignment"),
             Assigned::Maybe => Diagnostic::error(format!("the constant `{name}` may already have a value"))
@@ -140,15 +140,15 @@ impl Checker {
     /// At the end of a block: each `let` declared in it without a value must have
     /// received one on every path (§6.1).
     pub(crate) fn check_constants_assigned(&mut self, declared: &[ir::LocalId]) {
-        if !self.flow.is_reachable() {
+        if !self.ctx.flow.is_reachable() {
             return;
         }
         for &local in declared {
-            let info = &self.locals[local.index()];
+            let info = &self.ctx.locals[local.index()];
             if info.mutable || info.initialized || info.temporary || info.ty.is_none() {
                 continue;
             }
-            let message = match (self.flow.get(local), info.first_assignment) {
+            let message = match (self.ctx.flow.get(local), info.first_assignment) {
                 (Assigned::Yes, _) => continue,
                 (Assigned::No, None) => format!("the constant `{}` never receives a value", info.name),
                 _ => format!("the constant `{}` does not receive a value on every path", info.name),

@@ -1,0 +1,5 @@
+fun countdown(n in Int) in Int:
+    if n == 0: return 0 ;
+    return countdown(n + 1)
+;
+show(countdown(5))

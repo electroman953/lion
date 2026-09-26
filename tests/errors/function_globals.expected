@@ -1,0 +1,83 @@
+exit: 1
+----- stdout
+----- stderr
+error: `half` may read `total`, which may have no value at this call
+  --> tests/errors/function_globals.lion:2:6
+   |
+ 2 | show(half())
+   |      ^^^^^^
+ 3 | var total = 10
+   |     ----- declared here
+   |
+   = a function may read a variable declared further down, but only once it has a value (§6.1, §6.5)
+
+error: `reset` modifies `total` without saying so
+  --> tests/errors/function_globals.lion:5:5
+   |
+ 4 | fun reset():
+   |     ----- add `modifies total` to this declaration
+ 5 |     total = 0
+   |     ^^^^^
+   |
+   = a function announces the variables of the script it changes (§11.5)
+
+error: `limit` is a constant
+  --> tests/errors/function_globals.lion:8:22
+   |
+ 7 | let limit = 5
+   |     ----- declared with `let`
+ 8 | fun raise() modifies limit:
+   |                      ^^^^^
+   |
+   = help: declare it with `var` for a function to change it
+
+error: cannot assign to the constant `limit`
+  --> tests/errors/function_globals.lion:9:5
+   |
+ 7 | let limit = 5
+   |     ----- declared with `let`
+  ...
+ 9 |     limit = 6
+   |     ^^^^^
+
+error: `nothing` is not a variable of the script
+   --> tests/errors/function_globals.lion:11:22
+    |
+ 11 | fun wrong() modifies nothing:
+    |                      ^^^^^^^
+    |
+    = `modifies` names the variables of the script that a function changes (§11.5)
+
+error: the constant `later` receives its value in the script, not in a function
+   --> tests/errors/function_globals.lion:15:5
+    |
+ 13 | let later in Int
+    |     ----- declared here without a value
+   ...
+ 15 |     later = 1
+    |     ^^^^^
+
+error: `twice` is declared several times at the top level of the script
+   --> tests/errors/function_globals.lion:20:21
+    |
+ 18 | var twice = 1
+    |     ----- first declaration
+   ...
+ 20 | fun reads_twice() = twice
+    |                     ^^^^^ a function cannot tell which declaration this is
+    |
+    = help: give the top-level declarations different names
+
+error: `rate` is used before the script declares it
+   --> tests/errors/function_globals.lion:21:15
+    |
+ 21 | fun early() = rate
+    |               ^^^^ used here
+ 22 | show(early())
+    |      ----- the function is called here, before that declaration
+ 23 | let rate = 3
+    |     ---- declared here
+    |
+    = a function may use a variable declared further down, but it can only be called once the variable has a value (§6.1, §6.5)
+
+8 errors found

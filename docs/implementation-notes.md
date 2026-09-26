@@ -24,7 +24,7 @@ Détail technique choisi dans le cadre de l'affichage des Float : la notation ex
 | R3 | Ordre sur Text (`"a" < "b"`) | Erreur de compilation | §9 ne définit pas d'ordre sur Text. Pour Bool, le refus découle de la spec : `Bool = {true, false}` est une énumération sans ordre (§13.1) |
 | R4 | `div` et `mod` sur des Float (`7.5 div 2`) | Erreur de compilation | §8.1 les définit pour Int |
 | R5 | `as` hors du tableau de conversions (`true as Int`, `true as Text`) | Erreur de compilation. `show` et l'interpolation acceptent toutes les valeurs | §8.5 |
-| R6 | Déclarer un nom de la bibliothèque standard (`let show = 1`, `var sum = 0`) | Erreur de compilation | §6.5 ne dit pas si la bibliothèque standard forme une portée extérieure. **À trancher bientôt** : `sum` est un nom de variable courant |
+| ~~R6~~ | ~~Déclarer un nom de la bibliothèque standard~~ | **Levé** par C2 : c'est désormais permis | — |
 | R7 | `show` avec 0 ou plusieurs arguments, ou un argument nommé | Erreur de compilation | Les noms des paramètres de la bibliothèque standard ne sont pas spécifiés (annexe B.2) |
 | R8 | Un texte littéral qui continue sur la ligne suivante | Erreur « unterminated text » ; il faut écrire `\n` | §4.5 donne l'échappement `\n` sans parler des retours à la ligne bruts |
 | R9 | Un `}` non échappé dans un texte (`"a}b"`) | Erreur, avec la suggestion `\}` | §4.5 prévoit `\}` sans dire si le `}` seul est permis |
@@ -55,13 +55,39 @@ La spec me paraît claire sur ces points, mais ils méritent un coup d'œil.
 | I14 | Code inatteignable (après `return`, `break`, `continue`) | Accepté sans avertissement : la spec n'en parle pas. Il est vérifié (noms, types), mais sans erreur d'affectation définie, car aucun chemin n'y mène |
 | I15 | Affectations dans une boucle | Au début de chaque tour, une variable affectée n'importe où dans le corps est considérée comme « peut-être affectée ». Conséquence : un `let` sans valeur ne peut pas être affecté dans une boucle, même suivi de `break`. Java applique la même règle ; elle est prudente et pourra être affinée |
 
-## 4. Points de la spec à trancher plus tard (non bloquants aujourd'hui)
+## 4. Choix délégués pendant l'implémentation (C*)
 
-- **O1. Globales lues par une fonction avant leur initialisation.** §6.1 exige de détecter à la compilation toute lecture avant affectation. Mais §6.5 permet à une fonction de lire une globale déclarée plus bas, et rien n'empêche d'appeler cette fonction avant la déclaration. Il faudra soit une analyse entre fonctions, soit une règle. Le point deviendra concret avec les fonctions.
+Le 2026-09-26, l'auteur a délégué toutes les décisions « jusqu'à la fin du programme ». Chaque choix est pris selon la boussole du §2 et reste annulable d'un mot, comme les [Dn] de la spec.
+
+| # | Choix | § |
+| --- | --- | --- |
+| C1 | Un paramètre sans type rend la fonction générique : elle est spécialisée pour les types de chaque appel, comme le prévoit le §15.3 pour les génériques. Implémentation prévue au sous-slice 3b ; en attendant, ces paramètres sont signalés « not implemented » | 11.1, 15 |
+| C2 | Une déclaration peut masquer une fonction standard (`var sum = 0`, `fun show(...)`). La bibliothèque standard n'est pas un bloc du programme, donc le §6.5 ne s'applique pas. Appeler une variable qui masque une fonction standard donne un message qui le signale | 6.5, 23 |
+| C3 | Un appel fait depuis le script exige que toutes les globales que la fonction peut lire, directement ou via les fonctions qu'elle appelle, aient une valeur à ce point. C'est le même calcul transitif que les effets du §11.5 | 6.1, 11.5 |
+| C4 | Les fonctions de premier niveau sont hissées : on peut les appeler avant leur déclaration. Leurs noms sont uniques (pas de surcharge) et distincts des noms de variables du script | 11 |
+| C5 | Une fonction ne peut pas désigner une globale déclarée plusieurs fois au premier niveau (§6.3), car elle ne saurait pas laquelle | 6.3, 11.5 |
+| C6 | Les paramètres appartiennent au bloc le plus extérieur du corps : `let x = ...` pour un paramètre `x` le redéclare (§6.3) et ce n'est pas un masquage | 6.3, 6.5 |
+| C7 | Donner une globale à un paramètre `var` compte comme une modification directe : la fonction doit l'annoncer avec `modifies` | 11.2, 11.5 |
+| C8 | L'argument d'un paramètre `var` doit avoir une valeur | 6.1, 11.2 |
+| C9 | Un `let` global sans valeur reçoit sa valeur dans le script, pas dans une fonction | 6.1 |
+| C10 | Une valeur par défaut est vérifiée dans une portée qui contient les globales et les paramètres précédents ; elle est évaluée à chaque appel qui omet l'argument. Un paramètre `var` n'a pas de valeur par défaut | 11.2 |
+| C11 | Une fonction récursive dont le type de retour n'est pas écrit est refusée, avec l'aide « write the return type » | 11.4 |
+| C12 | Un type de retour non écrit est inféré des `return` (ou de l'expression de la forme courte). Int et Float donnent Float ; aucune valeur donne None ; d'autres mélanges attendent les unions | 11.4 |
+| C13 | Au plus 100 000 appels en cours ; au-delà, c'est un bug « too many nested calls ». La même limite vaut dans les deux modes | 18, 22.2 |
+| C14 | Un argument nommé doit porter le nom du paramètre à sa position | 11.2 |
+| C15 | Assigner une globale depuis une fonction sans `modifies` est une erreur. `modifies` ne peut nommer qu'une variable `var` du script. Nommer une variable jamais modifiée est accepté sans remarque | 11.5 |
+| C16 | Pour l'affectation définie du script, une globale affectée par une fonction appelée ne compte pas comme affectée. C'est prudent ; on déclare la globale avec sa valeur | 6.1 |
+| C17 | Quand un appel oblige à vérifier un corps de fonction avant que le script ait atteint la déclaration d'une globale que ce corps utilise, c'est une erreur. Elle désigne l'appel, qui serait de toute façon refusé par C3 | 6.1, 6.5 |
+| C18 | `f()` sans argument alors que `f` a des paramètres obligatoires est une erreur. Un appel avec une partie des arguments est une curryfication (§11.3), « not implemented » jusqu'au sous-slice 3c | 11.3 |
+| C19 | Les diagnostics sont présentés dans l'ordre du fichier, même si les corps de fonction sont vérifiés dans un autre ordre | 24.3 |
+
+## 5. Points de la spec à trancher plus tard (non bloquants aujourd'hui)
+
+- ~~**O1. Globales lues par une fonction avant leur initialisation.**~~ Tranché par C3 et C17.
 - **O2. `x in List of Int` hors d'un `match`.** La règle `comparison` de §26 n'accepte qu'une `as_expr` à droite de `in`, donc pas un type avec `of`, alors que les motifs de `match` l'acceptent. Le point deviendra concret avec les unions.
 - **O3. Mode interactif.** La spec l'ouvre avec `lion` seul (§24) ; la demande d'implémentation mentionnait `lion repl`. L'implémentation suivra la spec.
 
-## 5. Choix techniques (sans effet sur la sémantique)
+## 6. Choix techniques (sans effet sur la sémantique)
 
 - **Architecture.** Une chaîne de crates, chacune avec un rôle unique :
   - `lion_diagnostics` : sources, positions, diagnostics et leur rendu ;
@@ -84,3 +110,13 @@ La spec me paraît claire sur ces points, mais ils méritent un coup d'œil.
   - sinon, il désigne la première ligne moins indentée que l'ouverture du bloc.
 - **Affectation définie.** Elle est calculée pendant la vérification des types, dans un état de flux fusionné aux points de rencontre (`flow.rs`). Ce même mécanisme servira à l'affinage des unions (§7.4), qui dépend de `return`, `break` et `continue`.
 - **Contrôle de flux dans l'IR.** Les chaînes `elif` sont imbriquées dans la branche `else`, et `break` ou `continue` visent la boucle la plus intérieure. `return` au niveau du script devient l'arrêt de la machine virtuelle.
+- **Fonctions dans l'IR et la machine virtuelle.** Le programme est une liste de fonctions, dont le script. Les globales sont les registres du cadre du script, au bas de la pile ; les autres fonctions les lisent avec `LoadGlobal` et les écrivent avec `StoreGlobal`. Un paramètre `var` reçoit une référence vers un registre, celui d'un appelant ou d'une globale : elle pointe toujours vers le bas de la pile, donc elle reste valide. Les valeurs par défaut forment un prologue qui teste le nombre d'arguments reçus.
+- **Ordre d'évaluation.** Dans `total + bump()`, si `bump` modifie `total`, l'opérande de gauche est d'abord copié, pour garder l'ordre de gauche à droite (§9.2).
+- **Traces de bug.** Un bug dans une fonction affiche les appels en cours (au plus trois lieux distincts), pour qu'on voie d'où vient l'appel fautif.
+- **Erreurs internes de la VM.** Une valeur du mauvais type dans un registre est un défaut de l'implémentation : la VM panique et la commande `lion` l'annonce comme « internal compiler error ».
+- **Performance de la VM** (mesurée le 2026-09-26 face à CPython 3.13) :
+  - une boucle de 10 millions de tours prend 0,19 s contre 0,80 s, soit environ 4 fois plus vite ;
+  - `fib(32)` récursif prend 0,25 s contre 0,15 s, soit environ 1,7 fois plus lent.
+
+  Le chemin d'appel et la représentation des valeurs, un `enum` de 16 octets avec comptage de références, sont à optimiser dans une passe dédiée : registres spécialisés par type, opérandes immédiats, cadres plus légers.
+

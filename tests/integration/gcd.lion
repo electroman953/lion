@@ -1,0 +1,14 @@
+// Greatest common divisor, least common multiple, and a fraction in lowest terms.
+fun gcd(a in Int, b in Int) in Int = if b == 0 then a else gcd(b, a mod b)
+fun lcm(a in Int, b in Int) = a div gcd(a, b) * b
+fun simplify(var numerator in Int, var denominator in Int):
+    let g = gcd(numerator, denominator)
+    numerator = numerator div g
+    denominator = denominator div g
+;
+show(gcd(1071, 462))
+show(lcm(4, 6))
+var top = 84
+var bottom = 36
+simplify(top, bottom)
+show("84/36 = {top}/{bottom}")

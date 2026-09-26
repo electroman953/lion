@@ -46,6 +46,42 @@ pub enum StmtKind {
     Continue,
     /// `return`, with an optional value (§11.4, §20.1).
     Return(Option<Expr>),
+    /// `fun name(params) in T modifies x: ... ;` or `fun name(params) = expr` (§11.1).
+    Fun(FunDecl),
+}
+
+#[derive(Clone, Debug)]
+pub struct FunDecl {
+    /// `infix fun` (§9.5).
+    pub infix: bool,
+    /// The type of `self` in `fun Student.passes()` (§12.4).
+    pub receiver: Option<Ident>,
+    pub name: Ident,
+    pub params: Vec<Param>,
+    /// The type after `in`, if written.
+    pub ret: Option<TypeExpr>,
+    /// Type variables: `T in Comparable` (§15.2).
+    pub type_params: Vec<(Ident, TypeExpr)>,
+    /// The outer variables the function modifies directly (§11.5).
+    pub modifies: Vec<Ident>,
+    pub body: FunBody,
+}
+
+#[derive(Clone, Debug)]
+pub struct Param {
+    /// `var x`: the parameter works on the caller's variable (§11.2).
+    pub var: Option<Span>,
+    /// `self` is written as a name.
+    pub name: Ident,
+    pub ty: Option<TypeExpr>,
+    pub default: Option<Expr>,
+}
+
+#[derive(Clone, Debug)]
+pub enum FunBody {
+    Block(Block),
+    /// The short form `= expr` (§11.1, D7).
+    Expr(Expr),
 }
 
 /// One `if` or `elif` branch of an `if` statement.

@@ -1,25 +1,26 @@
 exit: 0
 ----- stdout
-locals
-  a#0 let Float
-  b#1 let Float
-  c#2 let Float
-  d#3 let Float
-  e#4 let Int
-  f#5 let Float
-  g#6 let Int
-  h#7 let Text
-  i#8 var Float
-body
-  a#0 = (int_to_float 5)
-  b#1 = (int_to_float 5)
-  c#2 = (add_float (int_to_float 1) 2.5)
-  d#3 = (div_float (int_to_float 7) (int_to_float 2))
-  e#4 = (div_int 7 2)
-  f#5 = (pow_float (int_to_float 2) 0.5)
-  g#6 = (float_to_int 3.7)
-  h#7 = (to_text 12)
-  i#8 = 1.5
-  i#8 = (int_to_float 2)
-  i#8 = (add_float i#8 (int_to_float 1))
+script
+  locals
+    a#0 let Float
+    b#1 let Float
+    c#2 let Float
+    d#3 let Float
+    e#4 let Int
+    f#5 let Float
+    g#6 let Int
+    h#7 let Text
+    i#8 var Float
+  body
+    a#0 = (int_to_float 5)
+    b#1 = (int_to_float 5)
+    c#2 = (add_float (int_to_float 1) 2.5)
+    d#3 = (div_float (int_to_float 7) (int_to_float 2))
+    e#4 = (div_int 7 2)
+    f#5 = (pow_float (int_to_float 2) 0.5)
+    g#6 = (float_to_int 3.7)
+    h#7 = (to_text 12)
+    i#8 = 1.5
+    i#8 = (int_to_float 2)
+    i#8 = (add_float i#8 (int_to_float 1))
 ----- stderr

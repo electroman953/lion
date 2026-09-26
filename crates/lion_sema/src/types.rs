@@ -28,7 +28,7 @@ const PLANNED: &[(&str, &str, &str)] = &[
     ("Type", "the type `Type`", "§15"),
 ];
 
-impl Checker {
+impl Checker<'_> {
     /// The type written, or `None` after reporting why it cannot be used.
     pub(crate) fn resolve_type(&mut self, ty: &ast::TypeExpr) -> Option<Type> {
         let (what, section) = match &ty.kind {

@@ -48,7 +48,12 @@ pub enum BugKind {
     NegativeExponent { base: i64, exponent: i64 },
     /// `x as Int` where `x` is NaN, infinite or outside the Int range (§8.5, D74).
     InvalidFloatToInt { value: f64 },
+    /// More than [`MAX_CALL_DEPTH`] calls in progress: usually a recursion that never ends.
+    StackOverflow,
 }
+
+/// The number of calls that may be in progress at once, the same in both modes (C13).
+pub const MAX_CALL_DEPTH: usize = 100_000;
 
 impl BugKind {
     /// One-line description, used as the title of the bug report.
@@ -58,6 +63,7 @@ impl BugKind {
             BugKind::DivisionByZero { .. } => "integer division by zero".to_string(),
             BugKind::NegativeExponent { .. } => "negative exponent in an Int power".to_string(),
             BugKind::InvalidFloatToInt { .. } => "cannot convert this Float to an Int".to_string(),
+            BugKind::StackOverflow => "too many nested calls".to_string(),
         }
     }
 
@@ -82,6 +88,7 @@ impl BugKind {
             BugKind::InvalidFloatToInt { value } => {
                 format!("{} has no Int value", format_float(value))
             }
+            BugKind::StackOverflow => format!("more than {MAX_CALL_DEPTH} calls are in progress"),
         }
     }
 
@@ -99,6 +106,9 @@ impl BugKind {
             }
             BugKind::InvalidFloatToInt { .. } => {
                 "check the value before converting it with `as Int`".to_string()
+            }
+            BugKind::StackOverflow => {
+                "check that the recursion reaches a case that does not call again".to_string()
             }
         }
     }

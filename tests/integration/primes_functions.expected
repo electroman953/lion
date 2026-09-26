@@ -1,0 +1,5 @@
+exit: 0
+----- stdout
+168 nombres premiers jusqu'à 1000
+35 couples de premiers jumeaux
+----- stderr

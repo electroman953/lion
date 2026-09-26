@@ -41,6 +41,7 @@ impl Builder {
             ty,
             mutable: true,
             temporary: false,
+            by_reference: false,
             span: self.span,
         });
         ir::LocalId(self.locals.len() as u32 - 1)
@@ -57,7 +58,16 @@ impl Builder {
     }
 
     fn run(self, body: Vec<ir::Stmt>) -> (String, Vec<AlertKind>, Result<(), Trap>) {
-        let program = ir::Program { locals: self.locals, body };
+        let script = ir::Function {
+            name: "script".to_string(),
+            params: 0,
+            defaults: Vec::new(),
+            ret: Type::None,
+            locals: self.locals,
+            body,
+            span: None,
+        };
+        let program = ir::Program { functions: vec![script], main: ir::FunctionId(0) };
         let chunk = compile(&program);
         let mut out = Vec::new();
         let mut alerts = Vec::new();
@@ -72,8 +82,8 @@ fn adds_and_shows() {
     let x = b.local("x", Type::Int);
     let y = b.local("y", Type::Int);
     let body = vec![
-        ir::Stmt::Assign { local: x, value: b.int(10) },
-        ir::Stmt::Assign { local: y, value: b.int(20) },
+        ir::Stmt::Assign { place: ir::Place::Local(x), value: b.int(10) },
+        ir::Stmt::Assign { place: ir::Place::Local(y), value: b.int(20) },
         b.show(b.binary(BinaryOp::AddInt, b.read(x), b.read(y), Type::Int)),
     ];
     let (out, alerts, result) = b.run(body);
@@ -136,8 +146,8 @@ fn and_or_short_circuit_and_assignment_reads_old_value() {
         Type::Bool,
     );
     let body = vec![
-        ir::Stmt::Assign { local: x, value: b.expr(ExprKind::Bool(false), Type::Bool) },
-        ir::Stmt::Assign { local: x, value },
+        ir::Stmt::Assign { place: ir::Place::Local(x), value: b.expr(ExprKind::Bool(false), Type::Bool) },
+        ir::Stmt::Assign { place: ir::Place::Local(x), value },
         b.show(b.read(x)),
     ];
     let (out, _, result) = b.run(body);

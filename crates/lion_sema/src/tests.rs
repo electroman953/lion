@@ -23,7 +23,8 @@ fn check_text(text: &str) -> Result<String, Vec<String>> {
 fn body(text: &str) -> String {
     let ir = check_text(text).unwrap_or_else(|errors| panic!("errors in {text:?}: {errors:?}"));
     let body = ir.split("body\n").nth(1).expect("a body section");
-    body.lines().map(str::trim).collect::<Vec<_>>().join("\n")
+    // The body of the script ends where the first function starts.
+    body.lines().take_while(|line| line.starts_with(' ')).map(str::trim).collect::<Vec<_>>().join("\n")
 }
 
 fn errors(text: &str) -> Vec<String> {
@@ -77,16 +78,16 @@ fn chained_comparisons_evaluate_each_operand_once() {
     // Literals are read twice; other operands go through a temporary.
     assert_eq!(
         body("let g = 12\nlet ok = 0 <= g <= 20").lines().nth(1).unwrap(),
-        "ok#2 = (let %t#1 g#0 (and (le_int 0 %t#1) (le_int %t#1 20)))"
+        "ok#1 = (let %t#2 g#0 (and (le_int 0 %t#2) (le_int %t#2 20)))"
     );
     assert_eq!(
         body("let a = 1\nlet ok = a < 2 < 3.5").lines().nth(1).unwrap(),
-        "ok#2 = (let %t#1 a#0 (and (lt_int %t#1 2) (lt_float (int_to_float 2) 3.5)))"
+        "ok#1 = (let %t#2 a#0 (and (lt_int %t#2 2) (lt_float (int_to_float 2) 3.5)))"
     );
     assert_eq!(
         body("let a = 1\nlet ok = 0 < a + 1 < a * 2 < 10").lines().nth(1).unwrap(),
-        "ok#3 = (let %t#1 (add_int a#0 1) (and (lt_int 0 %t#1) \
-         (let %t#2 (mul_int a#0 2) (and (lt_int %t#1 %t#2) (lt_int %t#2 10)))))"
+        "ok#1 = (let %t#2 (add_int a#0 1) (and (lt_int 0 %t#2) \
+         (let %t#3 (mul_int a#0 2) (and (lt_int %t#2 %t#3) (lt_int %t#3 10)))))"
     );
 }
 
@@ -117,7 +118,6 @@ fn constructions_not_defined_by_the_spec_are_refused() {
     assert_eq!(errors("let b = 1 == \"1\""), ["cannot compare an Int with a Text"]);
     assert_eq!(errors("let b = \"a\" < \"b\""), ["`<` is not defined for Text values"]);
     assert_eq!(errors("let q = 7.5 div 2"), ["`div` is defined only for Int values"]);
-    assert_eq!(errors("let show = 1"), ["`show` is the name of a standard function"]);
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn names_and_values() {
     assert_eq!(errors("let e in Text\ne = \"a\"\ne = \"b\""), ["the constant `e` already has a value"]);
     assert_eq!(
         errors("let e in Text\nshow(e)"),
-        ["`e` is used before it has a value", "the constant `e` never receives a value",]
+        ["the constant `e` never receives a value", "`e` is used before it has a value"]
     );
     assert_eq!(errors("var n in Int\nn += 1"), ["`n` is used before it has a value"]);
     assert_eq!(errors("let x = 1\nx(2)"), ["`x` is not a function"]);
@@ -211,4 +211,12 @@ fn if_expressions() {
     assert_eq!(body("let s = if true then 1 elif false then 2 else 3"), "s#0 = (if true 1 (if false 2 3))");
     assert_eq!(body("let s = if true then 1 else 2.5"), "s#0 = (if true (int_to_float 1) 2.5)");
     assert_eq!(errors("let s = if 1 then 1 else 2"), ["the condition of `if` must be a Bool"]);
+}
+
+#[test]
+fn declarations_may_hide_standard_functions() {
+    // C2: the standard library is not a block of the program.
+    assert!(check_text("var sum = 0\nsum += 1\nshow(sum)").is_ok());
+    assert_eq!(errors("let show = 1\nshow(show)"), ["`show` is not a function"]);
+    assert_eq!(body("fun show(x in Int) = x + 1\nlet y = show(1)"), "y#0 = (call show 1)");
 }

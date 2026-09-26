@@ -1,0 +1,4 @@
+fun ratio(a in Int, b in Int) in Int = a div b
+fun average_ratio(values in Int, count in Int) in Int = ratio(values, count)
+show(average_ratio(10, 2))
+show(average_ratio(10, 0))

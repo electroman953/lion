@@ -61,22 +61,55 @@ pub enum Instr {
     JumpIfFalse { cond: Reg, target: u32 },
     JumpIfTrue { cond: Reg, target: u32 },
 
+    /// Calls a function with the `count` values of registers `args ..`; its result goes
+    /// to `dst`.
+    Call { function: u32, dst: Reg, args: Reg, count: u32 },
+    Return { src: Reg },
+    ReturnNone,
+    /// Jumps when the call gave at least `count` arguments (default values, §11.2).
+    JumpIfArgs { count: u32, target: u32 },
+    /// Globals are the registers of the script's frame, at the bottom of the stack.
+    LoadGlobal { dst: Reg, global: u32 },
+    StoreGlobal { global: u32, src: Reg },
+    /// References, for `var` parameters (§11.2).
+    RefLocal { dst: Reg, src: Reg },
+    RefGlobal { dst: Reg, global: u32 },
+    LoadRef { dst: Reg, reference: Reg },
+    StoreRef { reference: Reg, src: Reg },
+
     Show { src: Reg },
     Halt,
 }
 
-/// Compiled code for one frame.
+/// A compiled program: one chunk per function.
+pub struct Program {
+    pub functions: Vec<Chunk>,
+    /// The script, which runs first.
+    pub main: usize,
+}
+
+/// Compiled code for one function.
 pub struct Chunk {
+    pub name: String,
     pub code: Vec<Instr>,
     /// The source span of each instruction, for bug and alert reports.
     pub spans: Vec<Option<Span>>,
-    pub texts: Vec<Rc<str>>,
+    pub texts: Vec<Rc<String>>,
     /// The number of registers the frame needs.
     pub registers: u32,
 }
 
 /// A readable listing, for `lion debug bytecode`.
-pub fn disassemble(chunk: &Chunk) -> String {
+pub fn disassemble(program: &Program) -> String {
+    let mut out = String::new();
+    for (index, chunk) in program.functions.iter().enumerate() {
+        out.push_str(&format!("function {index} {}\n", chunk.name));
+        out.push_str(&disassemble_chunk(chunk));
+    }
+    out
+}
+
+fn disassemble_chunk(chunk: &Chunk) -> String {
     let mut out = format!("registers {}\n", chunk.registers);
     if !chunk.texts.is_empty() {
         out.push_str("texts\n");

@@ -50,7 +50,46 @@ pub fn print_stmt(stmt: &Stmt) -> String {
         StmtKind::Continue => "continue".to_string(),
         StmtKind::Return(None) => "(return)".to_string(),
         StmtKind::Return(Some(value)) => format!("(return {})", print_expr(value)),
+        StmtKind::Fun(decl) => print_fun(decl),
     }
+}
+
+fn print_fun(decl: &FunDecl) -> String {
+    let mut out = String::from(if decl.infix { "(infix-fun " } else { "(fun " });
+    if let Some(receiver) = &decl.receiver {
+        out.push_str(&format!("{}.", receiver.name));
+    }
+    out.push_str(&decl.name.name);
+    let params: Vec<String> = decl
+        .params
+        .iter()
+        .map(|param| {
+            let mut out = format!("({}{}", if param.var.is_some() { "var " } else { "" }, param.name.name);
+            if let Some(ty) = &param.ty {
+                out.push_str(&format!(" : {}", print_type(ty)));
+            }
+            if let Some(default) = &param.default {
+                out.push_str(&format!(" = {}", print_expr(default)));
+            }
+            out + ")"
+        })
+        .collect();
+    out.push_str(&format!(" ({})", params.join(" ")));
+    if let Some(ret) = &decl.ret {
+        out.push_str(&format!(" in {}", print_type(ret)));
+    }
+    for (name, set) in &decl.type_params {
+        out.push_str(&format!(" (where {} {})", name.name, print_type(set)));
+    }
+    if !decl.modifies.is_empty() {
+        let names: Vec<&str> = decl.modifies.iter().map(|name| name.name.as_str()).collect();
+        out.push_str(&format!(" (modifies {})", names.join(" ")));
+    }
+    match &decl.body {
+        FunBody::Block(block) => out.push_str(&format!(" {}", print_block(block))),
+        FunBody::Expr(expr) => out.push_str(&format!(" = {}", print_expr(expr))),
+    }
+    out + ")"
 }
 
 fn print_block(block: &Block) -> String {

@@ -10,7 +10,9 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
-    Text(Rc<str>),
+    Text(Rc<String>),
+    /// A reference to a register of the stack, held by a `var` parameter (§11.2).
+    Ref(u32),
 }
 
 impl Value {
@@ -22,6 +24,7 @@ impl Value {
             Value::Int(value) => value.to_string(),
             Value::Float(value) => format_float(*value),
             Value::Text(text) => text.to_string(),
+            Value::Ref(_) => "<reference>".to_string(),
         }
     }
 
@@ -32,6 +35,7 @@ impl Value {
             Value::Int(_) => "Int",
             Value::Float(_) => "Float",
             Value::Text(_) => "Text",
+            Value::Ref(_) => "reference",
         }
     }
 }

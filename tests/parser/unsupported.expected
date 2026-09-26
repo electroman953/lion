@@ -1,15 +1,8 @@
 exit: 1
 ----- stdout
+(fun square ((x)) = (* x x))
 (let ok 1)
 ----- stderr
-error: not implemented yet: functions
-  --> tests/parser/unsupported.lion:1:1
-   |
- 1 | fun square(x) = x * x
-   | ^^^
-   |
-   = this part of Lion (spec §11) is not supported by this version of the implementation
-
 error: not implemented yet: `for` loops, which need collections and intervals
   --> tests/parser/unsupported.lion:2:1
    |
@@ -66,4 +59,4 @@ error: not implemented yet: `try`
    |
    = this part of Lion (spec §18.3) is not supported by this version of the implementation
 
-8 errors found
+7 errors found
