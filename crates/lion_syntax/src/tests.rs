@@ -176,7 +176,6 @@ fn unsupported_constructions_are_reported() {
         ("parallel for f in files: show(f) ;", "not implemented yet: parallelism"),
         ("struct S:\n;", "not implemented yet: structures"),
         ("Color = {red, green}", "not implemented yet: type definitions (enumerations and named unions)"),
-        ("let l = [1, 2]", "not implemented yet: lists"),
         ("let s = {1, 2}", "not implemented yet: sets and comprehensions"),
         ("let t = (1, 2)", "not implemented yet: tuples"),
         ("let v = try f()", "not implemented yet: `try`"),
@@ -353,4 +352,18 @@ fn for_loops() {
         "expected `in` and the values to go through, found a number"
     );
     assert_eq!(first_error("for i in 1..3:\n    show(i)\n"), "the `for` block is never closed");
+}
+
+#[test]
+fn lists() {
+    assert_eq!(ast("let l = [1, 2, 3]"), "(let l (list 1 2 3))");
+    assert_eq!(ast("var l = [] in List of Int"), "(var l (list) : (List of Int))");
+    assert_eq!(ast("let l = [\n    1,\n    2\n]"), "(let l (list 1 2))");
+    assert_eq!(
+        ast("let n = [s.name, s in students, s.grade >= 10]"),
+        "(let n (list (. s name) (in s students) (>= (. s grade) 10)))"
+    );
+    assert_eq!(ast("let e = l[2..4]"), "(let e (index l (.. 2 4)))");
+    assert_eq!(first_error("let l = [1, 2,]"), "expected an expression, found `]`");
+    assert_eq!(first_error("let l = [a: 1]"), "the elements of a list have no name, like `a:`");
 }

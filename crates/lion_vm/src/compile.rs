@@ -11,7 +11,7 @@ use std::rc::Rc;
 use lion_diagnostics::Span;
 use lion_ir::{self as ir, BinaryOp, Builtin, Conversion, ExprKind, UnaryOp};
 
-use crate::bytecode::{Chunk, Instr, Program, Reg};
+use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
 
 pub fn compile(program: &ir::Program) -> Program {
     let functions = program
@@ -109,7 +109,21 @@ impl Compiler<'_> {
                     self.patch(at);
                 }
             }
-            ir::Stmt::For { var, iterable, body } => self.for_range(*var, iterable, body),
+            ir::Stmt::For { var, iterable, body } => match iterable.ty {
+                ir::Type::Range => self.for_range(*var, iterable, body),
+                _ => self.for_list(*var, iterable, body),
+            },
+            ir::Stmt::Seq(stmts) => self.block(stmts),
+            ir::Stmt::AssignElement { root, indices, value } => {
+                let (target, start, depth) = self.path(*root, indices);
+                let src = self.operand(value);
+                self.emit(Instr::StoreElement { target, indices: start, depth, src }, Some(value.span));
+            }
+            ir::Stmt::Add { root, indices, value } => {
+                let (target, start, depth) = self.path(*root, indices);
+                let src = self.operand(value);
+                self.emit(Instr::AddElement { target, indices: start, depth, src }, Some(value.span));
+            }
             ir::Stmt::Break => {
                 let at = self.jump();
                 self.loops.last_mut().expect("`break` is inside a loop").breaks.push(at);
@@ -176,6 +190,48 @@ impl Compiler<'_> {
         for at in finished.breaks {
             self.patch(at);
         }
+    }
+
+    /// `for var in list`: the list and a position live in temporaries during the loop.
+    fn for_list(&mut self, var: ir::LocalId, iterable: &ir::Expr, body: &[ir::Stmt]) {
+        let span = Some(iterable.span);
+        let list = self.temp();
+        self.expr_into(iterable, list);
+        let counter = self.temp();
+        let start = self.code.len();
+        self.emit(Instr::ForList { list, counter, target: 0 }, span);
+        let head = self.code.len() as u32;
+        self.emit(Instr::ElementAt { dst: register(var), list, counter }, span);
+        self.loops.push(Loop { continues: Vec::new(), breaks: Vec::new() });
+        self.block(body);
+        let finished = self.loops.pop().expect("the loop is open");
+        let step = self.code.len() as u32;
+        for at in finished.continues {
+            self.patch_to(at, step);
+        }
+        self.emit(Instr::NextList { list, counter, target: head }, span);
+        self.patch(start);
+        for at in finished.breaks {
+            self.patch(at);
+        }
+    }
+
+    /// The variable of a change in place, and its indices evaluated into consecutive
+    /// registers.
+    fn path(&mut self, root: ir::Place, indices: &[ir::Expr]) -> (Target, Reg, u32) {
+        let target = match root {
+            ir::Place::Local(local) if self.by_reference(local) => Target::Reference(register(local)),
+            ir::Place::Local(local) => Target::Register(register(local)),
+            ir::Place::Global(global) => Target::Global(global.0),
+        };
+        let start = self.next_temp;
+        for _ in indices {
+            self.temp();
+        }
+        for (offset, index) in indices.iter().enumerate() {
+            self.expr_into(index, start + offset as u32);
+        }
+        (target, start, indices.len() as u32)
     }
 
     fn block(&mut self, stmts: &[ir::Stmt]) {
@@ -318,6 +374,39 @@ impl Compiler<'_> {
                 let b = self.operand(end);
                 self.emit(Instr::MakeRange { dst, a, b }, span);
             }
+            ExprKind::List(elements) => {
+                let start = self.next_temp;
+                for _ in elements {
+                    self.temp();
+                }
+                for (offset, element) in elements.iter().enumerate() {
+                    self.expr_into(element, start + offset as u32);
+                }
+                self.emit(Instr::MakeList { dst, start, count: elements.len() as u32 }, span);
+            }
+            ExprKind::Index { object, index } => {
+                let object = self.operand_before(object, index);
+                let index = self.operand(index);
+                self.emit(Instr::GetIndex { dst, object, index }, span);
+            }
+            ExprKind::Slice { object, range } => {
+                let object = self.operand_before(object, range);
+                let range = self.operand(range);
+                self.emit(Instr::GetSlice { dst, object, range }, span);
+            }
+            ExprKind::Property { object, property } => {
+                let object = self.operand(object);
+                let instr = match property {
+                    ir::Property::Size => Instr::GetSize { dst, object },
+                    ir::Property::First => Instr::GetFirst { dst, list: object },
+                    ir::Property::Last => Instr::GetLast { dst, list: object },
+                };
+                self.emit(instr, span);
+            }
+            ExprKind::Block { stmts, value } => {
+                self.block(stmts);
+                self.expr_into(value, dst);
+            }
             ExprKind::Concat(parts) => {
                 let start = self.next_temp;
                 for _ in parts {
@@ -332,6 +421,15 @@ impl Compiler<'_> {
                 let src = self.operand(&args[0]);
                 self.emit(Instr::Show { src }, span);
                 self.emit(Instr::LoadNone { dst }, span);
+            }
+            ExprKind::CallBuiltin { builtin: Builtin::Sum, args } => {
+                let values = self.operand(&args[0]);
+                let instr = if expr.ty == ir::Type::Float {
+                    Instr::SumFloat { dst, values }
+                } else {
+                    Instr::SumInt { dst, values }
+                };
+                self.emit(instr, span);
             }
         }
         self.next_temp = mark;
@@ -399,7 +497,8 @@ impl Compiler<'_> {
             | Instr::JumpIfFalse { target, .. }
             | Instr::JumpIfTrue { target, .. }
             | Instr::JumpIfArgs { target, .. }
-            | Instr::ForRange { target, .. } => *target = destination,
+            | Instr::ForRange { target, .. }
+            | Instr::ForList { target, .. } => *target = destination,
             other => unreachable!("not a jump: {other:?}"),
         }
     }
@@ -443,6 +542,12 @@ fn calls_function(expr: &ir::Expr) -> bool {
             calls_function(cond) || calls_function(then) || calls_function(otherwise)
         }
         ExprKind::Range { start, end } => calls_function(start) || calls_function(end),
+        // A comprehension may call functions from its statements.
+        ExprKind::Block { .. } => true,
+        ExprKind::List(elements) => elements.iter().any(calls_function),
+        ExprKind::Index { object, index } => calls_function(object) || calls_function(index),
+        ExprKind::Slice { object, range } => calls_function(object) || calls_function(range),
+        ExprKind::Property { object, .. } => calls_function(object),
         ExprKind::Concat(parts) => parts.iter().any(calls_function),
         ExprKind::CallBuiltin { args, .. } => args.iter().any(calls_function),
     }
@@ -478,6 +583,9 @@ fn binary_instr(op: BinaryOp, dst: Reg, a: Reg, b: Reg) -> Instr {
         BinaryOp::EqText => Instr::EqText { dst, a, b },
         BinaryOp::NeText => Instr::NeText { dst, a, b },
         BinaryOp::InRange => Instr::InRange { dst, a, b },
+        BinaryOp::InList => Instr::InList { dst, a, b },
+        BinaryOp::EqValue => Instr::EqValue { dst, a, b },
+        BinaryOp::NeValue => Instr::NeValue { dst, a, b },
         BinaryOp::EqNone | BinaryOp::NeNone => unreachable!("compiled to a constant"),
     }
 }

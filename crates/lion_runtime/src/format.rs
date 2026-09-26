@@ -23,9 +23,35 @@ pub fn format_float(value: f64) -> String {
     text
 }
 
+/// A Text as a Lion literal, between quotes, as it appears inside a shown collection:
+/// `["Léa", "Tom"]` (C24).
+pub fn quote_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '{' => out.push_str("\\{"),
+            '}' => out.push_str("\\}"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::format_float;
+    use super::{format_float, quote_text};
+
+    #[test]
+    fn quoted_texts_are_lion_literals() {
+        assert_eq!(quote_text("Léa"), "\"Léa\"");
+        assert_eq!(quote_text("a\"b{c}\n"), "\"a\\\"b\\{c\\}\\n\"");
+    }
 
     #[test]
     fn floats_keep_a_fractional_part() {

@@ -1,4 +1,4 @@
-var l in List of Int
+var l in Set of Int
 var m in maybe Int
 let n = "12" as Int
 let r = 1 over 3

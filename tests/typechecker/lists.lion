@@ -1,0 +1,5 @@
+var grades = [12, 8.5]
+grades[1] += 1
+grades.add(14)
+let passed = [g, g in grades, g >= 10]
+let best = if 14.0 in grades then grades.last else grades.first

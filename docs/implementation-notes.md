@@ -84,6 +84,15 @@ Le 2026-09-26, l'auteur a délégué toutes les décisions « jusqu'à la fin du
 | C21 | `show(1..5)` affiche `1..5`, la forme du littéral | 16.3 |
 | C22 | La variable d'une boucle `for` est une constante du corps, redéclarée à chaque tour ; lui affecter une valeur est une erreur | 10.2 |
 | C23 | `x in a..b` demande un Int ; un Float est refusé, comme les autres comparaisons entre types différents (R2) | 16.3 |
+| C24 | `show` d'une collection l'écrit comme un littéral : `[1, 2.5]`, `["Léa", "Tom"]`. Les Text y sont entre guillemets, échappés | 16, 23 |
+| C25 | `l.add(v)` s'écrit comme une instruction, sur une variable `var` ou l'un de ses éléments ; elle ne donne pas de valeur. Changer une liste temporaire serait perdu : c'est refusé | 6.4, 16 |
+| C26 | `l.first` et `l.last` d'une liste vide sont un bug, comme un indice hors limites | 16.2, D38 |
+| C27 | Un extrait avec un intervalle vide (`l[3..2]`) donne une liste vide ; un intervalle non vide doit être dans `1..l.size`, sinon c'est un bug | 16.2, D41 |
+| C28 | Une liste vide prend le type attendu là où elle est écrite (annotation, variable affectée, paramètre, retour, `[] as List of Int`) ; ailleurs, son type est inconnu et c'est une erreur | 16 |
+| C29 | Les éléments de types différents dans une liste attendent les unions ; Int et Float donnent une liste de Float (§8.5) | 7.3, 8.5 |
+| C30 | Un Text ne se modifie pas caractère par caractère (`t[1] = "x"` est refusé) ; `t[i]`, `t[a..b]` et `t.size` comptent en caractères (D23, D42) | 16.2 |
+| C31 | `sum` accepte une liste d'Int ou de Float, et un intervalle ; la somme vide vaut 0 ou 0.0 | 23 |
+| C32 | `l[i] += v` évalue ses indices une seule fois | 9.2 |
 
 ## 5. Points de la spec à trancher plus tard (non bloquants aujourd'hui)
 
@@ -125,4 +134,6 @@ Le 2026-09-26, l'auteur a délégué toutes les décisions « jusqu'à la fin du
   Le chemin d'appel et la représentation des valeurs, un `enum` de 16 octets avec comptage de références, sont à optimiser dans une passe dédiée : registres spécialisés par type, opérandes immédiats, cadres plus légers.
 - **Types composés.** `Type` reste une petite valeur copiable : les types qui en contiennent d'autres, comme `List of T`, désignent ces derniers par une référence vers une table globale, où chaque type n'est stocké qu'une fois. L'égalité des types est ainsi une simple comparaison.
 - **Intervalles.** Un `Range` ne stocke que ses deux bornes (D46). La boucle `for` sur un intervalle compare le compteur à la borne avant de l'augmenter, si bien que `for i in 1..9223372036854775807` se termine sans débordement.
+- **Listes.** Une liste est partagée tant que personne ne la modifie ; la première modification d'une liste partagée la copie. Cette copie à l'écriture donne la sémantique de valeur du §17.1 sans copier les grandes listes qu'on ne fait que lire. Les modifications en place (`l[i] = v`, `l.add(v)`) descendent dans les listes imbriquées depuis une variable locale, une globale ou un paramètre `var`.
+- **Compréhensions.** Une compréhension devient, dans l'IR, un bloc qui remplit une liste avec des boucles `for` imbriquées et des `if`, dans l'ordre des générateurs et des conditions (§16.4).
 

@@ -595,7 +595,10 @@ impl<'a> Checker<'a> {
                 Some(ir::Stmt::Return(None))
             }
             Some(expr) => {
-                let checked = self.expr(expr);
+                let checked = match declared {
+                    Some(ty) => self.expr_expecting(expr, ty),
+                    None => self.expr(expr),
+                };
                 let value = match (checked, declared) {
                     (Some(checked), Some(ty)) => {
                         let context =
@@ -724,7 +727,10 @@ impl<'a> Checker<'a> {
     }
 
     fn value_argument(&mut self, arg: &ast::Arg, param: &ParamInfo) -> Option<Pending> {
-        let value = self.expr(&arg.value)?;
+        let value = match param.ty {
+            Some(ty) => self.expr_expecting(&arg.value, ty)?,
+            None => self.expr(&arg.value)?,
+        };
         match param.ty {
             Some(ty) => {
                 let context = (param.span, "parameter declared here".to_string());

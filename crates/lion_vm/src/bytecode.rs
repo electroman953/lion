@@ -88,8 +88,45 @@ pub enum Instr {
     /// increased, unless it was the last value. Never overflows.
     NextRange { range: Reg, counter: Reg, target: u32 },
 
+    MakeList { dst: Reg, start: Reg, count: u32 },
+    /// An element of a List, or a character of a Text, from 1 (§16.2).
+    GetIndex { dst: Reg, object: Reg, index: Reg },
+    /// `l[a..b]` of a List or a Text (D41).
+    GetSlice { dst: Reg, object: Reg, range: Reg },
+    /// The size of a List, a Text or a Range.
+    GetSize { dst: Reg, object: Reg },
+    GetFirst { dst: Reg, list: Reg },
+    GetLast { dst: Reg, list: Reg },
+    /// Whether the value in `a` is an element of the List in `b`.
+    InList { dst: Reg, a: Reg, b: Reg },
+    /// Equality of content of any two values of the same type.
+    EqValue { dst: Reg, a: Reg, b: Reg },
+    NeValue { dst: Reg, a: Reg, b: Reg },
+    /// Starts going through a List: jumps to `target` when it is empty.
+    ForList { list: Reg, counter: Reg, target: u32 },
+    /// The element at the position in `counter`, counted from 0.
+    ElementAt { dst: Reg, list: Reg, counter: Reg },
+    /// Jumps back to `target` with the next position, unless it was the last.
+    NextList { list: Reg, counter: Reg, target: u32 },
+    /// Replaces the element reached from `target` through the `depth` indices in
+    /// registers `indices ..`.
+    StoreElement { target: Target, indices: Reg, depth: u32, src: Reg },
+    /// Adds at the end of the list reached from `target` through the indices.
+    AddElement { target: Target, indices: Reg, depth: u32, src: Reg },
+    SumInt { dst: Reg, values: Reg },
+    SumFloat { dst: Reg, values: Reg },
+
     Show { src: Reg },
     Halt,
+}
+
+/// The variable in which a change happens.
+#[derive(Clone, Copy, Debug)]
+pub enum Target {
+    Register(Reg),
+    Global(u32),
+    /// The variable designated by the reference in a register (a `var` parameter).
+    Reference(Reg),
 }
 
 /// A compiled program: one chunk per function.

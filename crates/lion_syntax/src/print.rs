@@ -122,6 +122,10 @@ pub fn print_expr(expr: &Expr) -> String {
         },
         ExprKind::Name(name) | ExprKind::TypeName(name) => name.clone(),
         ExprKind::Paren(inner) => format!("(paren {})", print_expr(inner)),
+        ExprKind::List(elements) => {
+            let elements: Vec<String> = elements.iter().map(print_expr).collect();
+            format!("(list{}{})", if elements.is_empty() { "" } else { " " }, elements.join(" "))
+        }
         ExprKind::Unary { op, operand } => {
             let op = match op {
                 UnaryOp::Neg => "neg",

@@ -38,14 +38,9 @@ impl Checker<'_> {
             ast::ExprKind::Compare { first, rest } => self.compare(first, rest, span),
             ast::ExprKind::As { value, ty } => self.convert(value, ty, span),
             ast::ExprKind::Call { callee, args } => self.call(callee, args, span),
-            ast::ExprKind::Field { .. } => {
-                self.not_implemented(span, "fields and methods", "§12");
-                None
-            }
-            ast::ExprKind::Index { .. } => {
-                self.not_implemented(span, "indexing", "§16.2");
-                None
-            }
+            ast::ExprKind::Field { object, name } => self.property(object, name, span),
+            ast::ExprKind::Index { object, index } => self.index(object, index, span),
+            ast::ExprKind::List(elements) => self.list(elements, span),
             ast::ExprKind::If { branches, otherwise } => self.if_expr(branches, otherwise.as_deref(), span),
         }
     }
@@ -257,6 +252,7 @@ impl Checker<'_> {
                 };
                 Some(typed(kind, Type::Bool, span))
             }
+            Type::List(_) => self.list_membership(value, set, span),
             Type::Range => {
                 self.diagnostics.push(
                     Diagnostic::error(format!("an interval holds Int values, not {}", article(value.ty)))
@@ -412,6 +408,10 @@ impl Checker<'_> {
             (Type::None, Type::None) if equality => {
                 Comparison { op: equality_op(B::EqNone, B::NeNone), on_floats: false }
             }
+            // Collections compare their content (§9.4).
+            (Type::List(_) | Type::Range, _) if equality && lty == rty => {
+                Comparison { op: equality_op(B::EqValue, B::NeValue), on_floats: false }
+            }
             _ if lty == rty => {
                 self.diagnostics.push(
                     Diagnostic::error(format!("`{}` is not defined for {lty} values", op.as_str()))
@@ -490,8 +490,11 @@ impl Checker<'_> {
 
     /// `x as T` (§8.5).
     fn convert(&mut self, value: &ast::Expr, ty: &ast::TypeExpr, span: Span) -> Option<ir::Expr> {
-        let value = self.expr(value);
         let target = self.resolve_type(ty);
+        let value = match target {
+            Some(target) => self.expr_expecting(value, target),
+            None => self.expr(value),
+        };
         let (value, target) = (value?, target?);
         let conversion = match (value.ty, target) {
             (from, to) if from == to => return Some(ir::Expr { span, ..value }),
@@ -522,6 +525,14 @@ impl Checker<'_> {
         let ast::ExprKind::Name(name) = &callee.kind else {
             let (what, section) = match callee.kind {
                 ast::ExprKind::TypeName(_) => ("building structures", "§12.2"),
+                ast::ExprKind::Field { ref name, .. } if name.name == "add" => {
+                    self.diagnostics.push(
+                        Diagnostic::error("`add` is called on its own line: `l.add(value)`")
+                            .with_primary(span, "")
+                            .with_note("`add` changes the list and gives no value"),
+                    );
+                    return None;
+                }
                 ast::ExprKind::Field { .. } => ("methods", "§12.4"),
                 _ => ("calling a computed function", "§11.3"),
             };
@@ -531,6 +542,7 @@ impl Checker<'_> {
         let (decl_span, ty) = match self.resolve(name, callee.span) {
             Resolved::Function(index) => return self.call_function(index, callee.span, args, span),
             Resolved::Standard("show") => return self.show(args, span),
+            Resolved::Standard("sum") => return self.sum(args, span),
             Resolved::Standard(standard) => {
                 self.not_implemented(callee.span, &format!("the standard function `{standard}`"), "§23");
                 return None;

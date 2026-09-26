@@ -50,6 +50,12 @@ pub enum BugKind {
     InvalidFloatToInt { value: f64 },
     /// More than [`MAX_CALL_DEPTH`] calls in progress: usually a recursion that never ends.
     StackOverflow,
+    /// `l[i]` with `i` outside `1..l.size` (§16.2, D38).
+    IndexOutOfRange { index: i64, size: usize },
+    /// `l[a..b]` with a non-empty interval outside `1..l.size` (§16.2, D41).
+    SliceOutOfRange { start: i64, end: i64, size: usize },
+    /// `l.first` or `l.last` of an empty list (D38).
+    EmptyList,
 }
 
 /// The number of calls that may be in progress at once, the same in both modes (C13).
@@ -64,6 +70,9 @@ impl BugKind {
             BugKind::NegativeExponent { .. } => "negative exponent in an Int power".to_string(),
             BugKind::InvalidFloatToInt { .. } => "cannot convert this Float to an Int".to_string(),
             BugKind::StackOverflow => "too many nested calls".to_string(),
+            BugKind::IndexOutOfRange { .. } => "index out of range".to_string(),
+            BugKind::SliceOutOfRange { .. } => "extract out of range".to_string(),
+            BugKind::EmptyList => "the list is empty".to_string(),
         }
     }
 
@@ -89,6 +98,14 @@ impl BugKind {
                 format!("{} has no Int value", format_float(value))
             }
             BugKind::StackOverflow => format!("more than {MAX_CALL_DEPTH} calls are in progress"),
+            BugKind::IndexOutOfRange { index, size: 0 } => format!("index {index} in an empty sequence"),
+            BugKind::IndexOutOfRange { index, size } => {
+                format!("index {index} is outside 1..{size}; indices start at 1 (§16.2)")
+            }
+            BugKind::SliceOutOfRange { start, end, size } => {
+                format!("{start}..{end} is not inside 1..{size}")
+            }
+            BugKind::EmptyList => "an empty list has no first or last element".to_string(),
         }
     }
 
@@ -110,6 +127,10 @@ impl BugKind {
             BugKind::StackOverflow => {
                 "check that the recursion reaches a case that does not call again".to_string()
             }
+            BugKind::IndexOutOfRange { .. } | BugKind::SliceOutOfRange { .. } => {
+                "check the index against `size` first; the last element is at `size`, or `last`".to_string()
+            }
+            BugKind::EmptyList => "check that `size > 0` first".to_string(),
         }
     }
 }

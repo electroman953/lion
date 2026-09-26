@@ -1,0 +1,25 @@
+// A grade report with lists, comprehensions and functions.
+let names = ["Léa", "Tom", "Inès", "Hugo"]
+let grades = [14.5, 8.0, 17.0, 11.5]
+
+fun average(values in List of Float) = sum(values) / values.size
+
+fun best_index(values in List of Float) in Int:
+    var best = 1
+    for i in 2..values.size:
+        if values[i] > values[best]: best = i ;
+    ;
+    return best
+;
+
+let admitted = [names[i], i in 1..names.size, grades[i] >= 10]
+show("Moyenne de la classe : {average(grades)}")
+show("Admis : {admitted}")
+show("Meilleure note : {names[best_index(grades)]} ({grades[best_index(grades)]})")
+
+var curved = grades
+for i in 1..curved.size:
+    curved[i] += 1
+;
+show("Avec un point de plus : {curved}")
+show("Notes d'origine : {grades}")

@@ -878,7 +878,7 @@ impl<'t> Parser<'t> {
             TokenKind::UpperIdent(name) => ExprKind::TypeName(name.clone()),
             TokenKind::TextStart => return self.text(),
             TokenKind::LParen => return self.parenthesized(),
-            TokenKind::LBracket => return Err(self.not_implemented(span, "lists", "§16")),
+            TokenKind::LBracket => return self.list(),
             TokenKind::LBrace => {
                 return Err(self.not_implemented(span, "sets and comprehensions", "§16"));
             }
@@ -887,6 +887,31 @@ impl<'t> Parser<'t> {
         };
         self.bump();
         Ok(Expr { kind, span })
+    }
+
+    /// `[a, b, c]` or a comprehension; newlines are ignored inside the brackets (§5.1).
+    fn list(&mut self) -> PResult<Expr> {
+        let start = self.bump().span;
+        let mut elements = Vec::new();
+        if !self.at(&TokenKind::RBracket) {
+            loop {
+                if let TokenKind::LowerIdent(name) = self.peek()
+                    && self.kind_at(self.pos + 1) == &TokenKind::Colon
+                {
+                    let error =
+                        Diagnostic::error(format!("the elements of a list have no name, like `{name}:`"))
+                            .with_primary(self.span(), "")
+                            .with_note("names belong to the fields of a structure (§12.2)");
+                    return Err(self.error(error));
+                }
+                elements.push(self.nested(Self::expr)?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+        let end = self.expect(&TokenKind::RBracket, "`,` or `]`")?;
+        Ok(Expr { kind: ExprKind::List(elements), span: start.to(end) })
     }
 
     fn parenthesized(&mut self) -> PResult<Expr> {

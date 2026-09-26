@@ -147,7 +147,7 @@ fn one_mistake_gives_one_message() {
 
 #[test]
 fn unsupported_types_are_reported() {
-    assert_eq!(errors("var l in List of Int"), ["not implemented yet: collections"]);
+    assert_eq!(errors("var s in Set of Int"), ["not implemented yet: collections"]);
     assert_eq!(errors("var m in maybe Int"), ["not implemented yet: union types (`or`, `maybe`)"]);
     assert_eq!(
         errors("let n = \"12\" as Int"),

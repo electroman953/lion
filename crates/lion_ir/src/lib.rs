@@ -88,6 +88,7 @@ pub enum Place {
     Global(LocalId),
 }
 
+#[derive(Clone)]
 pub enum Stmt {
     Assign {
         place: Place,
@@ -104,6 +105,21 @@ pub enum Stmt {
     While {
         cond: Expr,
         body: Vec<Stmt>,
+    },
+    /// Statements in order, without a block of their own.
+    Seq(Vec<Stmt>),
+    /// `l[i] = value`, `l[i][j] = value`: replaces an element inside the variable `root`,
+    /// following the indices (§6.3).
+    AssignElement {
+        root: Place,
+        indices: Vec<Expr>,
+        value: Expr,
+    },
+    /// `l.add(value)`, `l[i].add(value)`: adds at the end of a list inside `root`.
+    Add {
+        root: Place,
+        indices: Vec<Expr>,
+        value: Expr,
     },
     /// Goes through the elements of `iterable`, evaluated once, in `var` (§10.2).
     For {
@@ -171,6 +187,27 @@ pub enum ExprKind {
         conversion: Conversion,
         value: Box<Expr>,
     },
+    /// `[a, b, c]`.
+    List(Vec<Expr>),
+    /// `l[i]`, from 1 (§16.2); also the character `i` of a Text (D42).
+    Index {
+        object: Box<Expr>,
+        index: Box<Expr>,
+    },
+    /// `l[a..b]`, bounds included (D41).
+    Slice {
+        object: Box<Expr>,
+        range: Box<Expr>,
+    },
+    Property {
+        object: Box<Expr>,
+        property: Property,
+    },
+    /// Runs statements, then evaluates to `value` (a comprehension, §16.4).
+    Block {
+        stmts: Vec<Stmt>,
+        value: Box<Expr>,
+    },
     /// `start..end`: the integers from `start` to `end` included (§16.3).
     Range {
         start: Box<Expr>,
@@ -188,6 +225,24 @@ pub enum ExprKind {
         builtin: Builtin,
         args: Vec<Expr>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Property {
+    /// The number of elements of a List, characters of a Text, integers of a Range.
+    Size,
+    First,
+    Last,
+}
+
+impl Property {
+    pub fn name(self) -> &'static str {
+        match self {
+            Property::Size => "size",
+            Property::First => "first",
+            Property::Last => "last",
+        }
+    }
 }
 
 /// An argument of a call.
@@ -240,6 +295,11 @@ pub enum BinaryOp {
     NeNone,
     /// An Int in a Range (§16.3).
     InRange,
+    /// A value among the elements of a List, compared with `==` (§16.2).
+    InList,
+    /// Equality of Lists and Ranges, element by element (§9.4).
+    EqValue,
+    NeValue,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -256,6 +316,8 @@ pub enum Conversion {
 pub enum Builtin {
     /// `show(value)`: writes the value and a line end (§23).
     Show,
+    /// `sum(values)`: the sum of a List of Int or of Float (§23).
+    Sum,
 }
 
 impl BinaryOp {
@@ -292,6 +354,9 @@ impl BinaryOp {
             EqNone => "eq_none",
             NeNone => "ne_none",
             InRange => "in_range",
+            InList => "in_list",
+            EqValue => "eq_value",
+            NeValue => "ne_value",
         }
     }
 }
@@ -320,6 +385,7 @@ impl Builtin {
     pub fn name(self) -> &'static str {
         match self {
             Builtin::Show => "show",
+            Builtin::Sum => "sum",
         }
     }
 }

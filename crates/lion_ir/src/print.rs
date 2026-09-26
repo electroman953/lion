@@ -73,6 +73,23 @@ impl Printer<'_> {
                     self.block(body, depth + 1, out);
                     out.push_str(&format!("{indent}end\n"));
                 }
+                Stmt::Seq(stmts) => self.block(stmts, depth, out),
+                Stmt::AssignElement { root, indices, value } => {
+                    out.push_str(&format!(
+                        "{indent}{}{} = {}\n",
+                        self.place(*root),
+                        self.indices(indices),
+                        self.expr(value)
+                    ));
+                }
+                Stmt::Add { root, indices, value } => {
+                    out.push_str(&format!(
+                        "{indent}{}{}.add({})\n",
+                        self.place(*root),
+                        self.indices(indices),
+                        self.expr(value)
+                    ));
+                }
                 Stmt::For { var, iterable, body } => {
                     out.push_str(&format!(
                         "{indent}for {} in {}\n",
@@ -123,6 +140,19 @@ impl Printer<'_> {
                 format!("(if {} {} {})", print(cond), print(then), print(otherwise))
             }
             ExprKind::Range { start, end } => format!("(range {} {})", print(start), print(end)),
+            ExprKind::List(elements) => {
+                let elements: Vec<String> = elements.iter().map(print).collect();
+                format!("(list{}{})", if elements.is_empty() { "" } else { " " }, elements.join(" "))
+            }
+            ExprKind::Index { object, index } => format!("(index {} {})", print(object), print(index)),
+            ExprKind::Slice { object, range } => format!("(slice {} {})", print(object), print(range)),
+            ExprKind::Property { object, property } => format!("({} {})", property.name(), print(object)),
+            ExprKind::Block { stmts, value } => {
+                let mut inner = String::new();
+                self.block(stmts, 0, &mut inner);
+                let stmts: Vec<&str> = inner.lines().map(str::trim).collect();
+                format!("(block [{}] {})", stmts.join("; "), print(value))
+            }
             ExprKind::Concat(parts) => {
                 let parts: Vec<String> = parts.iter().map(print).collect();
                 format!("(concat {})", parts.join(" "))
@@ -132,6 +162,10 @@ impl Printer<'_> {
                 format!("({} {})", builtin.name(), args.join(" "))
             }
         }
+    }
+
+    fn indices(&self, indices: &[Expr]) -> String {
+        indices.iter().map(|index| format!("[{}]", self.expr(index))).collect()
     }
 
     fn place(&self, place: Place) -> String {

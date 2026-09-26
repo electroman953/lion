@@ -1,0 +1,100 @@
+exit: 1
+----- stdout
+----- stderr
+error: cannot change the content of the constant `notes`
+  --> tests/errors/lists.lion:2:1
+   |
+ 1 | let notes = [12, 8, 15]
+   |     ----- declared with `let`
+ 2 | notes.add(10)
+   | ^^^^^
+   |
+   = a value held by `let` never changes, nor does its content (§6.4)
+   = help: to change it, declare it with `var`: `var notes = ...`
+
+error: cannot change the content of the constant `notes`
+  --> tests/errors/lists.lion:3:1
+   |
+ 1 | let notes = [12, 8, 15]
+   |     ----- declared with `let`
+  ...
+ 3 | notes[1] = 3
+   | ^^^^^
+   |
+   = a value held by `let` never changes, nor does its content (§6.4)
+   = help: to change it, declare it with `var`: `var notes = ...`
+
+error: the type of this empty list is not known
+  --> tests/errors/lists.lion:4:9
+   |
+ 4 | let e = []
+   |         ^^
+   |
+   = help: write its type: `var l = [] in List of Int`, or `[] as List of Int`
+
+error: not implemented yet: the elements of a list of different types (the type would be a union such as `Int or Text`)
+  --> tests/errors/lists.lion:5:9
+   |
+ 5 | let m = [1, "a"]
+   |         ^^^^^^^^
+   |
+   = this part of Lion (spec §7.3) is not supported by this version of the implementation
+
+error: an index is an Int, or an interval for an extract
+  --> tests/errors/lists.lion:6:15
+   |
+ 6 | let x = notes["1"]
+   |               ^^^ this is a Text
+
+error: An Int has no elements to index
+  --> tests/errors/lists.lion:7:9
+   |
+ 7 | let y = 5[1]
+   |         ^
+   |
+   = a List and a Text are indexed from 1: `l[1]` (§16.2)
+
+error: A List of Int has no `average`
+  --> tests/errors/lists.lion:8:15
+   |
+ 8 | let z = notes.average
+   |               ^^^^^^^
+   |
+   = it has `size`, `first`, `last` and `add` (§16)
+
+error: `add` is called on its own line: `l.add(value)`
+  --> tests/errors/lists.lion:9:6
+   |
+ 9 | show(notes.add(1))
+   |      ^^^^^^^^^^^^
+   |
+   = `add` changes the list and gives no value
+
+error: with several generators, a comprehension starts with its result
+   --> tests/errors/lists.lion:10:10
+    |
+ 10 | let w = [a in 1..3, b in 1..3]
+    |          ^^^^^^^^^
+    |
+    = help: write the result first: `[(a, b), a in A, b in B]` (§16.4)
+
+error: cannot change the content of the constant `t`
+   --> tests/errors/lists.lion:12:1
+    |
+ 11 | let t = "Lion"
+    |     - declared with `let`
+ 12 | t[1] = "l"
+    | ^
+    |
+    = a value held by `let` never changes, nor does its content (§6.4)
+    = help: to change it, declare it with `var`: `var t = ...`
+
+error: a List of Int does not hold a Text
+   --> tests/errors/lists.lion:13:6
+    |
+ 13 | show("a" in notes)
+    |      ^^^ this is a Text
+    |
+    = Lion 0.1 does not define membership between values of different types
+
+11 errors found

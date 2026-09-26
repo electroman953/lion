@@ -10,7 +10,7 @@ mod compile;
 mod machine;
 mod value;
 
-pub use bytecode::{Chunk, Instr, Program, Reg, disassemble};
+pub use bytecode::{Chunk, Instr, Program, Reg, Target, disassemble};
 pub use compile::compile;
 pub use machine::{Alert, AlertKind, Trap, run};
 pub use value::Value;

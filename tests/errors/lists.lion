@@ -1,0 +1,13 @@
+let notes = [12, 8, 15]
+notes.add(10)
+notes[1] = 3
+let e = []
+let m = [1, "a"]
+let x = notes["1"]
+let y = 5[1]
+let z = notes.average
+show(notes.add(1))
+let w = [a in 1..3, b in 1..3]
+let t = "Lion"
+t[1] = "l"
+show("a" in notes)

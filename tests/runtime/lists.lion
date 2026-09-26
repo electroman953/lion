@@ -1,0 +1,54 @@
+let notes = [12, 8, 15]
+show(notes)
+show(notes[1])
+show(notes.size)
+show(notes.first)
+show(notes.last)
+show(notes[2..3])
+show(8 in notes)
+show(9 in notes)
+var copy = notes
+copy.add(10)
+show(notes)
+show(copy)
+copy[1] = 20
+copy[2] += 1
+show(copy)
+show(sum(copy))
+show(sum([1.5, 2.5]))
+show(sum(1..100))
+let names = ["Léa", "Tom"]
+show(names)
+show("Admis : {names}")
+var empty = [] in List of Int
+show(empty)
+empty.add(3)
+show(empty)
+let mixed = [1, 2.5]
+show(mixed)
+let squares = [x * x, x in 1..5]
+show(squares)
+let odd = [x in 1..9, x mod 2 == 1]
+show(odd)
+let pairs = [a * 10 + b, a in 1..3, b in 1..a]
+show(pairs)
+var grid = [[1, 2], [3, 4]]
+grid[2][1] = 30
+grid[1].add(5)
+show(grid)
+fun add_grade(var grades in List of Int, grade in Int):
+    grades.add(grade)
+;
+var mine = [10]
+add_grade(mine, 18)
+show(mine)
+fun average(values in List of Float) = sum(values) / values.size
+show(average([12.0, 8.5, 15]))
+for n in notes: show(n * 2) ;
+show("Lion"[1])
+show("Lion".size)
+show("Lion"[2..3])
+show("é".size)
+show([1, 2] == [1, 2])
+show([1, 2] == [2, 1])
+show(notes == [12, 8, 15])

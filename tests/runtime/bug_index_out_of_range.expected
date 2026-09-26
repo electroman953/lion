@@ -1,0 +1,12 @@
+exit: 2
+----- stdout
+----- stderr
+bug: index out of range
+  --> tests/runtime/bug_index_out_of_range.lion:2:6
+   |
+ 2 | show(l[4])
+   |      ^^^^
+   |
+   = index 4 is outside 1..3; indices start at 1 (§16.2)
+   = help: check the index against `size` first; the last element is at `size`, or `last`
+

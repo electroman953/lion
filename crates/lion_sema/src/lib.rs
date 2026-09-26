@@ -9,6 +9,7 @@
 //! a function body is checked when a call needs its inferred return type, and every
 //! other body afterwards.
 
+mod collections;
 mod expr;
 mod flow;
 mod functions;

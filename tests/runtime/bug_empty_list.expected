@@ -1,0 +1,12 @@
+exit: 2
+----- stdout
+----- stderr
+bug: the list is empty
+  --> tests/runtime/bug_empty_list.lion:2:6
+   |
+ 2 | show(l.last)
+   |      ^^^^^^
+   |
+   = an empty list has no first or last element
+   = help: check that `size > 0` first
+

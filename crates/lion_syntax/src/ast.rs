@@ -150,6 +150,9 @@ pub enum ExprKind {
     /// An uppercase name used as a value, such as `Float` in `x in Float` (§4.2).
     TypeName(String),
     Paren(Box<Expr>),
+    /// `[a, b, c]`, or a comprehension `[f(x), x in values, condition]` when an element
+    /// is `v in X` with a new name `v` (§16.4, §26 rule 4).
+    List(Vec<Expr>),
     Unary {
         op: UnaryOp,
         operand: Box<Expr>,

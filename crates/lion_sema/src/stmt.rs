@@ -30,7 +30,15 @@ impl Checker<'_> {
         match &stmt.kind {
             ast::StmtKind::Let(decl) => self.let_stmt(decl),
             ast::StmtKind::Assign { target, op, value, .. } => self.assign(target, *op, value, stmt.span),
-            ast::StmtKind::Expr(expr) => self.expr(expr).map(ir::Stmt::Expr),
+            ast::StmtKind::Expr(expr) => match &expr.kind {
+                // `l.add(value)` changes the list in place.
+                ast::ExprKind::Call { callee, args } if matches!(&callee.kind, ast::ExprKind::Field { name, .. } if name.name == "add") =>
+                {
+                    let ast::ExprKind::Field { object, .. } = &callee.kind else { unreachable!() };
+                    self.add_stmt(object, args, expr.span)
+                }
+                _ => self.expr(expr).map(ir::Stmt::Expr),
+            },
             ast::StmtKind::If { branches, otherwise } => self.if_stmt(branches, otherwise.as_ref()),
             ast::StmtKind::While { cond, body } => self.while_stmt(cond, body),
             ast::StmtKind::For { var, iterable, body } => self.for_stmt(var, iterable, body),
@@ -62,9 +70,14 @@ impl Checker<'_> {
         let mut value = None;
         // The value is checked before the name is declared: in `let x = x + 1`, the
         // `x` on the right is the previous binding.
-        if let Some(expr) = &decl.value
-            && let Some(checked) = self.expr(expr)
-        {
+        let expected = annotation.and_then(|(ty, _)| ty);
+        let checked = decl.value.as_ref().and_then(|expr| match expected {
+            Some(expected) => self.expr_expecting(expr, expected),
+            // The annotation has an error: an empty list cannot get its type from it.
+            None if annotation.is_some() && is_empty_list(expr) => None,
+            None => self.expr(expr),
+        });
+        if let Some(checked) = checked {
             value = match annotation {
                 Some((Some(expected), span)) => {
                     self.coerce(checked, expected, Some((span, "expected because of this type".to_string())))
@@ -90,8 +103,14 @@ impl Checker<'_> {
     ) -> Option<ir::Stmt> {
         let name = match &target.kind {
             ast::ExprKind::Name(name) => name,
-            ast::ExprKind::Field { .. } | ast::ExprKind::Index { .. } => {
-                self.not_implemented(target.span, "assigning to a field or an element", "§6.3, §12, §16");
+            ast::ExprKind::Index { .. } => {
+                return match compound_operator(op) {
+                    None => self.change_in_place(target, value, false),
+                    Some(op) => self.compound_element(target, op, value, span),
+                };
+            }
+            ast::ExprKind::Field { .. } => {
+                self.not_implemented(target.span, "assigning to a field", "§6.3, §12");
                 return None;
             }
             _ => {
@@ -103,7 +122,9 @@ impl Checker<'_> {
                 return None;
             }
         };
-        let value = self.expr(value);
+        // An empty list takes the type of the variable, known once it is resolved.
+        let value_ast = value;
+        let value = if is_empty_list(value) { None } else { self.expr(value) };
         if !self.is_known(name) {
             let error = self
                 .unknown_name_error(name, target.span)
@@ -147,6 +168,7 @@ impl Checker<'_> {
             }
             Resolved::Nothing => return None,
         };
+        let value = if is_empty_list(value_ast) { self.expr_expecting(value_ast, ty) } else { value };
         let value = value?;
         let value = match compound_operator(op) {
             None => value,
@@ -183,6 +205,25 @@ impl Checker<'_> {
             return None;
         };
         Some(ir::Stmt::Assign { place, value })
+    }
+
+    /// `l.add(value)`.
+    fn add_stmt(&mut self, list: &ast::Expr, args: &[ast::Arg], span: Span) -> Option<ir::Stmt> {
+        let [arg] = args else {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`add` takes one value, not {}", args.len()))
+                    .with_primary(span, ""),
+            );
+            return None;
+        };
+        if arg.name.is_some() || arg.var_marker.is_some() {
+            self.diagnostics.push(
+                Diagnostic::error("the value given to `add` is written alone")
+                    .with_primary(arg.value.span, ""),
+            );
+            return None;
+        }
+        self.change_in_place(list, &arg.value, true)
     }
 
     /// `if c: ... elif d: ... else: ... ;` (§5.2). Each branch starts from the flow
@@ -322,6 +363,14 @@ impl Checker<'_> {
             }
         }
         found
+    }
+}
+
+fn is_empty_list(expr: &ast::Expr) -> bool {
+    match &expr.kind {
+        ast::ExprKind::List(elements) => elements.is_empty(),
+        ast::ExprKind::Paren(inner) => is_empty_list(inner),
+        _ => false,
     }
 }
 

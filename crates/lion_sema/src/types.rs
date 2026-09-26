@@ -18,7 +18,6 @@ const SUPPORTED: &[(&str, Type)] = &[
 /// Types of the spec that this version does not support yet, with their section.
 const PLANNED: &[(&str, &str, &str)] = &[
     ("Rational", "Rational numbers", "§8.3"),
-    ("List", "collections", "§16"),
     ("Set", "collections", "§16"),
     ("Domain", "collections", "§16"),
     ("Range", "collections", "§16"),
@@ -47,12 +46,27 @@ impl Checker<'_> {
     }
 
     fn named_type(&mut self, name: &ast::Ident, args: &[ast::TypeExpr], ty: &ast::TypeExpr) -> Option<Type> {
+        if name.name == "List" {
+            let [element] = args else {
+                self.diagnostics.push(
+                    Diagnostic::error("`List` takes the type of its elements: `List of Int`")
+                        .with_primary(ty.span, "")
+                        .with_note("`of` gives the type parameters of a generic type (§15.1)"),
+                );
+                return None;
+            };
+            return self.resolve_type(element).map(Type::list);
+        }
         if let Some(&(_, what, section)) = PLANNED.iter().find(|(planned, ..)| *planned == name.name) {
             self.not_implemented(ty.span, what, section);
             return None;
         }
         let Some(&(_, resolved)) = SUPPORTED.iter().find(|(known, _)| *known == name.name) else {
-            let known = SUPPORTED.iter().map(|(known, _)| *known).chain(PLANNED.iter().map(|(p, ..)| *p));
+            let known = SUPPORTED
+                .iter()
+                .map(|(known, _)| *known)
+                .chain(PLANNED.iter().map(|(p, ..)| *p))
+                .chain(["List"]);
             let mut error = Diagnostic::error(format!("cannot find the type `{}`", name.name))
                 .with_primary(name.span, "unknown type");
             if let Some(close) = closest(&name.name, known) {

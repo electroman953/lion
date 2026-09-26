@@ -1,0 +1,8 @@
+exit: 0
+----- stdout
+Moyenne de la classe : 12.75
+Admis : ["Léa", "Inès", "Hugo"]
+Meilleure note : Inès (17.0)
+Avec un point de plus : [15.5, 9.0, 18.0, 12.5]
+Notes d'origine : [14.5, 8.0, 17.0, 11.5]
+----- stderr

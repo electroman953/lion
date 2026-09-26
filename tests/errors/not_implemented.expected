@@ -4,8 +4,8 @@ exit: 1
 error: not implemented yet: collections
   --> tests/errors/not_implemented.lion:1:10
    |
- 1 | var l in List of Int
-   |          ^^^^^^^^^^^
+ 1 | var l in Set of Int
+   |          ^^^^^^^^^^
    |
    = this part of Lion (spec §16) is not supported by this version of the implementation
 
@@ -33,21 +33,19 @@ error: not implemented yet: Rational numbers (`over`)
    |
    = this part of Lion (spec §8.3) is not supported by this version of the implementation
 
-error: not implemented yet: fields and methods
+error: cannot find `x` in this scope
   --> tests/errors/not_implemented.lion:6:9
    |
  6 | let t = x.name
-   |         ^^^^^^
+   |         ^ not found
    |
-   = this part of Lion (spec §12) is not supported by this version of the implementation
+   = help: a similar name exists: `l`
 
-error: not implemented yet: the standard function `sum`
-  --> tests/errors/not_implemented.lion:7:9
+error: `sum` adds a list of numbers, not an Int
+  --> tests/errors/not_implemented.lion:7:13
    |
  7 | let u = sum(1)
-   |         ^^^
-   |
-   = this part of Lion (spec §23) is not supported by this version of the implementation
+   |             ^
 
 error: not implemented yet: type tests (`x in T`)
   --> tests/errors/not_implemented.lion:8:12
