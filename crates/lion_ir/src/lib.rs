@@ -10,7 +10,7 @@ mod print;
 mod types;
 
 pub use print::print_program;
-pub use types::{Type, TypeRef};
+pub use types::{Type, TypeRef, UnionRef};
 
 use lion_diagnostics::Span;
 
@@ -189,6 +189,14 @@ pub enum ExprKind {
     },
     /// `[a, b, c]`.
     List(Vec<Expr>),
+    /// Whether the value belongs to `ty`, a set of the value's possible types (§7.1).
+    TypeTest {
+        value: Box<Expr>,
+        ty: Type,
+    },
+    /// The value, unless it is an Error: then the function returns it at once, or the
+    /// script stops (§18.3).
+    Try(Box<Expr>),
     /// `l[i]`, from 1 (§16.2); also the character `i` of a Text (D42).
     Index {
         object: Box<Expr>,
@@ -310,6 +318,10 @@ pub enum Conversion {
     FloatToInt,
     /// The text of any value, as `show` writes it; also `as Text` on numbers.
     ToText,
+    /// `"12" as Int`: an Int, or an Error that says why (§8.5, D14).
+    TextToInt,
+    /// `"2.5" as Float`: a Float, or an Error that says why (§8.5, D14).
+    TextToFloat,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -318,6 +330,10 @@ pub enum Builtin {
     Show,
     /// `sum(values)`: the sum of a List of Int or of Float (§23).
     Sum,
+    /// `error(message)`: a simple Error (§18.2, D65).
+    Error,
+    /// `e.message()`: the text of an Error (§18.2, D66).
+    Message,
 }
 
 impl BinaryOp {
@@ -377,6 +393,8 @@ impl Conversion {
             Conversion::IntToFloat => "int_to_float",
             Conversion::FloatToInt => "float_to_int",
             Conversion::ToText => "to_text",
+            Conversion::TextToInt => "text_to_int",
+            Conversion::TextToFloat => "text_to_float",
         }
     }
 }
@@ -386,6 +404,8 @@ impl Builtin {
         match self {
             Builtin::Show => "show",
             Builtin::Sum => "sum",
+            Builtin::Error => "error",
+            Builtin::Message => "message",
         }
     }
 }

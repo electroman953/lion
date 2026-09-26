@@ -1,0 +1,14 @@
+fun find(wanted in Text) in maybe Int = if wanted == "a" then 1
+let where = find("b")
+show(where + 1)
+let n = "12" as Int
+show(n * 2)
+fun strict(t in Text) in Int = try t as Int
+let e = error("oops")
+show(e.message())
+let maybe_error = "1" as Int
+show(maybe_error.message())
+var count in maybe Int
+count = 3
+let plain in Int
+plain = where

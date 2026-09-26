@@ -116,6 +116,16 @@ pub enum Instr {
     SumInt { dst: Reg, values: Reg },
     SumFloat { dst: Reg, values: Reg },
 
+    /// Whether the kind of the value in `src` is one of the bits of `kinds`.
+    TypeTest { dst: Reg, src: Reg, kinds: u16 },
+    /// The value in `src`, unless it is an Error: then the function returns it, or the
+    /// script stops (§18.3).
+    Try { dst: Reg, src: Reg },
+    NewError { dst: Reg, a: Reg },
+    ErrorMessage { dst: Reg, a: Reg },
+    TextToInt { dst: Reg, a: Reg },
+    TextToFloat { dst: Reg, a: Reg },
+
     Show { src: Reg },
     Halt,
 }

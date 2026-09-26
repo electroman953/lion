@@ -166,6 +166,8 @@ pub fn print_expr(expr: &Expr) -> String {
         ExprKind::Index { object, index } => {
             format!("(index {} {})", print_expr(object), print_expr(index))
         }
+        ExprKind::TypeTest { value, ty } => format!("(in-type {} {})", print_expr(value), print_type(ty)),
+        ExprKind::Try(value) => format!("(try {})", print_expr(value)),
         ExprKind::If { branches, otherwise } => {
             let mut out = String::from("(if-expr");
             for (index, (cond, value)) in branches.iter().enumerate() {

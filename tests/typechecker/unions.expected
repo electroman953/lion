@@ -1,0 +1,24 @@
+exit: 0
+----- stdout
+script
+  locals
+    result#0 let Int or Error
+    doubled#1 let Int
+    cell#2 var maybe Int
+    next#3 let Int
+  body
+    result#0 = (call half "8")
+    if (in_type result#0 Error)
+      return
+    end
+    doubled#1 = (mul_int result#0 2)
+    cell#2 = 3
+    next#3 = (add_int cell#2 1)
+fun half in Int or Error
+  locals
+    text#0 param Text
+    value#1 let Int
+  body
+    value#1 = (try (text_to_int text#0))
+    return (div_int value#1 2)
+----- stderr

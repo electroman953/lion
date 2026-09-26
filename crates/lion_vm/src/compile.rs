@@ -358,6 +358,8 @@ impl Compiler<'_> {
                     Conversion::IntToFloat => Instr::IntToFloat { dst, a },
                     Conversion::FloatToInt => Instr::FloatToInt { dst, a },
                     Conversion::ToText => Instr::ToText { dst, a },
+                    Conversion::TextToInt => Instr::TextToInt { dst, a },
+                    Conversion::TextToFloat => Instr::TextToFloat { dst, a },
                 };
                 self.emit(instr, span);
             }
@@ -403,6 +405,14 @@ impl Compiler<'_> {
                 };
                 self.emit(instr, span);
             }
+            ExprKind::TypeTest { value, ty } => {
+                let src = self.operand(value);
+                self.emit(Instr::TypeTest { dst, src, kinds: kinds_of(*ty) }, span);
+            }
+            ExprKind::Try(value) => {
+                let src = self.operand(value);
+                self.emit(Instr::Try { dst, src }, span);
+            }
             ExprKind::Block { stmts, value } => {
                 self.block(stmts);
                 self.expr_into(value, dst);
@@ -421,6 +431,14 @@ impl Compiler<'_> {
                 let src = self.operand(&args[0]);
                 self.emit(Instr::Show { src }, span);
                 self.emit(Instr::LoadNone { dst }, span);
+            }
+            ExprKind::CallBuiltin { builtin: Builtin::Error, args } => {
+                let a = self.operand(&args[0]);
+                self.emit(Instr::NewError { dst, a }, span);
+            }
+            ExprKind::CallBuiltin { builtin: Builtin::Message, args } => {
+                let a = self.operand(&args[0]);
+                self.emit(Instr::ErrorMessage { dst, a }, span);
             }
             ExprKind::CallBuiltin { builtin: Builtin::Sum, args } => {
                 let values = self.operand(&args[0]);
@@ -548,9 +566,29 @@ fn calls_function(expr: &ir::Expr) -> bool {
         ExprKind::Index { object, index } => calls_function(object) || calls_function(index),
         ExprKind::Slice { object, range } => calls_function(object) || calls_function(range),
         ExprKind::Property { object, .. } => calls_function(object),
+        ExprKind::TypeTest { value, .. } | ExprKind::Try(value) => calls_function(value),
         ExprKind::Concat(parts) => parts.iter().any(calls_function),
         ExprKind::CallBuiltin { args, .. } => args.iter().any(calls_function),
     }
+}
+
+/// The kinds of values of a type, as the bits of [`crate::value::kinds`].
+fn kinds_of(ty: ir::Type) -> u16 {
+    use crate::value::kinds;
+    ty.members()
+        .into_iter()
+        .map(|member| match member {
+            ir::Type::Int => kinds::INT,
+            ir::Type::Float => kinds::FLOAT,
+            ir::Type::Bool => kinds::BOOL,
+            ir::Type::Text => kinds::TEXT,
+            ir::Type::None => kinds::NONE,
+            ir::Type::Range => kinds::RANGE,
+            ir::Type::List(_) => kinds::LIST,
+            ir::Type::Error => kinds::ERROR,
+            ir::Type::Union(_) => unreachable!("the members of a union are not unions"),
+        })
+        .fold(0, |all, kind| all | kind)
 }
 
 fn binary_instr(op: BinaryOp, dst: Reg, a: Reg, b: Reg) -> Instr {

@@ -6,7 +6,7 @@ exit: 0
 (var d : Float)
 (let e : Text)
 (let ok (in 3 primes))
-(let valid (paren (in x Student)))
+(let valid (paren (in-type x Student)))
 (let r x : (or (List of Int) Error))
 (= count 1)
 (+= count 2)

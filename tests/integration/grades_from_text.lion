@@ -1,0 +1,26 @@
+// Reading grades given as texts: every failure is a value that the program handles.
+fun parse_grade(text in Text) in Float or Error:
+    let grade = try text as Float
+    if not (0 <= grade <= 20):
+        return error("{grade} n'est pas une note sur 20")
+    ;
+    return grade
+;
+
+fun average(texts in List of Text) in Float or Error:
+    var grades = [] in List of Float
+    for text in texts:
+        grades.add(try parse_grade(text))
+    ;
+    if grades.size == 0: return error("aucune note") ;
+    return sum(grades) / grades.size
+;
+
+for batch in [["12", "15.5", "9"], ["12", "vingt"], ["18", "22"], []]:
+    let result = average(batch)
+    if result in Error:
+        show("{batch} : erreur, {result.message()}")
+    else:
+        show("{batch} : moyenne {result}")
+    ;
+;

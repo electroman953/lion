@@ -6,7 +6,7 @@
 //! vacuous flow, which never reports anything.
 
 use lion_diagnostics::{Diagnostic, Span};
-use lion_ir as ir;
+use lion_ir::{self as ir, Type};
 
 use crate::Checker;
 
@@ -23,17 +23,32 @@ pub(crate) enum Assigned {
 pub(crate) struct Flow {
     /// Indexed by local. Locals beyond the end have no value yet.
     assigned: Vec<Assigned>,
+    /// The type a local is known to have here, narrower than its declared type after a
+    /// test such as `x in Int` or `x != none` (§7.4). Indexed by local.
+    narrowed: Vec<Option<Type>>,
     reachable: bool,
 }
 
 impl Flow {
     pub(crate) fn start() -> Flow {
-        Flow { assigned: Vec::new(), reachable: true }
+        Flow { assigned: Vec::new(), narrowed: Vec::new(), reachable: true }
     }
 
     /// The flow after `return`, `break` or `continue`.
     pub(crate) fn unreachable() -> Flow {
-        Flow { assigned: Vec::new(), reachable: false }
+        Flow { assigned: Vec::new(), narrowed: Vec::new(), reachable: false }
+    }
+
+    pub(crate) fn narrowed(&self, local: ir::LocalId) -> Option<Type> {
+        self.narrowed.get(local.index()).copied().flatten()
+    }
+
+    /// Records the type a local is known to have, or forgets it with `None`.
+    pub(crate) fn narrow(&mut self, local: ir::LocalId, ty: Option<Type>) {
+        if self.narrowed.len() <= local.index() {
+            self.narrowed.resize(local.index() + 1, None);
+        }
+        self.narrowed[local.index()] = ty;
     }
 
     pub(crate) fn is_reachable(&self) -> bool {
@@ -69,7 +84,19 @@ impl Flow {
                         _ => Assigned::Maybe,
                     })
                     .collect();
-                Flow { assigned, reachable: true }
+                // A local keeps a narrowed type only if every path narrowed it.
+                let narrowed_length = self.narrowed.len().max(other.narrowed.len());
+                let narrowed = (0..narrowed_length)
+                    .map(|index| {
+                        let a = self.narrowed.get(index).copied().flatten();
+                        let b = other.narrowed.get(index).copied().flatten();
+                        match (a, b) {
+                            (Some(a), Some(b)) => Some(Type::union([a, b])),
+                            _ => None,
+                        }
+                    })
+                    .collect();
+                Flow { assigned, narrowed, reachable: true }
             }
         }
     }

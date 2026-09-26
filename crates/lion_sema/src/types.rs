@@ -8,6 +8,7 @@ use crate::Checker;
 use crate::names::closest;
 
 const SUPPORTED: &[(&str, Type)] = &[
+    ("Error", Type::Error),
     ("Int", Type::Int),
     ("Float", Type::Float),
     ("Bool", Type::Bool),
@@ -22,7 +23,6 @@ const PLANNED: &[(&str, &str, &str)] = &[
     ("Domain", "collections", "§16"),
     ("Range", "collections", "§16"),
     ("Map", "collections", "§16"),
-    ("Error", "errors", "§18"),
     ("Task", "tasks", "§19.1"),
     ("Type", "the type `Type`", "§15"),
 ];
@@ -35,8 +35,12 @@ impl Checker<'_> {
                 return self.named_type(name, args, ty);
             }
             ast::TypeExprKind::Named { .. } => ("modules", "§20"),
-            ast::TypeExprKind::Maybe(_) | ast::TypeExprKind::Union(_) => {
-                ("union types (`or`, `maybe`)", "§7.3")
+            // `maybe maybe T` is `maybe T` (§7.3).
+            ast::TypeExprKind::Maybe(inner) => return self.resolve_type(inner).map(Type::maybe),
+            ast::TypeExprKind::Union(members) => {
+                let members: Vec<Option<Type>> =
+                    members.iter().map(|member| self.resolve_type(member)).collect();
+                return members.into_iter().collect::<Option<Vec<Type>>>().map(Type::union);
             }
             ast::TypeExprKind::Tuple(_) => ("tuples", "§16"),
             ast::TypeExprKind::Fun { .. } => ("function types", "§7.2, §11"),

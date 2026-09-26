@@ -1,0 +1,53 @@
+exit: 1
+----- stdout
+----- stderr
+error: `+` cannot be applied to maybe Int and Int
+  --> tests/errors/unions.lion:3:12
+   |
+ 3 | show(where + 1)
+   |      ----- this is a value of type `maybe Int`
+   |            ^
+   |
+   = `+` is defined for Int and Float values
+   = help: the value may be `none`: test it first, for instance `if x == none: return ;` (§7.4)
+
+error: `*` cannot be applied to Int or Error and Int
+  --> tests/errors/unions.lion:5:8
+   |
+ 5 | show(n * 2)
+   |      - this is a value of type `Int or Error`
+   |        ^
+   |
+   = `*` is defined for Int and Float values
+   = help: an Error must be handled first: `if x in Error: ... ;`, or `try x` (§18.3)
+
+error: `try` cannot return an Error from a function that returns an Int
+  --> tests/errors/unions.lion:6:32
+   |
+ 6 | fun strict(t in Text) in Int = try t as Int
+   |                                ^^^^^^^^^^^^
+   |
+   = help: declare the function `in Int or Error`, or handle the error with `if x in Error`
+
+error: a value of type `Int or Error` has no `message()`
+   --> tests/errors/unions.lion:10:6
+    |
+ 10 | show(maybe_error.message())
+    |      ^^^^^^^^^^^
+    |
+    = `message()` gives the text of an Error (§18.2)
+    = help: test it first: `if x in Error: show(x.message()) ;` (§7.4)
+
+error: mismatched types
+   --> tests/errors/unions.lion:14:9
+    |
+ 13 | let plain in Int
+    |     ----- `plain` is declared as an Int here
+ 14 | plain = where
+    |         ^^^^^ this is a value of type `maybe Int`
+    |
+    = expected: Int
+    = found: maybe Int
+    = help: the value may be `none`: test it first, for instance `if x == none: return ;` (§7.4)
+
+5 errors found

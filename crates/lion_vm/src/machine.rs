@@ -16,6 +16,8 @@ use crate::value::Value;
 pub enum Trap {
     /// A bug in the program (spec §18.1). `calls` are the calls in progress, innermost first.
     Bug { kind: BugKind, span: Option<Span>, calls: Vec<Span> },
+    /// `try` in the script met an Error: the script stops with its message (§18.3, D80).
+    Failure { message: String, span: Option<Span> },
     /// Writing the output failed.
     Io(io::Error),
 }
@@ -44,6 +46,13 @@ impl Trap {
                 diagnostic.with_note(kind.details()).with_help(kind.help())
             }
             Trap::Io(error) => Diagnostic::error(format!("cannot write the output: {error}")),
+            Trap::Failure { message, span } => {
+                let mut diagnostic = Diagnostic::error(message.clone());
+                if let Some(span) = span {
+                    diagnostic = diagnostic.with_primary(*span, "this `try` met the error");
+                }
+                diagnostic.with_note("the script stops on an Error that it does not handle (§18.3)")
+            }
         }
     }
 }
@@ -414,6 +423,50 @@ impl Machine<'_> {
                         self.alert(AlertKind::SpecialFloat { value: total }, at);
                     }
                     self.set(dst, Value::Float(total));
+                }
+                Instr::TypeTest { dst, src, kinds } => {
+                    let kind = self.stack[self.base + src as usize].kind();
+                    self.set(dst, Value::Bool(kind & kinds != 0));
+                }
+                Instr::Try { dst, src } => {
+                    let value = self.stack[self.base + src as usize].clone();
+                    if let Value::Error(message) = &value {
+                        if self.frames.len() == 1 {
+                            return Err(Trap::Failure {
+                                message: message.to_string(),
+                                span: self.chunk.spans[at],
+                            });
+                        }
+                        pc = self.return_to_caller(value);
+                        code = &self.chunk.code;
+                    } else {
+                        self.set(dst, value);
+                    }
+                }
+                Instr::NewError { dst, a } => {
+                    let message = self.text(a).to_string();
+                    self.set(dst, Value::Error(Rc::new(message)));
+                }
+                Instr::ErrorMessage { dst, a } => {
+                    let message = match &self.stack[self.base + a as usize] {
+                        Value::Error(message) => message.to_string(),
+                        other => self.mismatch("Error", other),
+                    };
+                    self.set(dst, Value::Text(Rc::new(message)));
+                }
+                Instr::TextToInt { dst, a } => {
+                    let value = match ops::parse_int(self.text(a)) {
+                        Ok(value) => Value::Int(value),
+                        Err(message) => Value::Error(Rc::new(message)),
+                    };
+                    self.set(dst, value);
+                }
+                Instr::TextToFloat { dst, a } => {
+                    let value = match ops::parse_float(self.text(a)) {
+                        Ok(value) => Value::Float(value),
+                        Err(message) => Value::Error(Rc::new(message)),
+                    };
+                    self.set(dst, value);
                 }
                 Instr::Halt => return Ok(()),
             }

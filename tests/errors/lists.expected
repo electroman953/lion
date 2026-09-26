@@ -32,14 +32,6 @@ error: the type of this empty list is not known
    |
    = help: write its type: `var l = [] in List of Int`, or `[] as List of Int`
 
-error: not implemented yet: the elements of a list of different types (the type would be a union such as `Int or Text`)
-  --> tests/errors/lists.lion:5:9
-   |
- 5 | let m = [1, "a"]
-   |         ^^^^^^^^
-   |
-   = this part of Lion (spec §7.3) is not supported by this version of the implementation
-
 error: an index is an Int, or an interval for an extract
   --> tests/errors/lists.lion:6:15
    |
@@ -97,4 +89,4 @@ error: a List of Int does not hold a Text
     |
     = Lion 0.1 does not define membership between values of different types
 
-11 errors found
+10 errors found

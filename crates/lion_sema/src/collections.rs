@@ -32,10 +32,36 @@ impl Checker<'_> {
             );
             return None;
         }
-        let values: Vec<Option<ir::Expr>> = elements.iter().map(|element| self.expr(element)).collect();
-        let values: Vec<ir::Expr> = values.into_iter().collect::<Option<_>>()?;
-        let element = self.common_type(&values, span, "the elements of a list")?;
-        let values = values.into_iter().map(|value| widen(value, element)).collect();
+        // An empty list among the elements takes the type of the others: `[[1], []]`.
+        let is_empty =
+            |element: &ast::Expr| matches!(&element.kind, ast::ExprKind::List(inner) if inner.is_empty());
+        let checked: Vec<Option<ir::Expr>> =
+            elements.iter().filter(|element| !is_empty(element)).map(|element| self.expr(element)).collect();
+        let checked: Vec<ir::Expr> = checked.into_iter().collect::<Option<_>>()?;
+        if checked.is_empty() {
+            self.diagnostics.push(
+                Diagnostic::error("the type of these empty lists is not known")
+                    .with_primary(span, "")
+                    .with_help("write the type: `[] as List of List of Int`"),
+            );
+            return None;
+        }
+        let element = self.common_type(&checked, span, "the elements of a list")?;
+        let mut checked = checked.into_iter();
+        let mut values = Vec::new();
+        for element_ast in elements {
+            if is_empty(element_ast) {
+                values.push(self.empty_list(element_ast, element).or_else(|| {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!("an empty list is not {}", article(element)))
+                            .with_primary(element_ast.span, ""),
+                    );
+                    None
+                })?);
+            } else {
+                values.push(widen(checked.next().expect("one value per element"), element));
+            }
+        }
         Some(typed(ir::ExprKind::List(values), Type::list(element), span))
     }
 
@@ -58,7 +84,8 @@ impl Checker<'_> {
         }
     }
 
-    /// One type for several values: the same, or Float when Int and Float are mixed (§8.5).
+    /// One type for several values: the same; Float when only Int and Float are mixed
+    /// (§8.5); otherwise their union, such as `Int or Text` (§7.3).
     pub(crate) fn common_type(&mut self, values: &[ir::Expr], span: Span, what: &str) -> Option<Type> {
         let first = values[0].ty;
         if values.iter().all(|value| value.ty == first) {
@@ -67,12 +94,13 @@ impl Checker<'_> {
         if values.iter().all(|value| value.ty.is_numeric()) {
             return Some(Type::Float);
         }
-        self.not_implemented(
-            span,
-            &format!("{what} of different types (the type would be a union such as `Int or Text`)"),
-            "§7.3",
-        );
-        None
+        let union = Type::union(values.iter().map(|value| value.ty));
+        let lists = union.members().into_iter().filter(|member| matches!(member, Type::List(_))).count();
+        if lists > 1 {
+            self.not_implemented(span, &format!("{what} that are lists of different types"), "§7.3");
+            return None;
+        }
+        Some(union)
     }
 
     /// Which elements are generators: `v in X` where `v` is new at that point (§16.4).

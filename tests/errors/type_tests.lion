@@ -1,0 +1,3 @@
+let n = 5
+let always = (n in Text)
+let surely = (n in Int)

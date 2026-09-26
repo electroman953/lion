@@ -90,6 +90,9 @@ impl Checker<'_> {
             };
         }
         let local = self.declare(&decl.name, ty, decl.mutable, decl.value.is_some());
+        if let Some(value) = &value {
+            self.narrow_to_value(local, value.ty);
+        }
         value.map(|value| ir::Stmt::Assign { place: ir::Place::Local(local), value })
     }
 
@@ -196,8 +199,16 @@ impl Checker<'_> {
             }
         };
         let context = (decl_span, format!("`{name}` is declared as {} here", article(ty)));
-        let Some(value) = self.coerce(value, ty, Some(context)) else {
-            if let Some(error) = self.diagnostics.last_mut() {
+        let value_type = value.ty;
+        let coerced = self.coerce(value, ty, Some(context));
+        if let (ir::Place::Local(local), Some(value)) = (place, &coerced) {
+            self.narrow_to_value(local, value.ty);
+        }
+        let Some(value) = coerced else {
+            // A union that was not tested is the problem, not the type of the variable.
+            if !ty.is_subset_of(value_type)
+                && let Some(error) = self.diagnostics.last_mut()
+            {
                 error.help.push(format!(
                     "to give `{name}` a value of another type, declare it again: `let {name} = ...` (§6.3)"
                 ));
@@ -233,9 +244,13 @@ impl Checker<'_> {
         let mut checked = Vec::new();
         for branch in branches {
             let cond = self.condition(&branch.cond, "if");
+            let facts = cond.as_ref().map(|cond| self.facts(cond)).unwrap_or_default();
             let before = self.ctx.flow.clone();
+            // The branch runs where the condition holds, the next one where it failed (§7.4).
+            self.apply(&facts.when_true);
             let body = self.block(&branch.body);
             ends.push(std::mem::replace(&mut self.ctx.flow, before));
+            self.apply(&facts.when_false);
             checked.push((cond, body));
         }
         // Without `else`, the flow where every condition is false goes on.
@@ -251,18 +266,23 @@ impl Checker<'_> {
     fn while_stmt(&mut self, cond: &ast::Expr, body: &ast::Block) -> Option<ir::Stmt> {
         // At the start of a turn, a local assigned in the body may hold a value from an
         // earlier turn.
-        for local in self.assigned_in(&body.stmts) {
-            if self.ctx.flow.is_reachable() && self.ctx.flow.get(local) == Assigned::No {
-                self.ctx.flow.set(local, Assigned::Maybe);
-            }
-        }
+        self.enter_loop(&body.stmts);
         let cond_ir = self.condition(cond, "while");
+        let facts = cond_ir.as_ref().map(|cond| self.facts(cond)).unwrap_or_default();
         let head = self.ctx.flow.clone();
         self.ctx.loops.push(LoopExits::default());
+        self.apply(&facts.when_true);
         let body_ir = self.block(body);
         let exits = self.ctx.loops.pop().expect("the loop is open");
         // `while true` only ends through `break`: no path leaves it when the condition is false.
-        let after = if matches!(cond.kind, ast::ExprKind::Bool(true)) { Flow::unreachable() } else { head };
+        let after = if matches!(cond.kind, ast::ExprKind::Bool(true)) {
+            Flow::unreachable()
+        } else {
+            let mut after = head;
+            std::mem::swap(&mut self.ctx.flow, &mut after);
+            self.apply(&facts.when_false);
+            std::mem::replace(&mut self.ctx.flow, after)
+        };
         self.ctx.flow = exits.breaks.into_iter().fold(after, Flow::join);
         Some(ir::Stmt::While { cond: cond_ir?, body: body_ir })
     }
@@ -285,11 +305,7 @@ impl Checker<'_> {
             },
             None => None,
         };
-        for local in self.assigned_in(&body.stmts) {
-            if self.ctx.flow.is_reachable() && self.ctx.flow.get(local) == Assigned::No {
-                self.ctx.flow.set(local, Assigned::Maybe);
-            }
-        }
+        self.enter_loop(&body.stmts);
         let head = self.ctx.flow.clone();
         self.ctx.loops.push(LoopExits::default());
         self.ctx.scopes.push(Scope::default());
@@ -300,6 +316,17 @@ impl Checker<'_> {
         let exits = self.ctx.loops.pop().expect("the loop is open");
         self.ctx.flow = exits.breaks.into_iter().fold(head, Flow::join);
         Some(ir::Stmt::For { var, iterable: iterable?, body })
+    }
+
+    /// At the start of a turn, a local assigned in the body may hold a value from an
+    /// earlier turn, of any of its types.
+    fn enter_loop(&mut self, body: &[ast::Stmt]) {
+        for local in self.assigned_in(body) {
+            if self.ctx.flow.is_reachable() && self.ctx.flow.get(local) == Assigned::No {
+                self.ctx.flow.set(local, Assigned::Maybe);
+            }
+            self.ctx.flow.narrow(local, None);
+        }
     }
 
     /// `break` or `continue`, in the innermost loop (§10.2).

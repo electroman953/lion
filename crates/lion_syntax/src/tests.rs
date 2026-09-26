@@ -38,11 +38,11 @@ fn in_after_a_declaration_value() {
     // §6.2: `in` followed by a type annotates; followed by a value, it tests membership.
     assert_eq!(ast("let x = 3 in Int"), "(let x 3 : Int)");
     assert_eq!(ast("let ok = 3 in primes"), "(let ok (in 3 primes))");
-    assert_eq!(ast("let ok = (3 in Int)"), "(let ok (paren (in 3 Int)))");
+    assert_eq!(ast("let ok = (3 in Int)"), "(let ok (paren (in-type 3 Int)))");
     assert_eq!(ast("let s = x in m.Student"), "(let s x : m.Student)");
     assert_eq!(ast("let n = a and b in Bool"), "(let n (and a b) : Bool)");
     assert_eq!(ast("let n = a < b in Bool"), "(let n (< a b) : Bool)");
-    assert_eq!(ast("if_ok = 3 in Int"), "(= if_ok (in 3 Int))");
+    assert_eq!(ast("if_ok = 3 in Int"), "(= if_ok (in-type 3 Int))");
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn precedence_examples_from_the_spec() {
     assert_eq!(ast("1..n - 1"), "(.. 1 (- n 1))");
     assert_eq!(ast("p + 2 in primes"), "(in (+ p 2) primes)");
     assert_eq!(ast("x + 1 as Text"), "(as (+ x 1) Text)");
-    assert_eq!(ast("y = not x in S"), "(= y (not (in x S)))");
+    assert_eq!(ast("y = not x in S"), "(= y (not (in-type x S)))");
 }
 
 #[test]
@@ -178,7 +178,6 @@ fn unsupported_constructions_are_reported() {
         ("Color = {red, green}", "not implemented yet: type definitions (enumerations and named unions)"),
         ("let s = {1, 2}", "not implemented yet: sets and comprehensions"),
         ("let t = (1, 2)", "not implemented yet: tuples"),
-        ("let v = try f()", "not implemented yet: `try`"),
     ];
     for (text, message) in cases {
         assert_eq!(first_error(text), message, "for {text:?}");
@@ -366,4 +365,19 @@ fn lists() {
     assert_eq!(ast("let e = l[2..4]"), "(let e (index l (.. 2 4)))");
     assert_eq!(first_error("let l = [1, 2,]"), "expected an expression, found `]`");
     assert_eq!(first_error("let l = [a: 1]"), "the elements of a list have no name, like `a:`");
+}
+
+#[test]
+fn type_tests_and_try() {
+    assert_eq!(ast("if v in Float: show(v) ;"), "(if (in-type v Float) [(call show v)])");
+    assert_eq!(
+        ast("let ok = (r in List of Int or Error)"),
+        "(let ok (paren (in-type r (or (List of Int) Error))))"
+    );
+    assert_eq!(ast("let ok = (x in primes)"), "(let ok (paren (in x primes)))");
+    assert_eq!(ast("y = not x in None"), "(= y (not (in-type x None)))");
+    // In a declaration, a final `in T` is still the annotation (§26 rule 1).
+    assert_eq!(ast("let x = 3 in Int"), "(let x 3 : Int)");
+    assert_eq!(ast("let g = try r.get(1) as Float"), "(let g (try (as (call (. r get) 1) Float)))");
+    assert_eq!(ast("return try text as Int"), "(return (try (as text Int)))");
 }

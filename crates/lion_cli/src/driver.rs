@@ -46,7 +46,7 @@ pub fn run(path: &str) -> ExitCode {
             eprintln!("{}", render(&trap.to_diagnostic(), &sources));
             match trap {
                 lion_vm::Trap::Bug { .. } => ExitCode::from(exit::BUG),
-                lion_vm::Trap::Io(_) => ExitCode::from(exit::REFUSED),
+                lion_vm::Trap::Io(_) | lion_vm::Trap::Failure { .. } => ExitCode::from(exit::REFUSED),
             }
         }
     }

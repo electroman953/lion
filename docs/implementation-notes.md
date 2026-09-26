@@ -93,11 +93,21 @@ Le 2026-09-26, l'auteur a délégué toutes les décisions « jusqu'à la fin du
 | C30 | Un Text ne se modifie pas caractère par caractère (`t[1] = "x"` est refusé) ; `t[i]`, `t[a..b]` et `t.size` comptent en caractères (D23, D42) | 16.2 |
 | C31 | `sum` accepte une liste d'Int ou de Float, et un intervalle ; la somme vide vaut 0 ou 0.0 | 23 |
 | C32 | `l[i] += v` évalue ses indices une seule fois | 9.2 |
+| C33 | Une valeur d'union n'est pas étiquetée : son type se lit sur la sorte de la valeur à l'exécution. Tester un type de liste dans une union qui en contient plusieurs (`List of Int or List of Text`) est « not implemented » | 7.3 |
+| C34 | `x in T` suivi d'un type est un test de type, même avec `of` (`r in List of Int`). Cela tranche O2 : la règle `comparison` du §26 s'étend aux types. Dans une déclaration, un `in T` final reste l'annotation (règle 1) | 7.1, 26 |
+| C35 | Un test toujours faux (`5 in Text`) est une erreur de compilation | 7.1 |
+| C36 | L'affinage (§7.4) vient de `x in T`, `x == none`, `x != none`, `not`, `and` (à droite de `and`, et dans la branche vraie) et `or` (à droite de `or`, et dans la branche fausse). Il s'applique aux variables locales et aux paramètres, pas aux globales lues par une fonction. Une affectation affine vers le type de la valeur ; une boucle oublie l'affinage des variables modifiées dans son corps ; un appel oublie celui des arguments `var` et, dans le script, des globales | 7.4 |
+| C37 | Des valeurs de types différents (branches d'un `if`, éléments d'une liste, `return`) ont pour type leur union ; un Int y rejoint Float si les deux apparaissent | 7.3, 8.5 |
+| C38 | `"12" as Int` et `as Float` ignorent les espaces autour ; ils acceptent un signe et, pour Float, la notation décimale avec exposant ; ils refusent `inf` et `nan`. Le message de l'Error dit pourquoi (D14) | 8.5 |
+| C39 | `try` au niveau du script arrête le script sur une Error : le message est affiché avec l'endroit du `try`, et le code de sortie est 1 | 18.3 |
+| C40 | Dans une fonction sans type de retour écrit, `try` ajoute `Error` au type de retour inféré | 11.4, 18.3 |
+| C41 | Une Error s'affiche comme un littéral : `error("message")` | 18.2 |
+| C42 | `Error` est pour l'instant un type prédéfini : les erreurs créées par `error(...)` et par la bibliothèque standard. Les types d'erreur définis par le programme (le trait du §18.2) viendront avec les structures et les traits | 18.2 |
 
 ## 5. Points de la spec à trancher plus tard (non bloquants aujourd'hui)
 
 - ~~**O1. Globales lues par une fonction avant leur initialisation.**~~ Tranché par C3 et C17.
-- **O2. `x in List of Int` hors d'un `match`.** La règle `comparison` de §26 n'accepte qu'une `as_expr` à droite de `in`, donc pas un type avec `of`, alors que les motifs de `match` l'acceptent. Le point deviendra concret avec les unions.
+- ~~**O2. `x in List of Int` hors d'un `match`.**~~ Tranché par C34.
 - **O3. Mode interactif.** La spec l'ouvre avec `lion` seul (§24) ; la demande d'implémentation mentionnait `lion repl`. L'implémentation suivra la spec.
 
 ## 6. Choix techniques (sans effet sur la sémantique)

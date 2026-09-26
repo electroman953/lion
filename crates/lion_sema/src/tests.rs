@@ -148,13 +148,41 @@ fn one_mistake_gives_one_message() {
 #[test]
 fn unsupported_types_are_reported() {
     assert_eq!(errors("var s in Set of Int"), ["not implemented yet: collections"]);
-    assert_eq!(errors("var m in maybe Int"), ["not implemented yet: union types (`or`, `maybe`)"]);
+}
+
+#[test]
+fn unions_and_narrowing() {
+    assert!(check_text("var m in maybe Int\nm = 3\nshow(m + 1)").is_ok());
     assert_eq!(
-        errors("let n = \"12\" as Int"),
-        [
-            "not implemented yet: converting a Text to a number (its result, `Int or Error`, needs union types)"
-        ]
+        errors("let n = \"12\" as Int\nshow(n + 1)"),
+        ["`+` cannot be applied to Int or Error and Int"]
     );
+    // A test narrows in its branch; an early exit narrows after it (§7.4).
+    assert!(check_text("let n = \"12\" as Int\nif n in Int: show(n + 1) ;").is_ok());
+    assert!(check_text("let n = \"12\" as Int\nif n in Error: return ;\nshow(n + 1)").is_ok());
+    assert!(check_text("let n = \"12\" as Int\nif n in Int and n > 3: show(n) ;").is_ok());
+    assert!(check_text("let n = \"12\" as Int\nif n in Error or n < 3: return ;\nshow(n + 1)").is_ok());
+    // Paths that did not narrow keep the whole union.
+    assert_eq!(
+        errors("let n = \"12\" as Int\nif n in Int: show(n) ;\nshow(n + 1)"),
+        ["`+` cannot be applied to Int or Error and Int"]
+    );
+    // Values of different types make a union (§7.3).
+    let ir = check_text("let v = if true then 1 else \"one\"").unwrap();
+    assert!(ir.contains("v#0 let Int or Text"), "{ir}");
+}
+
+#[test]
+fn errors_and_try() {
+    assert!(check_text("fun f(t in Text) in Int or Error = try t as Int\nshow(f(\"1\"))").is_ok());
+    assert_eq!(
+        errors("fun f(t in Text) in Int = try t as Int"),
+        ["`try` cannot return an Error from a function that returns an Int"]
+    );
+    assert_eq!(errors("let x = try 5"), ["`try` needs a value that may be an Error; this is an Int"]);
+    let ir = check_text("fun f(t in Text) = try t as Int").unwrap();
+    assert!(ir.contains("fun f in Int or Error"), "{ir}");
+    assert!(check_text("let e = error(\"oops\")\nshow(e.message())").is_ok());
 }
 
 #[test]

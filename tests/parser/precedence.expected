@@ -3,7 +3,7 @@ exit: 0
 (= x (.. 1 (- n 1)))
 (= x (in (+ p 2) primes))
 (= x (as (+ x 1) Text))
-(= x (not (in x S)))
+(= x (not (in-type x S)))
 (= x (- (+ 1 (* 2 3)) (/ 4 5)))
 (= x (mod (* (div 7 2) 3) 4))
 (= x (neg (^ 2 2)))

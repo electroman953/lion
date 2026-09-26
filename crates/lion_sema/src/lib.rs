@@ -14,6 +14,7 @@ mod expr;
 mod flow;
 mod functions;
 mod names;
+mod narrowing;
 mod stmt;
 mod types;
 
@@ -115,6 +116,8 @@ struct Context {
     returns: Vec<(Option<Type>, Span)>,
     /// Whether the value of a `return` had an error, so the return type is unknown.
     failed_return: bool,
+    /// How many `try` enclose the expression being checked (§18.3, D35).
+    in_try: u32,
     /// The globals read and the functions called, for the check of the calls made by
     /// the script (C3).
     reads: Vec<ir::LocalId>,
@@ -132,6 +135,7 @@ impl Context {
             loops: Vec::new(),
             returns: Vec::new(),
             failed_return: false,
+            in_try: 0,
             reads: Vec::new(),
             calls: Vec::new(),
             body: Vec::new(),
@@ -344,7 +348,9 @@ fn typed(kind: ir::ExprKind, ty: Type, span: Span) -> ir::Expr {
 fn article(ty: Type) -> String {
     match ty {
         Type::Int => "an Int".to_string(),
+        Type::Error => "an Error".to_string(),
         Type::None => "`none`".to_string(),
+        Type::Union(_) => format!("a value of type `{ty}`"),
         other => format!("a {other}"),
     }
 }

@@ -82,6 +82,48 @@ pub fn int_to_float(value: i64) -> (f64, bool) {
     (converted, converted as i128 == value as i128)
 }
 
+/// `text as Int` (§8.5): spaces around are ignored; the error says why (D14).
+pub fn parse_int(text: &str) -> Result<i64, String> {
+    let trimmed = text.trim();
+    let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+    if trimmed.is_empty() {
+        return Err(format!("{} is not an Int: it is empty", crate::format::quote_text(text)));
+    }
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return Err(format!("{} is not an Int: it is not a whole number", crate::format::quote_text(text)));
+    }
+    trimmed.parse().map_err(|_| format!("{} is too large for an Int", crate::format::quote_text(text)))
+}
+
+/// `text as Float` (§8.5): decimal notation with an optional exponent, spaces around
+/// ignored; the error says why (D14).
+pub fn parse_float(text: &str) -> Result<f64, String> {
+    let trimmed = text.trim();
+    let unsigned = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+    let (mantissa, exponent) = match unsigned.find(['e', 'E']) {
+        Some(at) => (&unsigned[..at], Some(&unsigned[at + 1..])),
+        None => (unsigned, None),
+    };
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits = |part: &str| part.chars().all(|c| c.is_ascii_digit());
+    let exponent_valid = exponent.is_none_or(|exponent| {
+        let exponent = exponent.strip_prefix(['+', '-']).unwrap_or(exponent);
+        !exponent.is_empty() && digits(exponent)
+    });
+    if trimmed.is_empty() {
+        return Err(format!("{} is not a Float: it is empty", crate::format::quote_text(text)));
+    }
+    if (whole.is_empty() && fraction.is_empty()) || !digits(whole) || !digits(fraction) || !exponent_valid {
+        return Err(format!("{} is not a Float: it is not a number", crate::format::quote_text(text)));
+    }
+    let value: f64 =
+        trimmed.parse().map_err(|_| format!("{} is not a Float", crate::format::quote_text(text)))?;
+    if value.is_infinite() {
+        return Err(format!("{} is too large for a Float", crate::format::quote_text(text)));
+    }
+    Ok(value)
+}
+
 fn overflow(op: IntOp, lhs: i64, rhs: i64) -> BugKind {
     BugKind::IntOverflow { op, lhs, rhs: Some(rhs) }
 }
@@ -139,6 +181,25 @@ mod tests {
         assert!(float_to_int(9_223_372_036_854_775_808.0).is_err());
         assert!(float_to_int(f64::NAN).is_err());
         assert!(float_to_int(f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn parsing_texts() {
+        assert_eq!(parse_int("12"), Ok(12));
+        assert_eq!(parse_int(" -7 "), Ok(-7));
+        assert!(parse_int("12a").unwrap_err().contains("not a whole number"));
+        assert!(parse_int("").unwrap_err().contains("empty"));
+        assert!(parse_int("99999999999999999999").unwrap_err().contains("too large"));
+        assert!(parse_int("1.5").is_err());
+        assert_eq!(parse_float("2.5"), Ok(2.5));
+        assert_eq!(parse_float("12"), Ok(12.0));
+        assert_eq!(parse_float("-1e3"), Ok(-1000.0));
+        assert_eq!(parse_float(".5"), Ok(0.5));
+        assert!(parse_float("inf").is_err());
+        assert!(parse_float("NaN").is_err());
+        assert!(parse_float("1e").is_err());
+        assert!(parse_float("abc").unwrap_err().contains("not a number"));
+        assert!(parse_float("1e999").unwrap_err().contains("too large"));
     }
 
     #[test]

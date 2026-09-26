@@ -1,0 +1,12 @@
+exit: 1
+----- stdout
+----- stderr
+error: this test is always false: the value is an Int
+  --> tests/errors/type_tests.lion:2:15
+   |
+ 2 | let always = (n in Text)
+   |               ^
+   |
+   = an Int is never a Text
+
+1 error found

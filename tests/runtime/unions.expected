@@ -1,0 +1,26 @@
+exit: 1
+----- stdout
+trouvé en 2
+none
+Zoé absente
+note 14, doublée : 28
+refusé : "abc" is not an Int: it is not a whole number
+refusé : 25 n'est pas une note sur 20
+2
+6
+none
+5.0
+[1, "un"]
+entier 1
+texte un
+6
+error("\"x\" is not an Int: it is not a whole number")
+----- stderr
+error: "oops" is not an Int: it is not a whole number
+   --> tests/runtime/unions.lion:53:11
+    |
+ 53 | let bad = try "oops" as Int
+    |           ^^^^^^^^^^^^^^^^^ this `try` met the error
+    |
+    = the script stops on an Error that it does not handle (§18.3)
+

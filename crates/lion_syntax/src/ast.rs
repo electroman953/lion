@@ -184,6 +184,13 @@ pub enum ExprKind {
         object: Box<Expr>,
         index: Box<Expr>,
     },
+    /// `x in T`: whether the value belongs to the type (§7.1).
+    TypeTest {
+        value: Box<Expr>,
+        ty: TypeExpr,
+    },
+    /// `try expr`: the value, or the Error it gives leaves the function (§18.3).
+    Try(Box<Expr>),
     /// `if c then a elif d then b else e` (§10.1).
     If {
         branches: Vec<(Expr, Expr)>,

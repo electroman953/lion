@@ -597,10 +597,14 @@ impl<'t> Parser<'t> {
             if *keyword == Keyword::If {
                 return self.if_expression();
             }
+            if *keyword == Keyword::Try {
+                let start = self.bump().span;
+                let value = self.expr()?;
+                return Ok(Expr { span: start.to(value.span), kind: ExprKind::Try(Box::new(value)) });
+            }
             let unsupported = match keyword {
                 Keyword::Match => Some(("`match`", "§10.3")),
                 Keyword::Fun => Some(("anonymous functions", "§11.1")),
-                Keyword::Try => Some(("`try`", "§18.3")),
                 Keyword::Task | Keyword::Wait => Some(("tasks", "§19.1")),
                 Keyword::Parallel => Some(("parallelism", "§19.2")),
                 Keyword::Compile => Some(("`compile`", "§21.1")),
@@ -678,8 +682,14 @@ impl<'t> Parser<'t> {
             Expr { kind: ExprKind::Compare { first: Box::new(first), rest }, span }
         } else if let Some(op) = self.membership_op() {
             let op_span = self.bump().span;
-            let rhs = self.as_expr()?;
-            binary(op, op_span, first, rhs)
+            // `x in Int`, `x in List of Int`: a type after `in` makes a type test (§7.1).
+            if op == BinaryOp::In && self.type_starts_at(self.pos) {
+                let ty = self.type_expr()?;
+                Expr { span: first.span.to(ty.span), kind: ExprKind::TypeTest { value: Box::new(first), ty } }
+            } else {
+                let rhs = self.as_expr()?;
+                binary(op, op_span, first, rhs)
+            }
         } else {
             return Ok(first);
         };

@@ -1,0 +1,7 @@
+exit: 0
+----- stdout
+["12", "15.5", "9"] : moyenne 12.166666666666666
+["12", "vingt"] : erreur, "vingt" is not a Float: it is not a number
+["18", "22"] : erreur, 22.0 n'est pas une note sur 20
+[] : erreur, aucune note
+----- stderr

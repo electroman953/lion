@@ -8,7 +8,7 @@ use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
 use crate::names::{IMPLEMENTED_FUNCTIONS, PLANNED_FUNCTIONS, Resolved};
-use crate::{Checker, GlobalType, article, typed};
+use crate::{Checker, ContextKind, GlobalType, article, typed};
 
 /// A comparison between two operands, specialised to their types.
 #[derive(Clone, Copy)]
@@ -42,6 +42,8 @@ impl Checker<'_> {
             ast::ExprKind::Index { object, index } => self.index(object, index, span),
             ast::ExprKind::List(elements) => self.list(elements, span),
             ast::ExprKind::If { branches, otherwise } => self.if_expr(branches, otherwise.as_deref(), span),
+            ast::ExprKind::TypeTest { value, ty } => self.type_test(value, ty, span),
+            ast::ExprKind::Try(value) => self.try_expr(value, span),
         }
     }
 
@@ -68,19 +70,26 @@ impl Checker<'_> {
         otherwise: Option<&ast::Expr>,
         span: Span,
     ) -> Option<ir::Expr> {
+        // Each value is checked where its condition holds, and the next condition
+        // where the previous ones failed (§7.4).
+        let before = self.ctx.flow.clone();
         let mut checked = Vec::new();
         for (cond, value) in branches {
-            checked.push((self.condition(cond, "if"), self.expr(value)));
+            let cond = self.condition(cond, "if");
+            let facts = cond.as_ref().map(|cond| self.facts(cond)).unwrap_or_default();
+            let outside = self.ctx.flow.clone();
+            self.apply(&facts.when_true);
+            let value = self.expr(value);
+            self.ctx.flow = outside;
+            self.apply(&facts.when_false);
+            checked.push((cond, value));
         }
-        let Some(otherwise) = otherwise else {
-            self.not_implemented(
-                span,
-                "`if ... then` without `else` (its value is a `maybe`, which needs union types)",
-                "§10.1, §7.3",
-            );
-            return None;
+        // Without `else`, the value is `none` when no condition holds (§10.1).
+        let otherwise = match otherwise {
+            Some(otherwise) => self.expr(otherwise),
+            None => Some(typed(ir::ExprKind::None, Type::None, span)),
         };
-        let otherwise = self.expr(otherwise);
+        self.ctx.flow = before;
         let mut valid = otherwise.is_some();
         let mut values = Vec::new();
         let mut conds = Vec::new();
@@ -93,21 +102,8 @@ impl Checker<'_> {
             return None;
         }
         values.push(otherwise.expect("checked above"));
-        let first = values[0].ty;
-        let ty = if values.iter().all(|value| value.ty == first) {
-            first
-        } else if values.iter().all(|value| value.ty.is_numeric()) {
-            Type::Float
-        } else {
-            self.not_implemented(
-                span,
-                "`if` expressions whose branches have different types (the value would be a union such as `Int or Text`)",
-                "§7.3, §10.1",
-            );
-            return None;
-        };
-        let mut values =
-            values.into_iter().map(|value| if ty == Type::Float { to_float(value) } else { value });
+        let ty = self.common_type(&values, span, "the values of an `if`")?;
+        let mut values = values.into_iter().map(|value| crate::collections::widen(value, ty));
         let mut result = values.next_back().expect("an `else` value");
         for (cond, then) in conds.into_iter().zip(values).rev() {
             let kind =
@@ -150,7 +146,7 @@ impl Checker<'_> {
         }
         match self.resolve(name, span) {
             Resolved::Local(local) => {
-                let ty = self.ctx.locals[local.index()].ty?;
+                let ty = self.local_type(local)?;
                 self.check_has_value(local, span).then(|| typed(ir::ExprKind::Local(local), ty, span))
             }
             // Whether it has a value is checked at the calls of the script (C3).
@@ -204,7 +200,6 @@ impl Checker<'_> {
         let unsupported = match op {
             Over => Some(("Rational numbers (`over`)", "§8.3")),
             Inter | Union | Minus | Subset => Some(("set operations", "§16.6")),
-            In if matches!(rhs.kind, ast::ExprKind::TypeName(_)) => Some(("type tests (`x in T`)", "§7.1")),
             Same => Some(("`same`", "§9.4, §17.2")),
             _ => None,
         };
@@ -212,11 +207,22 @@ impl Checker<'_> {
             self.not_implemented(op_span, what, section);
             return None;
         }
+        if matches!(op, And | Or) {
+            // The right side is checked where the left side has decided nothing yet:
+            // `x != none and x > 3` knows `x` is not `none` on the right (§7.4).
+            let lhs = self.expr(lhs);
+            let facts = lhs.as_ref().map(|lhs| self.facts(lhs)).unwrap_or_default();
+            let outside = self.ctx.flow.clone();
+            self.apply(if op == And { &facts.when_true } else { &facts.when_false });
+            let rhs = self.expr(rhs);
+            self.ctx.flow = outside;
+            return self.logical(op, lhs?, rhs?, span);
+        }
         let lhs = self.expr(lhs);
         let rhs = self.expr(rhs);
         let (lhs, rhs) = (lhs?, rhs?);
         match op {
-            And | Or => self.logical(op, lhs, rhs, span),
+            And | Or => unreachable!("handled above"),
             Range => self.range(lhs, rhs, span),
             In => self.membership(lhs, rhs, op_span, span),
             _ => self.arithmetic(op, op_span, lhs, rhs, span),
@@ -268,6 +274,107 @@ impl Checker<'_> {
         }
     }
 
+    /// `x in T`: whether the value belongs to the type (§7.1).
+    fn type_test(&mut self, value: &ast::Expr, ty: &ast::TypeExpr, span: Span) -> Option<ir::Expr> {
+        let value = self.expr(value);
+        let target = self.resolve_type(ty);
+        let (value, target) = (value?, target?);
+        let Some(tested) = value.ty.intersection(target) else {
+            self.diagnostics.push(
+                Diagnostic::error(format!("this test is always false: the value is {}", article(value.ty)))
+                    .with_primary(value.span, "")
+                    .with_note(format!("{} is never {}", article(value.ty), article(target))),
+            );
+            return None;
+        };
+        if !self.distinguishable(value.ty, tested, span) {
+            return None;
+        }
+        let kind = ir::ExprKind::TypeTest { value: Box::new(value), ty: tested };
+        Some(typed(kind, Type::Bool, span))
+    }
+
+    /// Whether a value of `whole` can be told to be in `part` while the program runs: a
+    /// value carries its kind (Int, List...), but not the type of the elements of a list.
+    pub(crate) fn distinguishable(&mut self, whole: Type, part: Type, span: Span) -> bool {
+        let lists = whole.members().into_iter().filter(|member| matches!(member, Type::List(_))).count();
+        let tested_lists =
+            part.members().into_iter().filter(|member| matches!(member, Type::List(_))).count();
+        if lists > 1 && tested_lists > 0 && tested_lists < lists {
+            self.not_implemented(span, "telling apart several list types in a union", "§7.3");
+            return false;
+        }
+        true
+    }
+
+    /// `try expr` (§18.3): the value without its Error, which leaves the function.
+    fn try_expr(&mut self, inner: &ast::Expr, span: Span) -> Option<ir::Expr> {
+        if !self.try_allowed(span) {
+            return None;
+        }
+        self.ctx.in_try += 1;
+        let value = self.expr(inner);
+        self.ctx.in_try -= 1;
+        let value = value?;
+        if !value.ty.members().contains(&Type::Error) {
+            self.diagnostics.push(
+                Diagnostic::error(format!(
+                    "`try` needs a value that may be an Error; this is {}",
+                    article(value.ty)
+                ))
+                .with_primary(value.span, "")
+                .with_note("`try` gives the value, or makes the function return the Error (§18.3)"),
+            );
+            return None;
+        }
+        self.unwrap_error(value, span)
+    }
+
+    /// `try` is allowed where an Error can leave: in a function whose return type may be
+    /// an Error, or in the script, which stops (§18.3, D80).
+    fn try_allowed(&mut self, span: Span) -> bool {
+        let ContextKind::Function(instance) = self.ctx.kind else { return true };
+        match self.declared_return(instance) {
+            Some(ret) if !ret.members().contains(&Type::Error) => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "`try` cannot return an Error from a function that returns {}",
+                        article(ret)
+                    ))
+                    .with_primary(span, "")
+                    .with_help(format!(
+                        "declare the function `in {ret} or Error`, or handle the error with `if x in Error`"
+                    )),
+                );
+                false
+            }
+            // An inferred return type gets `Error` from the `try`.
+            _ => true,
+        }
+    }
+
+    /// The value without its Error, which leaves the function or stops the script.
+    fn unwrap_error(&mut self, value: ir::Expr, span: Span) -> Option<ir::Expr> {
+        let Some(rest) = value.ty.without(Type::Error) else {
+            self.diagnostics
+                .push(Diagnostic::error("this value is always an Error").with_primary(value.span, ""));
+            return None;
+        };
+        if let ContextKind::Function(_) = self.ctx.kind {
+            self.ctx.returns.push((Some(Type::Error), span));
+        }
+        Some(typed(ir::ExprKind::Try(Box::new(value)), rest, span))
+    }
+
+    /// Inside `try`, every step that may give an Error is covered (§18.3, D35).
+    pub(crate) fn within_try(&mut self, value: ir::Expr) -> ir::Expr {
+        if self.ctx.in_try == 0 || !value.ty.members().contains(&Type::Error) || value.ty == Type::Error {
+            return value;
+        }
+        let span = value.span;
+        self.unwrap_error(value.clone(), span).unwrap_or(value)
+    }
+
     /// `and` and `or`, which only evaluate their right side when needed (§9.2).
     fn logical(&mut self, op: ast::BinaryOp, lhs: ir::Expr, rhs: ir::Expr, span: Span) -> Option<ir::Expr> {
         let mut valid = true;
@@ -303,6 +410,8 @@ impl Checker<'_> {
         span: Span,
     ) -> Option<ir::Expr> {
         use ast::BinaryOp as Op;
+        let lhs = self.within_try(lhs);
+        let rhs = self.within_try(rhs);
         if !(lhs.ty.is_numeric() && rhs.ty.is_numeric()) {
             self.arithmetic_type_error(op, op_span, &lhs, &rhs);
             return None;
@@ -349,6 +458,9 @@ impl Checker<'_> {
         error = error.with_note(format!("`{symbol}` is defined for Int and Float values"));
         if op == ast::BinaryOp::Add && (lhs.ty == Type::Text || rhs.ty == Type::Text) {
             error = error.with_help("to join texts, use interpolation: \"{a}{b}\" (§4.5)");
+        }
+        if let Some(help) = [lhs, rhs].iter().find_map(|operand| union_help(operand.ty)) {
+            error = error.with_help(help);
         }
         self.diagnostics.push(error);
     }
@@ -409,7 +521,12 @@ impl Checker<'_> {
                 Comparison { op: equality_op(B::EqNone, B::NeNone), on_floats: false }
             }
             // Collections compare their content (§9.4).
-            (Type::List(_) | Type::Range, _) if equality && lty == rty => {
+            (Type::List(_) | Type::Range | Type::Union(_), _) if equality && lty == rty => {
+                Comparison { op: equality_op(B::EqValue, B::NeValue), on_floats: false }
+            }
+            // A value of a union compares with a value of one of its members, as in
+            // `x == none` (§7.4).
+            _ if equality && (lty.is_subset_of(rty) || rty.is_subset_of(lty)) => {
                 Comparison { op: equality_op(B::EqValue, B::NeValue), on_floats: false }
             }
             _ if lty == rty => {
@@ -496,18 +613,21 @@ impl Checker<'_> {
             None => self.expr(value),
         };
         let (value, target) = (value?, target?);
+        let value = self.within_try(value);
         let conversion = match (value.ty, target) {
             (from, to) if from == to => return Some(ir::Expr { span, ..value }),
+            (from, to) if from.is_subset_of(to) => return Some(ir::Expr { span, ..value }),
             (Type::Int, Type::Float) => ir::Conversion::IntToFloat,
             (Type::Float, Type::Int) => ir::Conversion::FloatToInt,
             (Type::Int | Type::Float, Type::Text) => ir::Conversion::ToText,
-            (Type::Text, Type::Int | Type::Float) => {
-                self.not_implemented(
-                    span,
-                    "converting a Text to a number (its result, `Int or Error`, needs union types)",
-                    "§8.5, §18",
-                );
-                return None;
+            // From a Text, the conversion may fail: the result says why (§8.5, D14).
+            (Type::Text, Type::Int) => {
+                let ty = Type::union([Type::Int, Type::Error]);
+                return Some(ir::Expr { span, ..convert(ir::Conversion::TextToInt, value, ty) });
+            }
+            (Type::Text, Type::Float) => {
+                let ty = Type::union([Type::Float, Type::Error]);
+                return Some(ir::Expr { span, ..convert(ir::Conversion::TextToFloat, value, ty) });
             }
             (from, to) => {
                 self.diagnostics.push(
@@ -533,6 +653,9 @@ impl Checker<'_> {
                     );
                     return None;
                 }
+                ast::ExprKind::Field { ref object, ref name } if name.name == "message" => {
+                    return self.message(object, args, span);
+                }
                 ast::ExprKind::Field { .. } => ("methods", "§12.4"),
                 _ => ("calling a computed function", "§11.3"),
             };
@@ -543,6 +666,7 @@ impl Checker<'_> {
             Resolved::Function(index) => return self.call_function(index, callee.span, args, span),
             Resolved::Standard("show") => return self.show(args, span),
             Resolved::Standard("sum") => return self.sum(args, span),
+            Resolved::Standard("error") => return self.error_value(args, span),
             Resolved::Standard(standard) => {
                 self.not_implemented(callee.span, &format!("the standard function `{standard}`"), "§23");
                 return None;
@@ -569,6 +693,44 @@ impl Checker<'_> {
         }
         self.diagnostics.push(error);
         None
+    }
+
+    /// `error(message)`: a simple Error (§18.2, D65).
+    fn error_value(&mut self, args: &[ast::Arg], span: Span) -> Option<ir::Expr> {
+        let [arg] = args else {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`error` takes one message, not {} values", args.len()))
+                    .with_primary(span, ""),
+            );
+            return None;
+        };
+        let message = self.expr(&arg.value)?;
+        let message = self.coerce(message, Type::Text, None)?;
+        let kind = ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Error, args: vec![message] };
+        Some(typed(kind, Type::Error, span))
+    }
+
+    /// `e.message()`: the text of an Error (§18.2, D66).
+    fn message(&mut self, object: &ast::Expr, args: &[ast::Arg], span: Span) -> Option<ir::Expr> {
+        let error = self.expr(object)?;
+        let error = self.within_try(error);
+        if error.ty != Type::Error {
+            let mut diagnostic = Diagnostic::error(format!("{} has no `message()`", article(error.ty)))
+                .with_primary(error.span, "")
+                .with_note("`message()` gives the text of an Error (§18.2)");
+            if error.ty.members().contains(&Type::Error) {
+                diagnostic =
+                    diagnostic.with_help("test it first: `if x in Error: show(x.message()) ;` (§7.4)");
+            }
+            self.diagnostics.push(diagnostic);
+            return None;
+        }
+        if !args.is_empty() {
+            self.diagnostics.push(Diagnostic::error("`message()` takes no argument").with_primary(span, ""));
+            return None;
+        }
+        let kind = ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Message, args: vec![error] };
+        Some(typed(kind, Type::Text, span))
     }
 
     /// `show(value)`: any value can be shown (§23, D29).
@@ -618,11 +780,17 @@ impl Checker<'_> {
         expected: Type,
         context: Option<(Span, String)>,
     ) -> Option<ir::Expr> {
-        if expr.ty == expected {
+        if expr.ty == expected || expr.ty.is_subset_of(expected) {
             return Some(expr);
         }
-        if expr.ty == Type::Int && expected == Type::Float {
+        // An Int goes where a Float is expected, also in a union (§8.5).
+        let members = expected.members();
+        if expr.ty == Type::Int && members.contains(&Type::Float) && !members.contains(&Type::Int) {
             return Some(to_float(expr));
+        }
+        let expr = self.within_try(expr);
+        if expr.ty.is_subset_of(expected) {
+            return Some(expr);
         }
         let mut error = Diagnostic::error("mismatched types")
             .with_primary(expr.span, format!("this is {}", article(expr.ty)));
@@ -630,9 +798,29 @@ impl Checker<'_> {
             error = error.with_secondary(span, message);
         }
         error = error.with_note(format!("expected: {expected}")).with_note(format!("found: {}", expr.ty));
+        if expected.is_subset_of(expr.ty)
+            && let Some(help) = union_help(expr.ty)
+        {
+            error = error.with_help(help);
+        }
         self.diagnostics.push(error);
         None
     }
+}
+
+/// How to use a value of a union type as one of its members (§7.4, §18).
+pub(crate) fn union_help(ty: Type) -> Option<String> {
+    let members = ty.members();
+    if members.len() < 2 {
+        return None;
+    }
+    Some(if members.contains(&Type::Error) {
+        "an Error must be handled first: `if x in Error: ... ;`, or `try x` (§18.3)".to_string()
+    } else if members.contains(&Type::None) {
+        "the value may be `none`: test it first, for instance `if x == none: return ;` (§7.4)".to_string()
+    } else {
+        format!("test the type of the value first, for instance `if x in {}: ... ;` (§7.4)", members[0])
+    })
 }
 
 fn convert(conversion: ir::Conversion, value: ir::Expr, ty: Type) -> ir::Expr {

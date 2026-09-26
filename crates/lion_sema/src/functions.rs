@@ -488,7 +488,10 @@ impl<'a> Checker<'a> {
                     ),
             );
         }
-        if ret == Some(Type::Float) {
+        if let Some(ret) = ret
+            && ret.members().contains(&Type::Float)
+            && !ret.members().contains(&Type::Int)
+        {
             widen_returns(&mut body);
         }
         (body, defaults, param_types)
@@ -524,20 +527,26 @@ impl<'a> Checker<'a> {
                 ),
             );
             None
-        } else if values.iter().all(|(ty, _)| *ty == values[0].0) {
-            Some(values[0].0)
-        } else if values.iter().all(|(ty, _)| ty.is_numeric()) {
-            Some(Type::Float)
         } else {
-            self.not_implemented(
-                decl.name.span,
-                "functions that return values of different types (the result would be a union such as `Int or Text`)",
-                "§7.3, §11.4",
-            );
-            None
+            // The union of the returned types; an Int joins a Float when both appear (§8.5).
+            let union = Type::union(values.iter().map(|(ty, _)| *ty));
+            let members = union.members();
+            if members.contains(&Type::Int) && members.contains(&Type::Float) {
+                Some(Type::union(members.into_iter().filter(|member| *member != Type::Int)))
+            } else {
+                Some(union)
+            }
         };
         self.instances[instance].ret = ret.map_or(Ret::Failed, Ret::Inferred);
         ret
+    }
+
+    /// The return type written in the declaration of an instance's function.
+    pub(crate) fn declared_return(&self, instance: usize) -> Option<Type> {
+        match self.instances[instance].ret {
+            Ret::Declared(ty) => Some(ty),
+            _ => None,
+        }
     }
 
     /// The return type of an instance, checking its body first if it is inferred.
@@ -676,6 +685,11 @@ impl<'a> Checker<'a> {
         if self.ctx.kind == ContextKind::Script {
             let unassigned = self.unassigned_globals();
             self.script_calls.push(ScriptCall { instance, span, unassigned });
+            // The function may change the globals: what was known of them is forgotten.
+            let globals: Vec<ir::LocalId> = self.globals.values().filter_map(|global| global.local).collect();
+            for global in globals {
+                self.ctx.flow.narrow(global, None);
+            }
         }
         Some(self.build_call(instance, pending, ret, span))
     }
@@ -760,6 +774,8 @@ impl<'a> Checker<'a> {
                 if !self.check_has_value(local, span) {
                     return None;
                 }
+                // After the call, it may hold any value of its type.
+                self.ctx.flow.narrow(local, None);
                 let info = &self.ctx.locals[local.index()];
                 (ir::Place::Local(local), info.ty?, info.mutable, info.decl_span)
             }

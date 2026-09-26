@@ -3,6 +3,7 @@ exit: 1
 (fun square ((x)) = (* x x))
 (for i (.. 1 3) [(call show i)])
 (let l (list 1 2 3))
+(let w (try (call f)))
 (let ok 1)
 ----- stderr
 error: not implemented yet: structures
@@ -37,12 +38,4 @@ error: not implemented yet: tuples
    |
    = this part of Lion (spec §16) is not supported by this version of the implementation
 
-error: not implemented yet: `try`
-  --> tests/parser/unsupported.lion:9:9
-   |
- 9 | let w = try f()
-   |         ^^^
-   |
-   = this part of Lion (spec §18.3) is not supported by this version of the implementation
-
-5 errors found
+4 errors found

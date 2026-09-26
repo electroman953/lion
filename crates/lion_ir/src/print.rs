@@ -145,6 +145,8 @@ impl Printer<'_> {
                 format!("(list{}{})", if elements.is_empty() { "" } else { " " }, elements.join(" "))
             }
             ExprKind::Index { object, index } => format!("(index {} {})", print(object), print(index)),
+            ExprKind::TypeTest { value, ty } => format!("(in_type {} {ty})", print(value)),
+            ExprKind::Try(value) => format!("(try {})", print(value)),
             ExprKind::Slice { object, range } => format!("(slice {} {})", print(object), print(range)),
             ExprKind::Property { object, property } => format!("({} {})", property.name(), print(object)),
             ExprKind::Block { stmts, value } => {

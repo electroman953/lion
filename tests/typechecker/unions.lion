@@ -1,0 +1,10 @@
+fun half(text in Text) in Int or Error:
+    let value = try text as Int
+    return value div 2
+;
+let result = half("8")
+if result in Error: return ;
+let doubled = result * 2
+var cell in maybe Int
+cell = 3
+let next = cell + 1

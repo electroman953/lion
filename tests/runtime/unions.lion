@@ -1,0 +1,54 @@
+fun find(names in List of Text, wanted in Text) in maybe Int:
+    for i in 1..names.size:
+        if names[i] == wanted: return i ;
+    ;
+    return none
+;
+let names = ["Léa", "Tom"]
+let where = find(names, "Tom")
+if where == none:
+    show("absent")
+else:
+    show("trouvé en {where + 1 - 1}")
+;
+let missing = find(names, "Zoé")
+show(missing)
+if missing in None: show("Zoé absente") ;
+
+fun parse_grade(text in Text) in Int or Error:
+    let value = try text as Int
+    if not (0 <= value <= 20):
+        return error("{value} n'est pas une note sur 20")
+    ;
+    return value
+;
+for input in ["14", "abc", "25"]:
+    let grade = parse_grade(input)
+    if grade in Error:
+        show("refusé : {grade.message()}")
+        continue
+    ;
+    show("note {grade}, doublée : {grade * 2}")
+;
+let bonus = if where != none and where > 1 then 2
+show(bonus)
+var cell = 5 in maybe Int
+show(cell + 1)
+cell = none
+show(cell)
+let f = "2.5" as Float
+if f in Float: show(f * 2) ;
+let mixed = [1, "un"]
+show(mixed)
+for m in mixed:
+    if m in Int: show("entier {m}") else: show("texte {m}") ;
+;
+fun total(texts in List of Text) in Int or Error:
+    var sum_ = 0
+    for t in texts: sum_ += try t as Int ;
+    return sum_
+;
+show(total(["1", "2", "3"]))
+show(total(["1", "x"]))
+let bad = try "oops" as Int
+show("never")

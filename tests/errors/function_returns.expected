@@ -35,14 +35,6 @@ error: `nothing` returns an Int: this `return` needs a value
  10 |     return
     |     ^^^^^^
 
-error: not implemented yet: functions that return values of different types (the result would be a union such as `Int or Text`)
-   --> tests/errors/function_returns.lion:12:5
-    |
- 12 | fun different(x in Int):
-    |     ^^^^^^^^^
-    |
-    = this part of Lion (spec §7.3, §11.4) is not supported by this version of the implementation
-
 error: the return type of `loop_forever` must be written
    --> tests/errors/function_returns.lion:16:30
     |
@@ -52,4 +44,4 @@ error: the return type of `loop_forever` must be written
     |
     = help: write it after the parameters: `fun loop_forever(...) in Type`
 
-6 errors found
+5 errors found
