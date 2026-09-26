@@ -1,0 +1,6 @@
+// The `;` of the inner `if` is missing; indentation tells where (§5.3).
+while true:
+    if a:
+        show(1)
+    show(2)
+;

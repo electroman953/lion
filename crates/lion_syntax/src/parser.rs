@@ -18,7 +18,14 @@ pub struct Parsed {
 /// Parses the tokens of one file, which must end with [`TokenKind::Eof`].
 pub fn parse(tokens: &[Token]) -> Parsed {
     assert!(matches!(tokens.last().map(|t| &t.kind), Some(TokenKind::Eof)));
-    let mut parser = Parser { tokens, pos: 0, diagnostics: Vec::new(), annotation_ends_expr: false };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        diagnostics: Vec::new(),
+        annotation_ends_expr: false,
+        misaligned: None,
+        reported_unclosed: false,
+    };
     let module = parser.module();
     Parsed { module, diagnostics: parser.diagnostics }
 }
@@ -35,9 +42,25 @@ struct Parser<'t> {
     /// Set while parsing the value of a `let` or `var`: a top-level `in` followed by a
     /// type then starts the type annotation, not a membership test (§6.2, §26 rule 1).
     annotation_ends_expr: bool,
+    /// The first block closed by a `;`, `elif` or `else` less indented than the line
+    /// that opened it: the likely place of a forgotten `;` (§5.3).
+    misaligned: Option<(Opener, usize)>,
+    /// Whether a block left open at the end of the file has been reported.
+    reported_unclosed: bool,
 }
 
-impl Parser<'_> {
+/// The statement that opened a block, for messages about how the block ends.
+#[derive(Clone, Copy)]
+struct Opener {
+    /// `if` or `while`.
+    keyword: &'static str,
+    /// The token index of that keyword.
+    index: usize,
+    /// The token index of the keyword starting the current branch (`if`, `elif`, `else`).
+    branch: usize,
+}
+
+impl<'t> Parser<'t> {
     fn module(&mut self) -> Module {
         let mut stmts = Vec::new();
         loop {
@@ -61,6 +84,19 @@ impl Parser<'_> {
         }
         match self.peek() {
             TokenKind::Keyword(Keyword::Let | Keyword::Var) => self.let_statement(),
+            TokenKind::Keyword(Keyword::If) => self.if_statement(),
+            TokenKind::Keyword(Keyword::While) => self.while_statement(),
+            TokenKind::Keyword(Keyword::Break) => Ok(Stmt { kind: StmtKind::Break, span: self.bump().span }),
+            TokenKind::Keyword(Keyword::Continue) => {
+                Ok(Stmt { kind: StmtKind::Continue, span: self.bump().span })
+            }
+            TokenKind::Keyword(Keyword::Return) => self.return_statement(),
+            TokenKind::Keyword(keyword @ (Keyword::Elif | Keyword::Else)) => {
+                let error = Diagnostic::error(format!("`{}` without `if`", keyword.as_str()))
+                    .with_primary(start, "")
+                    .with_note("`elif` and `else` continue the block of an `if` (§5.2)");
+                Err(self.error(error))
+            }
             TokenKind::Semicolon => Err(self.stray_semicolon()),
             kind if is_operator(kind) => Err(self.error(
                 Diagnostic::error("a line cannot start with an operator").with_primary(start, "").with_help(
@@ -80,10 +116,8 @@ impl Parser<'_> {
         let TokenKind::Keyword(keyword) = self.peek() else { return None };
         Some(match keyword {
             Keyword::Fun | Keyword::Infix => ("functions", "§11"),
-            Keyword::If => ("`if` blocks", "§5.2, §10.1"),
-            Keyword::While | Keyword::For | Keyword::Break | Keyword::Continue => ("loops", "§10.2"),
+            Keyword::For => ("`for` loops, which need collections and intervals", "§10.2, §16"),
             Keyword::Match => ("`match`", "§10.3"),
-            Keyword::Return => ("`return`", "§11.4, §20.1"),
             Keyword::Struct => ("structures", "§12"),
             Keyword::Trait => ("traits", "§14"),
             Keyword::Use => ("modules", "§20"),
@@ -147,6 +181,213 @@ impl Parser<'_> {
         value
     }
 
+    /// `if c: ... elif d: ... else: ... ;`, or an `if ... then ... else` expression
+    /// used as a statement (§5.2, §10.1).
+    fn if_statement(&mut self) -> PResult<Stmt> {
+        let index = self.pos;
+        let start = self.bump().span;
+        let cond = self.nested(Self::expr)?;
+        if self.at_keyword(Keyword::Then) {
+            let expr = self.if_expression_rest(start, cond)?;
+            return Ok(Stmt { span: expr.span, kind: StmtKind::Expr(expr) });
+        }
+        let opener = Opener { keyword: "if", index, branch: index };
+        let mut branches = vec![Branch { cond, body: self.block(opener)? }];
+        let mut otherwise = None;
+        while otherwise.is_none() {
+            let branch = self.pos;
+            match self.peek() {
+                TokenKind::Keyword(Keyword::Elif) => {
+                    self.check_alignment(opener, branch);
+                    self.bump();
+                    let cond = self.nested(Self::expr)?;
+                    branches.push(Branch { cond, body: self.block(Opener { branch, ..opener })? });
+                }
+                TokenKind::Keyword(Keyword::Else) => {
+                    self.check_alignment(opener, branch);
+                    self.bump();
+                    otherwise = Some(self.block(Opener { branch, ..opener })?);
+                }
+                _ => break,
+            }
+        }
+        let end = self.close_block(opener)?;
+        Ok(Stmt { kind: StmtKind::If { branches, otherwise }, span: start.to(end) })
+    }
+
+    /// `while c: ... ;` (§10.2).
+    fn while_statement(&mut self) -> PResult<Stmt> {
+        let index = self.pos;
+        let start = self.bump().span;
+        let cond = self.nested(Self::expr)?;
+        let opener = Opener { keyword: "while", index, branch: index };
+        let body = self.block(opener)?;
+        let end = self.close_block(opener)?;
+        Ok(Stmt { kind: StmtKind::While { cond, body }, span: start.to(end) })
+    }
+
+    fn return_statement(&mut self) -> PResult<Stmt> {
+        let start = self.bump().span;
+        if self.at_line_end() || self.at_block_end() {
+            return Ok(Stmt { kind: StmtKind::Return(None), span: start });
+        }
+        let value = self.expr()?;
+        Ok(Stmt { span: start.to(value.span), kind: StmtKind::Return(Some(value)) })
+    }
+
+    /// `:` and the body of a block: either one statement on the same line, or lines
+    /// up to the `;`, `elif` or `else` that ends the body, left to the caller (§5.2).
+    fn block(&mut self, opener: Opener) -> PResult<Block> {
+        if !self.at(&TokenKind::Colon) {
+            return Err(self.expected("`:` to open the block"));
+        }
+        self.bump();
+        if self.at_block_end() {
+            let error = Diagnostic::error("a one-line block needs a statement")
+                .with_primary(self.span(), "")
+                .with_help("an empty block is written with `:` at the end of the line and `;` on the next one (§5.2)");
+            return Err(self.error(error));
+        }
+        if !self.at_line_end() {
+            let stmt = self.statement()?;
+            if !self.at_block_end() {
+                return Err(self.unclosed_one_line_block(opener));
+            }
+            return Ok(Block { stmts: vec![stmt] });
+        }
+        let mut stmts = Vec::new();
+        loop {
+            while self.eat(&TokenKind::Newline) {}
+            if self.at_block_end() {
+                return Ok(Block { stmts });
+            }
+            if self.at(&TokenKind::Eof) {
+                return Err(self.unclosed_block(opener));
+            }
+            match self.statement() {
+                Ok(stmt) => {
+                    stmts.push(stmt);
+                    self.end_of_line_in_block(opener);
+                }
+                Err(Reported) => self.skip_statement(),
+            }
+        }
+    }
+
+    /// After a statement in a block of several lines. A `;` on the same line is reported,
+    /// then taken as the end of the block to recover (§26: `line = [statement] NL`).
+    fn end_of_line_in_block(&mut self, opener: Opener) {
+        match self.peek() {
+            TokenKind::Newline | TokenKind::Eof => {}
+            TokenKind::Semicolon | TokenKind::Keyword(Keyword::Elif | Keyword::Else) => {
+                let found = self.peek().describe();
+                let opened = self.line_of(opener.branch);
+                let error = Diagnostic::error(format!("{found} must start a new line here"))
+                    .with_primary(self.span(), format!("this ends the block opened on line {opened}"))
+                    .with_help("a block of several lines ends with `;`, `elif` or `else` at the start of a line; a block on one line is written `if x > 0: show(x) ;` (§5.2)");
+                self.error(error);
+            }
+            _ => {
+                let _ = self.end_of_statement();
+                self.skip_statement();
+            }
+        }
+    }
+
+    /// The `;` that closes a whole `if` or `while` statement.
+    fn close_block(&mut self, opener: Opener) -> PResult<Span> {
+        let span = self.span();
+        match self.peek() {
+            TokenKind::Semicolon => {
+                self.check_alignment(opener, self.pos);
+                Ok(self.bump().span)
+            }
+            TokenKind::Keyword(keyword @ (Keyword::Elif | Keyword::Else)) => {
+                let keyword = keyword.as_str();
+                let note = if opener.keyword == "if" {
+                    "an `if` has at most one `else`, which comes last (§5.2)"
+                } else {
+                    "only an `if` has `elif` and `else` branches (§5.2)"
+                };
+                let error = Diagnostic::error(format!("unexpected `{keyword}`"))
+                    .with_primary(span, "")
+                    .with_secondary(self.tokens[opener.index].span, format!("in this `{}`", opener.keyword))
+                    .with_note(note);
+                Err(self.error(error))
+            }
+            _ => Err(self.expected("`;` to close the block")),
+        }
+    }
+
+    fn unclosed_one_line_block(&mut self, opener: Opener) -> Reported {
+        let mut error = Diagnostic::error(format!("the one-line `{}` block is not closed", opener.keyword))
+            .with_primary(self.span(), "expected `;` here")
+            .with_secondary(self.tokens[opener.branch].span, "block opened here");
+        error = error.with_help(if self.at_line_end() {
+            "a block written on one line ends with `;` on the same line: `if x > 0: show(x) ;`; for several lines, start the block on a new line after `:` (§5.2)"
+        } else {
+            "a one-line block holds a single statement, followed by `;` (§5.2)"
+        });
+        self.error(error)
+    }
+
+    /// A block still open at the end of the file. Indentation does not change the meaning
+    /// of a program, but it shows where the `;` was probably forgotten (§5.3).
+    fn unclosed_block(&mut self, opener: Opener) -> Reported {
+        if std::mem::replace(&mut self.reported_unclosed, true) {
+            return Reported;
+        }
+        let keyword = opener.keyword;
+        let mut error = Diagnostic::error(format!("the `{keyword}` block is never closed"))
+            .with_primary(self.tokens[opener.index].span, "this block has no `;`");
+        let suspect = self.misaligned.map_or(opener, |(suspect, _)| suspect);
+        if let Some(line_start) = self.first_dedented_line(suspect) {
+            error =
+                error.with_secondary(self.tokens[line_start].span, "`;` probably forgotten before this line");
+            if let Some((suspect, closing)) = self.misaligned {
+                error = error.with_note(format!(
+                    "the `{}` of line {} is closed by the {} of line {}, which is less indented than it",
+                    suspect.keyword,
+                    self.line_of(suspect.index),
+                    self.tokens[closing].kind.describe(),
+                    self.line_of(closing)
+                ));
+            }
+        } else {
+            error = error.with_help("close the block with `;` on its own line (§5.2)");
+        }
+        self.error(error)
+    }
+
+    /// The first line after the current branch of `opener` that is not more indented
+    /// than the line of `opener`, other than the `elif` and `else` of the same `if`.
+    fn first_dedented_line(&self, opener: Opener) -> Option<usize> {
+        let indent = self.tokens[opener.index].indent;
+        for (index, token) in self.tokens.iter().enumerate().skip(opener.branch + 1) {
+            if token.kind == TokenKind::Eof {
+                return None;
+            }
+            if !token.starts_line || token.indent > indent {
+                continue;
+            }
+            let own_branch = matches!(token.kind, TokenKind::Keyword(Keyword::Elif | Keyword::Else))
+                && opener.keyword == "if"
+                && token.indent == indent;
+            if !own_branch {
+                return Some(index);
+            }
+        }
+        None
+    }
+
+    /// Remembers a block whose end is less indented than its start (§5.3).
+    fn check_alignment(&mut self, opener: Opener, closing: usize) {
+        let (open, close) = (&self.tokens[opener.index], &self.tokens[closing]);
+        if close.starts_line && close.indent < open.indent && self.misaligned.is_none() {
+            self.misaligned = Some((opener, closing));
+        }
+    }
+
     fn expr_statement(&mut self) -> PResult<Stmt> {
         let target = self.expr()?;
         let op = match self.peek() {
@@ -185,6 +426,18 @@ impl Parser<'_> {
                 ))
             }
         }
+    }
+
+    fn at_line_end(&self) -> bool {
+        matches!(self.peek(), TokenKind::Newline | TokenKind::Eof)
+    }
+
+    fn at_block_end(&self) -> bool {
+        matches!(self.peek(), TokenKind::Semicolon | TokenKind::Keyword(Keyword::Elif | Keyword::Else))
+    }
+
+    fn line_of(&self, index: usize) -> u32 {
+        self.tokens[index].line
     }
 
     fn stray_semicolon(&mut self) -> Reported {
@@ -226,8 +479,10 @@ impl Parser<'_> {
 
     fn expr(&mut self) -> PResult<Expr> {
         if let TokenKind::Keyword(keyword) = self.peek() {
+            if *keyword == Keyword::If {
+                return self.if_expression();
+            }
             let unsupported = match keyword {
-                Keyword::If => Some(("`if ... then ... else` expressions", "§10.1")),
                 Keyword::Match => Some(("`match`", "§10.3")),
                 Keyword::Fun => Some(("anonymous functions", "§11.1")),
                 Keyword::Try => Some(("`try`", "§18.3")),
@@ -242,6 +497,31 @@ impl Parser<'_> {
             }
         }
         self.or_expr()
+    }
+
+    /// `if c then a elif d then b else e`, which covers the whole expression to its
+    /// right (§9.1, §10.1).
+    fn if_expression(&mut self) -> PResult<Expr> {
+        let start = self.bump().span;
+        let cond = self.nested(Self::expr)?;
+        self.if_expression_rest(start, cond)
+    }
+
+    fn if_expression_rest(&mut self, start: Span, cond: Expr) -> PResult<Expr> {
+        if !self.eat_keyword(Keyword::Then) {
+            return Err(self.expected("`then`"));
+        }
+        let mut branches = vec![(cond, self.expr()?)];
+        while self.eat_keyword(Keyword::Elif) {
+            let cond = self.nested(Self::expr)?;
+            if !self.eat_keyword(Keyword::Then) {
+                return Err(self.expected("`then`"));
+            }
+            branches.push((cond, self.expr()?));
+        }
+        let otherwise = if self.eat_keyword(Keyword::Else) { Some(Box::new(self.expr()?)) } else { None };
+        let end = otherwise.as_ref().map_or(branches.last().expect("one branch").1.span, |e| e.span);
+        Ok(Expr { kind: ExprKind::If { branches, otherwise }, span: start.to(end) })
     }
 
     fn or_expr(&mut self) -> PResult<Expr> {
@@ -727,11 +1007,11 @@ impl Parser<'_> {
         result
     }
 
-    fn peek(&self) -> &TokenKind {
+    fn peek(&self) -> &'t TokenKind {
         &self.tokens[self.pos].kind
     }
 
-    fn kind_at(&self, index: usize) -> &TokenKind {
+    fn kind_at(&self, index: usize) -> &'t TokenKind {
         &self.tokens[index.min(self.tokens.len() - 1)].kind
     }
 

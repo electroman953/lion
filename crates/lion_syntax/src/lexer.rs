@@ -26,6 +26,7 @@ pub fn lex(source: SourceId, text: &str) -> Lexed {
         tokens: Vec::new(),
         diagnostics: Vec::new(),
         frames: vec![Frame::Code { depth: 0 }],
+        counted: (0, 1),
     };
     lexer.run();
     Lexed { tokens: lexer.tokens, diagnostics: lexer.diagnostics }
@@ -48,6 +49,8 @@ struct Lexer<'a> {
     tokens: Vec<Token>,
     diagnostics: Vec<Diagnostic>,
     frames: Vec<Frame>,
+    /// A byte offset and its line, from which the line of the next token is counted.
+    counted: (usize, u32),
 }
 
 impl Lexer<'_> {
@@ -473,7 +476,22 @@ impl Lexer<'_> {
 
     fn push(&mut self, kind: TokenKind, start: usize, end: usize) {
         let span = self.span(start, end);
-        self.tokens.push(Token { kind, span });
+        let line_start = self.text[..start].rfind('\n').map_or(0, |i| i + 1);
+        let before = &self.text[line_start..start];
+        let starts_line = before.chars().all(|c| c == ' ' || c == '\t' || c == '\u{feff}');
+        let mut indent = 0;
+        for c in self.text[line_start..].chars() {
+            match c {
+                ' ' => indent += 1,
+                '\t' => indent = (indent / 4 + 1) * 4,
+                _ => break,
+            }
+        }
+        // Tokens come in increasing order, so lines are counted incrementally.
+        let (from, line) = self.counted;
+        let line = line + self.text[from..start].matches('\n').count() as u32;
+        self.counted = (start, line);
+        self.tokens.push(Token { kind, span, indent, starts_line, line });
     }
 }
 
@@ -527,6 +545,34 @@ mod tests {
 
     fn lower(name: &str) -> TokenKind {
         TokenKind::LowerIdent(name.to_string())
+    }
+
+    #[test]
+    fn indentation_of_tokens() {
+        let mut map = SourceMap::new();
+        let text = "if a:\n    b = 1\n\t c\n;";
+        let id = map.add("t.lion", text);
+        let tokens = lex(id, text).tokens;
+        let summary: Vec<(u32, bool)> = tokens.iter().map(|t| (t.indent, t.starts_line)).collect();
+        assert_eq!(
+            summary,
+            [
+                (0, true),
+                (0, false),
+                (0, false),
+                (0, false), // if a : newline
+                (4, true),
+                (4, false),
+                (4, false),
+                (4, false), // b = 1 newline
+                (5, true),
+                (5, false), // c newline
+                (0, true),
+                (0, false), // ; eof
+            ]
+        );
+        let lines: Vec<u32> = tokens.iter().map(|t| t.line).collect();
+        assert_eq!(lines, [1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4]);
     }
 
     #[test]

@@ -5,7 +5,9 @@
 //! builds an [`ir::Program`] only when there is none.
 
 mod expr;
+mod flow;
 mod names;
+mod stmt;
 mod types;
 
 use std::collections::HashMap;
@@ -14,6 +16,8 @@ use lion_diagnostics::{Diagnostic, Span};
 use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
+use crate::flow::{Assigned, Flow};
+
 pub struct Checked {
     /// Present only when there are no errors.
     pub program: Option<ir::Program>,
@@ -21,11 +25,16 @@ pub struct Checked {
 }
 
 pub fn check(module: &ast::Module) -> Checked {
-    let mut checker = Checker::default();
-    for stmt in &module.stmts {
-        checker.stmt(stmt);
-    }
-    checker.finish()
+    let mut checker = Checker {
+        diagnostics: Vec::new(),
+        locals: Vec::new(),
+        scopes: vec![Scope::default()],
+        flow: Flow::start(),
+        loops: Vec::new(),
+    };
+    let body = checker.stmts(&module.stmts);
+    checker.close_scope();
+    checker.finish(body)
 }
 
 /// What the checker knows about a local.
@@ -38,178 +47,38 @@ struct LocalInfo {
     decl_span: Span,
     /// Declared with a value (`let x = 1`) rather than without (`let x in Int`).
     initialized: bool,
-    /// Where it received its first value, when declared without one.
-    assigned_at: Option<Span>,
+    /// The first assignment met, for messages.
+    first_assignment: Option<Span>,
 }
 
-impl LocalInfo {
-    fn has_value(&self) -> bool {
-        self.initialized || self.assigned_at.is_some()
-    }
-}
-
+/// The names declared in one block.
 #[derive(Default)]
+struct Scope {
+    names: HashMap<String, ir::LocalId>,
+    /// In order of declaration, including those hidden by a later declaration.
+    declared: Vec<ir::LocalId>,
+}
+
+/// The flows that leave a loop through `break`.
+#[derive(Default)]
+struct LoopExits {
+    breaks: Vec<Flow>,
+}
+
 struct Checker {
     diagnostics: Vec<Diagnostic>,
     locals: Vec<LocalInfo>,
-    /// The names visible in the file's top-level block. Declaring a name again in the
-    /// same block replaces the entry: the new binding hides the old one (§6.3).
-    scope: HashMap<String, ir::LocalId>,
-    body: Vec<ir::Stmt>,
+    /// The blocks being checked, innermost last. Declaring a name again in the same
+    /// block hides the old binding (§6.3); declaring a name of an enclosing block in an
+    /// inner block is an error (§6.5).
+    scopes: Vec<Scope>,
+    /// What is known at the current point of the program.
+    flow: Flow,
+    /// The loops being checked, innermost last.
+    loops: Vec<LoopExits>,
 }
 
 impl Checker {
-    fn stmt(&mut self, stmt: &ast::Stmt) {
-        match &stmt.kind {
-            ast::StmtKind::Let(decl) => self.let_stmt(decl),
-            ast::StmtKind::Assign { target, op, value, .. } => self.assign(target, *op, value, stmt.span),
-            ast::StmtKind::Expr(expr) => {
-                if let Some(expr) = self.expr(expr) {
-                    self.body.push(ir::Stmt::Expr(expr));
-                }
-            }
-        }
-    }
-
-    /// `let x = value in T` and its variants (§6.1, §6.2).
-    fn let_stmt(&mut self, decl: &ast::LetStmt) {
-        self.check_not_standard_name(&decl.name);
-        let annotation = decl.annotation.as_ref().map(|ty| (self.resolve_type(ty), ty.span));
-        let mut ty = annotation.and_then(|(ty, _)| ty);
-        let mut value = None;
-        // The value is checked before the name is declared: in `let x = x + 1`, the
-        // `x` on the right is the previous binding.
-        if let Some(expr) = &decl.value
-            && let Some(checked) = self.expr(expr)
-        {
-            value = match annotation {
-                Some((Some(expected), span)) => {
-                    self.coerce(checked, expected, Some((span, "expected because of this type".to_string())))
-                }
-                Some((None, _)) => None,
-                None => {
-                    ty = Some(checked.ty);
-                    Some(checked)
-                }
-            };
-        }
-        let local = self.declare(&decl.name, ty, decl.mutable, decl.value.is_some());
-        if let Some(value) = value {
-            self.body.push(ir::Stmt::Assign { local, value });
-        }
-    }
-
-    /// `x = value`, `x += value`, ... (§6.3, D44).
-    fn assign(&mut self, target: &ast::Expr, op: ast::AssignOp, value: &ast::Expr, span: Span) {
-        let name = match &target.kind {
-            ast::ExprKind::Name(name) => name,
-            ast::ExprKind::Field { .. } | ast::ExprKind::Index { .. } => {
-                self.not_implemented(target.span, "assigning to a field or an element", "§6.3, §12, §16");
-                return;
-            }
-            _ => {
-                self.diagnostics.push(
-                    Diagnostic::error("cannot assign to this expression")
-                        .with_primary(target.span, "")
-                        .with_note("the left side of an assignment is a variable"),
-                );
-                return;
-            }
-        };
-        let value = self.expr(value);
-        let Some(local) = self.lookup(name) else {
-            let error = self
-                .unknown_name_error(name, target.span)
-                .with_help(format!("a variable is declared before it is used: `var {name} = ...` (§6)"));
-            self.diagnostics.push(error);
-            return;
-        };
-        if op != ast::AssignOp::Set && !self.check_has_value(local, target.span) {
-            return;
-        }
-        if !self.check_assignable(local, target.span) {
-            return;
-        }
-        let info = &mut self.locals[local.index()];
-        if !info.has_value() {
-            info.assigned_at = Some(target.span);
-        }
-        let (Some(ty), Some(value)) = (info.ty, value) else { return };
-        let (decl_span, name) = (info.decl_span, info.name.clone());
-        let value = match compound_operator(op) {
-            None => value,
-            Some(op) => {
-                let current = typed(ir::ExprKind::Local(local), ty, target.span);
-                let Some(result) = self.arithmetic(op, span, current, value, span) else { return };
-                if result.ty != ty && !(result.ty == Type::Int && ty == Type::Float) {
-                    self.diagnostics.push(
-                        Diagnostic::error("mismatched types")
-                            .with_primary(span, format!("the result is {}", article(result.ty)))
-                            .with_secondary(
-                                decl_span,
-                                format!("`{name}` is declared as {} here", article(ty)),
-                            )
-                            .with_note(format!("expected: {ty}"))
-                            .with_note(format!("found: {}", result.ty)),
-                    );
-                    return;
-                }
-                result
-            }
-        };
-        let context = (decl_span, format!("`{name}` is declared as {} here", article(ty)));
-        let Some(value) = self.coerce(value, ty, Some(context)) else {
-            if let Some(error) = self.diagnostics.last_mut() {
-                error.help.push(format!(
-                    "to give `{name}` a value of another type, declare it again: `let {name} = ...` (§6.3)"
-                ));
-            }
-            return;
-        };
-        self.body.push(ir::Stmt::Assign { local, value });
-    }
-
-    /// A constant changes at most once: a `let` without a value receives exactly one
-    /// assignment, and a `let` with a value none (§6.1).
-    fn check_assignable(&mut self, local: ir::LocalId, span: Span) -> bool {
-        let info = &self.locals[local.index()];
-        if info.mutable {
-            return true;
-        }
-        let name = &info.name;
-        let error = if let Some(first) = info.assigned_at {
-            Diagnostic::error(format!("the constant `{name}` already has a value"))
-                .with_primary(span, "second assignment")
-                .with_secondary(first, "first assignment")
-                .with_note("a `let` declared without a value receives exactly one assignment (§6.1)")
-                .with_help(format!("to change `{name}`, declare it with `var`"))
-        } else if info.initialized {
-            Diagnostic::error(format!("cannot assign to the constant `{name}`"))
-                .with_primary(span, "")
-                .with_secondary(info.decl_span, "declared with `let`")
-                .with_help(format!("to change `{name}`, declare it with `var` (§6)"))
-        } else {
-            return true;
-        };
-        self.diagnostics.push(error);
-        false
-    }
-
-    fn check_has_value(&mut self, local: ir::LocalId, span: Span) -> bool {
-        let info = &self.locals[local.index()];
-        if info.has_value() {
-            return true;
-        }
-        let name = &info.name;
-        self.diagnostics.push(
-            Diagnostic::error(format!("`{name}` is used before it has a value"))
-                .with_primary(span, "used here")
-                .with_secondary(info.decl_span, "declared here without a value")
-                .with_help(format!("give `{name}` a value before this line (§6.1)")),
-        );
-        false
-    }
-
     fn declare(
         &mut self,
         name: &ast::Ident,
@@ -217,55 +86,65 @@ impl Checker {
         mutable: bool,
         initialized: bool,
     ) -> ir::LocalId {
-        let id = ir::LocalId(self.locals.len() as u32);
-        self.locals.push(LocalInfo {
+        let (_, enclosing) = self.scopes.split_last().expect("a scope is open");
+        if let Some(&outer) = enclosing.iter().rev().find_map(|scope| scope.names.get(&name.name)) {
+            let outer = &self.locals[outer.index()];
+            self.diagnostics.push(
+                Diagnostic::error(format!("`{}` is already declared in an enclosing block", name.name))
+                    .with_primary(name.span, "declared again here")
+                    .with_secondary(outer.decl_span, "first declared here")
+                    .with_note("a name of an enclosing block cannot be declared again in an inner block (§6.5)")
+                    .with_help(format!(
+                        "choose another name, or assign the existing variable without `let` or `var`: `{} = ...`",
+                        name.name
+                    )),
+            );
+        }
+        let id = self.push_local(LocalInfo {
             name: name.name.clone(),
             ty,
             mutable,
             temporary: false,
             decl_span: name.span,
             initialized,
-            assigned_at: None,
+            first_assignment: None,
         });
-        self.scope.insert(name.name.clone(), id);
+        let scope = self.scopes.last_mut().expect("a scope is open");
+        scope.names.insert(name.name.clone(), id);
+        scope.declared.push(id);
+        self.flow.set(id, if initialized { Assigned::Yes } else { Assigned::No });
         id
     }
 
     /// A local introduced by the checker, invisible to the program.
     fn temporary(&mut self, ty: Type, span: Span) -> ir::LocalId {
-        let id = ir::LocalId(self.locals.len() as u32);
-        self.locals.push(LocalInfo {
+        let id = self.push_local(LocalInfo {
             name: "%t".to_string(),
             ty: Some(ty),
             mutable: false,
             temporary: true,
             decl_span: span,
             initialized: true,
-            assigned_at: None,
+            first_assignment: None,
         });
+        self.flow.set(id, Assigned::Yes);
         id
     }
 
+    fn push_local(&mut self, info: LocalInfo) -> ir::LocalId {
+        self.locals.push(info);
+        ir::LocalId(self.locals.len() as u32 - 1)
+    }
+
     fn lookup(&self, name: &str) -> Option<ir::LocalId> {
-        self.scope.get(name).copied()
+        self.scopes.iter().rev().find_map(|scope| scope.names.get(name).copied())
     }
 
     fn not_implemented(&mut self, span: Span, what: &str, section: &str) {
         self.diagnostics.push(Diagnostic::not_implemented(span, what, section));
     }
 
-    fn finish(mut self) -> Checked {
-        let unassigned: Vec<Diagnostic> = self
-            .locals
-            .iter()
-            .filter(|info| !info.mutable && !info.temporary && !info.has_value() && info.ty.is_some())
-            .map(|info| {
-                Diagnostic::error(format!("the constant `{}` never receives a value", info.name))
-                    .with_primary(info.decl_span, "declared here without a value")
-                    .with_note("a `let` declared without a value receives exactly one assignment (§6.1)")
-            })
-            .collect();
-        self.diagnostics.extend(unassigned);
+    fn finish(self, body: Vec<ir::Stmt>) -> Checked {
         if self.diagnostics.iter().any(Diagnostic::is_fatal) {
             return Checked { program: None, diagnostics: self.diagnostics };
         }
@@ -280,16 +159,7 @@ impl Checker {
                 span: info.decl_span,
             })
             .collect();
-        Checked { program: Some(ir::Program { locals, body: self.body }), diagnostics: self.diagnostics }
-    }
-}
-
-fn compound_operator(op: ast::AssignOp) -> Option<ast::BinaryOp> {
-    match op {
-        ast::AssignOp::Set => None,
-        ast::AssignOp::Add => Some(ast::BinaryOp::Add),
-        ast::AssignOp::Sub => Some(ast::BinaryOp::Sub),
-        ast::AssignOp::Mul => Some(ast::BinaryOp::Mul),
+        Checked { program: Some(ir::Program { locals, body }), diagnostics: self.diagnostics }
     }
 }
 

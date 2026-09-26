@@ -166,6 +166,14 @@ impl TokenKind {
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
+    /// The indentation width of the token's line (a tab counts up to the next multiple
+    /// of 4). Indentation never changes the meaning of a program; it only helps to
+    /// locate a forgotten `;` (§5.3).
+    pub indent: u32,
+    /// Whether the token is the first of its line.
+    pub starts_line: bool,
+    /// The 1-based line of the start of the token.
+    pub line: u32,
 }
 
 /// Writes text content with Lion escapes, as it would appear between quotes.

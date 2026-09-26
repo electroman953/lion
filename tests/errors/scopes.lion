@@ -1,0 +1,15 @@
+let n = 10
+if n > 5:
+    let n = 3
+    let inner = 1
+;
+show(inner)
+while n > 0:
+    var n = 1
+;
+if n > 5:
+    let temp = 1
+;
+if n < 5:
+    let temp = 2
+;

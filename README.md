@@ -9,6 +9,7 @@ L'implémentation est au début de l'étape 2 de la feuille de route (§28). Ell
 **Ce qui fonctionne aujourd'hui**
 
 - **Programmes-scripts** (§20.1) : `let`, `var`, déclaration sans valeur (`let e in Text`), annotation (`in Float`), redéclaration dans le même bloc, `=`, `+=`, `-=`, `*=`.
+- **Contrôle de flux** : blocs `if`/`elif`/`else` et `while` (sur plusieurs lignes ou sur une seule), `break`, `continue`, `return` pour terminer le script, expression `if … then … else`. Les portées suivent les blocs ; un nom ne peut pas être redéclaré dans un bloc intérieur (§6.5).
 - **Types** : `Int` (64 bits, débordement = bug), `Float` (IEEE 754), `Bool`, `Text`, `None`, avec conversion automatique Int → Float.
 - **Opérateurs** :
   - `+ - * /` ;
@@ -18,11 +19,11 @@ L'implémentation est au début de l'étape 2 de la feuille de route (§28). Ell
   - `and`, `or` (court-circuit), `not` ;
   - conversions `as` entre nombres et vers Text.
 - **Textes** : échappements et interpolation `"x = {x}"`. La fonction `show`.
-- **Vérifications à la compilation** : types, noms inconnus (avec suggestions), constantes réaffectées, lecture d'une variable sans valeur.
+- **Vérifications à la compilation** : types, noms inconnus (avec suggestions), constantes réaffectées, lecture d'une variable qui peut ne pas avoir de valeur sur un des chemins (§6.1), `;` oublié localisé grâce à l'indentation (§5.3).
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, exposant négatif, conversion Float → Int impossible. Chacun est signalé avec l'emplacement, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 
-**Pas encore implémenté** : blocs `if`, boucles, fonctions, collections, structures, énumérations, unions, `match`, erreurs-valeurs et `try`, modules, concurrence, compilateur natif, formateur, tests intégrés, mode interactif.
+**Pas encore implémenté** : boucles `for` (elles attendent les intervalles et les collections), fonctions, collections, structures, énumérations, unions (dont `maybe` et `if` sans `else`), `match`, erreurs-valeurs et `try`, modules, concurrence, compilateur natif, formateur, tests intégrés, mode interactif.
 
 ## Construire et utiliser
 

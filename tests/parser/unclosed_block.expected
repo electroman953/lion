@@ -1,0 +1,15 @@
+exit: 1
+----- stdout
+----- stderr
+error: the `while` block is never closed
+  --> tests/parser/unclosed_block.lion:2:1
+   |
+ 2 | while true:
+   | ^^^^^ this block has no `;`
+  ...
+ 5 |     show(2)
+   |     ---- `;` probably forgotten before this line
+   |
+   = the `if` of line 3 is closed by the `;` of line 6, which is less indented than it
+
+1 error found

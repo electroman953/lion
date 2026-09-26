@@ -47,9 +47,28 @@ pub struct Local {
 
 pub enum Stmt {
     /// Stores a value in a local.
-    Assign { local: LocalId, value: Expr },
+    Assign {
+        local: LocalId,
+        value: Expr,
+    },
     /// Evaluates an expression for its effects and discards its value.
     Expr(Expr),
+    /// `elif` chains are nested in `otherwise`.
+    If {
+        cond: Expr,
+        then: Vec<Stmt>,
+        otherwise: Vec<Stmt>,
+    },
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+    },
+    /// Leaves the innermost loop.
+    Break,
+    /// Goes to the next turn of the innermost loop.
+    Continue,
+    /// Ends the script (§20.1).
+    Return,
 }
 
 #[derive(Clone)]
@@ -99,6 +118,12 @@ pub enum ExprKind {
     },
     /// Joins Text values, in order (text interpolation).
     Concat(Vec<Expr>),
+    /// `if cond then then else otherwise`; `elif` chains are nested in `otherwise`.
+    If {
+        cond: Box<Expr>,
+        then: Box<Expr>,
+        otherwise: Box<Expr>,
+    },
     CallBuiltin {
         builtin: Builtin,
         args: Vec<Expr>,

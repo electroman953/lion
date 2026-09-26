@@ -1,0 +1,34 @@
+exit: 1
+----- stdout
+----- stderr
+error: `n` is already declared in an enclosing block
+  --> tests/errors/scopes.lion:3:9
+   |
+ 1 | let n = 10
+   |     - first declared here
+  ...
+ 3 |     let n = 3
+   |         ^ declared again here
+   |
+   = a name of an enclosing block cannot be declared again in an inner block (§6.5)
+   = help: choose another name, or assign the existing variable without `let` or `var`: `n = ...`
+
+error: cannot find `inner` in this scope
+  --> tests/errors/scopes.lion:6:6
+   |
+ 6 | show(inner)
+   |      ^^^^^ not found
+
+error: `n` is already declared in an enclosing block
+  --> tests/errors/scopes.lion:8:9
+   |
+ 1 | let n = 10
+   |     - first declared here
+  ...
+ 8 |     var n = 1
+   |         ^ declared again here
+   |
+   = a name of an enclosing block cannot be declared again in an inner block (§6.5)
+   = help: choose another name, or assign the existing variable without `let` or `var`: `n = ...`
+
+3 errors found

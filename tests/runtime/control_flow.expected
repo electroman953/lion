@@ -1,0 +1,11 @@
+exit: 0
+----- stdout
+i = 10, total = 27
+1 
+2 4 
+3 6 9 
+medium
+odd
+1.0
+pass
+----- stderr

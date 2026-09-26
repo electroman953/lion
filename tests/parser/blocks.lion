@@ -1,0 +1,24 @@
+// Blocks: `:` opens, `;` closes; `elif` and `else` close the previous branch (§5.2)
+if x > 0:
+    show("positif")
+elif x == 0:
+    show("nul")
+else:
+    show("négatif")
+;
+if x > 0: show(x) ;
+if a: show(1) elif b: show(2) else: show(3) ;
+if a:
+    x = 1
+else: x = 2 ;
+if a:
+;
+while n > 1:
+    n = n div 2
+    if n == 7: break ;
+    if n == 9: continue ;
+;
+while true: n += 1 ;
+return
+let sign = if x > 0 then 1 elif x == 0 then 0 else -1
+let bonus = if late then 0

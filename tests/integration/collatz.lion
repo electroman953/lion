@@ -1,0 +1,10 @@
+// The Collatz sequence of 27: how long, how high?
+var n = 27
+var steps = 0
+var highest = n
+while n != 1:
+    n = if n mod 2 == 0 then n div 2 else 3 * n + 1
+    if n > highest: highest = n ;
+    steps += 1
+;
+show("27 atteint 1 en {steps} étapes, en passant par {highest}")

@@ -1,0 +1,58 @@
+exit: 1
+----- stdout
+----- stderr
+error: the condition of `if` must be a Bool
+  --> tests/errors/control_flow.lion:2:4
+   |
+ 2 | if n: show(n) ;
+   |    ^ this is an Int
+   |
+   = help: compare the number, for instance `x != 0`
+
+error: the condition of `while` must be a Bool
+  --> tests/errors/control_flow.lion:3:7
+   |
+ 3 | while "yes": show(n) ;
+   |       ^^^^^ this is a Text
+
+error: `break` outside a loop
+  --> tests/errors/control_flow.lion:4:1
+   |
+ 4 | break
+   | ^^^^^
+   |
+   = `break` is used inside a `while` loop (§10.2)
+
+error: `continue` outside a loop
+  --> tests/errors/control_flow.lion:5:1
+   |
+ 5 | continue
+   | ^^^^^^^^
+   |
+   = `continue` is used inside a `while` loop (§10.2)
+
+error: not implemented yet: `if` expressions whose branches have different types (the value would be a union such as `Int or Text`)
+  --> tests/errors/control_flow.lion:6:9
+   |
+ 6 | let v = if n > 0 then 1 else "one"
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = this part of Lion (spec §7.3, §10.1) is not supported by this version of the implementation
+
+error: not implemented yet: `if ... then` without `else` (its value is a `maybe`, which needs union types)
+  --> tests/errors/control_flow.lion:7:9
+   |
+ 7 | let w = if n > 0 then 1
+   |         ^^^^^^^^^^^^^^^
+   |
+   = this part of Lion (spec §10.1, §7.3) is not supported by this version of the implementation
+
+error: a script cannot return a value
+  --> tests/errors/control_flow.lion:8:8
+   |
+ 8 | return n
+   |        ^
+   |
+   = at the level of a script, `return` alone ends the script (§20.1)
+
+7 errors found

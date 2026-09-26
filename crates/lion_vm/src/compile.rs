@@ -21,10 +21,9 @@ pub fn compile(program: &ir::Program) -> Chunk {
         text_indices: HashMap::new(),
         next_temp: locals,
         registers: locals,
+        loops: Vec::new(),
     };
-    for stmt in &program.body {
-        compiler.stmt(stmt);
-    }
+    compiler.block(&program.body);
     compiler.emit(Instr::Halt, None);
     Chunk { code: compiler.code, spans: compiler.spans, texts: compiler.texts, registers: compiler.registers }
 }
@@ -38,6 +37,15 @@ struct Compiler {
     next_temp: Reg,
     /// The number of registers used so far.
     registers: u32,
+    /// The loops being compiled, innermost last.
+    loops: Vec<Loop>,
+}
+
+struct Loop {
+    /// Where each turn starts, with the test of the condition.
+    head: u32,
+    /// The jumps of `break`, to point at the end of the loop.
+    breaks: Vec<usize>,
 }
 
 impl Compiler {
@@ -56,8 +64,64 @@ impl Compiler {
                 }
             }
             ir::Stmt::Expr(expr) => self.effect(expr),
+            ir::Stmt::If { cond, then, otherwise } => {
+                let to_otherwise = self.jump_unless(cond);
+                self.block(then);
+                if otherwise.is_empty() {
+                    self.patch(to_otherwise);
+                } else {
+                    let to_end = self.jump();
+                    self.patch(to_otherwise);
+                    self.block(otherwise);
+                    self.patch(to_end);
+                }
+            }
+            ir::Stmt::While { cond, body } => {
+                let head = self.code.len() as u32;
+                let to_end = self.jump_unless(cond);
+                self.loops.push(Loop { head, breaks: Vec::new() });
+                self.block(body);
+                self.emit(Instr::Jump { target: head }, None);
+                let finished = self.loops.pop().expect("the loop is open");
+                self.patch(to_end);
+                for at in finished.breaks {
+                    self.patch(at);
+                }
+            }
+            ir::Stmt::Break => {
+                let at = self.jump();
+                self.loops.last_mut().expect("`break` is inside a loop").breaks.push(at);
+            }
+            ir::Stmt::Continue => {
+                let head = self.loops.last().expect("`continue` is inside a loop").head;
+                self.emit(Instr::Jump { target: head }, None);
+            }
+            ir::Stmt::Return => self.emit(Instr::Halt, None),
         }
         self.next_temp = mark;
+    }
+
+    fn block(&mut self, stmts: &[ir::Stmt]) {
+        for stmt in stmts {
+            self.stmt(stmt);
+        }
+    }
+
+    /// Evaluates a condition and jumps when it is false; returns the jump to patch.
+    fn jump_unless(&mut self, cond: &ir::Expr) -> usize {
+        let mark = self.next_temp;
+        let reg = self.operand(cond);
+        let at = self.code.len();
+        self.emit(Instr::JumpIfFalse { cond: reg, target: 0 }, Some(cond.span));
+        self.next_temp = mark;
+        at
+    }
+
+    /// An unconditional jump, to patch.
+    fn jump(&mut self) -> usize {
+        let at = self.code.len();
+        self.emit(Instr::Jump { target: 0 }, None);
+        at
     }
 
     /// Evaluates an expression whose value is not used.
@@ -136,6 +200,14 @@ impl Compiler {
                 };
                 self.emit(instr, span);
             }
+            ExprKind::If { cond, then, otherwise } => {
+                let to_otherwise = self.jump_unless(cond);
+                self.expr_into(then, dst);
+                let to_end = self.jump();
+                self.patch(to_otherwise);
+                self.expr_into(otherwise, dst);
+                self.patch(to_end);
+            }
             ExprKind::Concat(parts) => {
                 let start = self.next_temp;
                 for _ in parts {
@@ -210,6 +282,9 @@ fn writes_destination_early(expr: &ir::Expr) -> bool {
     match &expr.kind {
         ExprKind::And { .. } | ExprKind::Or { .. } => true,
         ExprKind::Let { body, .. } => writes_destination_early(body),
+        ExprKind::If { then, otherwise, .. } => {
+            writes_destination_early(then) || writes_destination_early(otherwise)
+        }
         _ => false,
     }
 }

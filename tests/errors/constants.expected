@@ -15,7 +15,7 @@ error: the constant `e` already has a value
   --> tests/errors/constants.lion:5:1
    |
  4 | e = "first"
-   | - first assignment
+   | - earlier assignment
  5 | e = "second"
    | ^ second assignment
    |

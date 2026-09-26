@@ -1,0 +1,29 @@
+exit: 0
+----- stdout
+locals
+  n#0 var Int
+  steps#1 var Int
+  parity#2 let Text
+  half#3 let Float
+body
+  n#0 = 10
+  steps#1 = 0
+  while (ne_int n#0 1)
+    if (eq_int (mod_int n#0 2) 0)
+      n#0 = (div_int n#0 2)
+    else
+      if (eq_int n#0 3)
+        break
+      else
+        n#0 = (add_int (mul_int 3 n#0) 1)
+      end
+    end
+    steps#1 = (add_int steps#1 1)
+  end
+  parity#2 = (if (eq_int (mod_int steps#1 2) 0) "even" "odd")
+  half#3 = (if (gt_int n#0 0) (int_to_float (div_int n#0 2)) (div_float (int_to_float n#0) (int_to_float 2)))
+  if (gt_int steps#1 100)
+    return
+  end
+  (show (concat parity#2 " " (to_text half#3)))
+----- stderr

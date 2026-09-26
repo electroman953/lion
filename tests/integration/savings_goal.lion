@@ -1,0 +1,11 @@
+// How many years to double a capital at 3% a year?
+let start = 1_000.0
+let rate = 0.03
+var capital = start
+var years = 0
+while capital < 2 * start:
+    capital *= 1 + rate
+    years += 1
+;
+let verdict = if years <= 25 then "raisonnable" else "long"
+show("{years} ans pour doubler ({verdict}) : {capital as Int} euros")

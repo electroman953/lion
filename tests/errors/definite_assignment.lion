@@ -1,0 +1,33 @@
+let n = 10
+var total in Int
+if n > 5:
+    total = 1
+;
+show(total)
+var acc in Int
+while n > 100:
+    acc = 1
+;
+show(acc)
+let label in Text
+while n > 0:
+    label = "x"
+;
+let partial in Text
+if n > 5:
+    partial = "big"
+;
+let both in Text
+if n > 5:
+    both = "a"
+else:
+    both = "b"
+;
+both = "c"
+let fine in Text
+if n > 5:
+    fine = "a"
+else:
+    fine = "b"
+;
+show(fine)

@@ -31,6 +31,7 @@ Détail technique choisi dans le cadre de l'affichage des Float : la notation ex
 | R10 | Littéral entier au-delà de 2^63−1, y compris en hexadécimal (`0x8000000000000000`) | Erreur de compilation | §8.1. Conséquence : Int minimal ne s'écrit pas en littéral, car `-9223372036854775808` applique le moins unaire à un littéral trop grand. On écrit `-9223372036854775807 - 1` |
 | R11 | Littéral flottant infini (`1.0e999`) | Erreur de compilation. Un littéral trop petit est arrondi (à 0.0 pour `1.0e-999`), comme tout littéral | §8.2 |
 | R12 | Nombre collé à des lettres (`1e5`, `12abc`), préfixes en majuscules (`0XFF`) | Erreur, avec la suggestion `1.0e5` | Grammaire §26 : `float_lit` exige un point, `int_lit` écrit `0x` et `0b` |
+| R13 | `return valeur` au niveau d'un script | Erreur de compilation ; seul `return` sans valeur termine le script | §20.1 ne donne pas de sens à une valeur renvoyée par un script |
 
 ## 3. Interprétations de la spec, à confirmer
 
@@ -39,7 +40,7 @@ La spec me paraît claire sur ces points, mais ils méritent un coup d'œil.
 | # | Point | Lecture retenue |
 | --- | --- | --- |
 | I1 | `7 / 0` avec deux Int | Les Int sont convertis en Float, le résultat est `Infinity` avec une alerte, et ce n'est pas un bug. Raison : `/` « donne toujours un Float » (§8), et le bug « division entière par zéro » (§8.1, §18.1) vise `div` et `mod` |
-| I2 | `let e in Text` jamais affecté | Erreur de compilation : « reçoit exactement une affectation » (§6.1) |
+| I2 | « Un `let` sans valeur reçoit exactement une affectation » (§6.1) | La règle est vérifiée chemin par chemin. Une affectation qui peut suivre une autre est une erreur, y compris dans une boucle. À la fin de son bloc, la constante doit avoir une valeur sur tous les chemins qui y arrivent. Une constante jamais affectée est une erreur |
 | I3 | Ligne commençant par `-x` ou `not x` | Refusée : « une ligne qui commence par un opérateur est une erreur » (§5.1), même si `-x` serait une expression valide |
 | I4 | Commentaire `/* */` contenant un retour à la ligne | Il termine l'instruction, comme la fin de ligne qu'il contient (même règle qu'en Go) |
 | I5 | Alertes du mode interprété (§22.3) | Chaque emplacement du code n'alerte qu'une fois, sinon une boucle produirait des millions de messages. « Valeur flottante spéciale » : une opération sur des valeurs finies produit l'infini ou NaN. Propager une valeur déjà spéciale (`inf + 1`) n'alerte pas |
@@ -48,6 +49,11 @@ La spec me paraît claire sur ces points, mais ils méritent un coup d'œil.
 | I8 | `let n = a and b in Bool` | `in Bool` annote toute l'expression : « si l'expression se termine par `in T` » (§26, règle 1) |
 | I9 | `x as Int or ok` | `(x as Int) or ok` : dans un type, `or` ne continue que si un type suit. Avec les règles de casse, la lecture n'est pas ambiguë |
 | I10 | `maybe maybe T` | Accepté par le parser, car §7.3 l'évoque, alors que la grammaire §26 n'autorise qu'un seul `maybe` |
+| I11 | Placement du `;` qui ferme un bloc | La grammaire §26 est appliquée à la lettre (`line = [statement] NL`, `body = NL {line} \| statement`). Un bloc de plusieurs lignes se ferme par `;`, `elif` ou `else` en début de ligne ; `show(x) ;` à la fin de sa dernière ligne est refusé, avec une explication. Un bloc d'une ligne, `if x > 0: show(x) ;`, se ferme sur la même ligne |
+| I12 | `if c then 1 else 2.5` | De type Float : la conversion Int → Float est « automatique partout » (§8.5), comme dans une collection `[1, 2.5]`. Des branches de types sans lien (Int et Text) donneraient une union : elles sont « not implemented » en attendant les unions, de même que `if c then 1` sans `else`, dont le type est `maybe Int` (§10.1) |
+| I13 | Conditions constantes | Pour l'affectation définie, seul `while true` est reconnu : cette boucle ne se termine que par `break`. Aucune autre condition n'est évaluée à la compilation, pas même `if true` |
+| I14 | Code inatteignable (après `return`, `break`, `continue`) | Accepté sans avertissement : la spec n'en parle pas. Il est vérifié (noms, types), mais sans erreur d'affectation définie, car aucun chemin n'y mène |
+| I15 | Affectations dans une boucle | Au début de chaque tour, une variable affectée n'importe où dans le corps est considérée comme « peut-être affectée ». Conséquence : un `let` sans valeur ne peut pas être affecté dans une boucle, même suivi de `break`. Java applique la même règle ; elle est prudente et pourra être affinée |
 
 ## 4. Points de la spec à trancher plus tard (non bloquants aujourd'hui)
 
@@ -73,3 +79,8 @@ La spec me paraît claire sur ces points, mais ils méritent un coup d'œil.
 - **Erreurs internes.** Une panique de l'implémentation est présentée comme « internal compiler error », jamais comme une erreur du programme.
 - **Récupération d'erreurs du parser.** Après une erreur, il reprend à l'instruction suivante, en sautant les blocs `:` … `;` de l'instruction fautive. Une indentation incohérente ne sert pas encore à localiser un `;` oublié (§5.3).
 - **Détails du lexer.** Un BOM UTF-8 en tête de fichier est ignoré, et les fins de ligne CRLF sont acceptées.
+- **Indentation et `;` oubliés (§5.3).** Chaque token porte sa ligne et l'indentation de sa ligne ; une tabulation compte jusqu'au multiple de 4 suivant. Le parser n'en tient jamais compte pour le sens du programme. Il s'en sert seulement quand un bloc reste ouvert à la fin du fichier :
+  - s'il a vu un bloc fermé par un `;`, `elif` ou `else` moins indenté que le `if` ou le `while` qui l'a ouvert, c'est là que le `;` manque ;
+  - sinon, il désigne la première ligne moins indentée que l'ouverture du bloc.
+- **Affectation définie.** Elle est calculée pendant la vérification des types, dans un état de flux fusionné aux points de rencontre (`flow.rs`). Ce même mécanisme servira à l'affinage des unions (§7.4), qui dépend de `return`, `break` et `continue`.
+- **Contrôle de flux dans l'IR.** Les chaînes `elif` sont imbriquées dans la branche `else`, et `break` ou `continue` visent la boucle la plus intérieure. `return` au niveau du script devient l'arrêt de la machine virtuelle.

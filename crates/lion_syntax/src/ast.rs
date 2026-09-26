@@ -32,6 +32,33 @@ pub enum StmtKind {
         value: Expr,
     },
     Expr(Expr),
+    /// `if c: ... elif d: ... else: ... ;` (§5.2, §10.1).
+    If {
+        branches: Vec<Branch>,
+        otherwise: Option<Block>,
+    },
+    /// `while c: ... ;` (§10.2).
+    While {
+        cond: Expr,
+        body: Block,
+    },
+    Break,
+    Continue,
+    /// `return`, with an optional value (§11.4, §20.1).
+    Return(Option<Expr>),
+}
+
+/// One `if` or `elif` branch of an `if` statement.
+#[derive(Clone, Debug)]
+pub struct Branch {
+    pub cond: Expr,
+    pub body: Block,
+}
+
+/// The statements between `:` and the `;`, `elif` or `else` that ends them (§5.2).
+#[derive(Clone, Debug)]
+pub struct Block {
+    pub stmts: Vec<Stmt>,
 }
 
 #[derive(Clone, Debug)]
@@ -111,6 +138,11 @@ pub enum ExprKind {
     Index {
         object: Box<Expr>,
         index: Box<Expr>,
+    },
+    /// `if c then a elif d then b else e` (§10.1).
+    If {
+        branches: Vec<(Expr, Expr)>,
+        otherwise: Option<Box<Expr>>,
     },
 }
 

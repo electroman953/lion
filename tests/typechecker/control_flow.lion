@@ -1,0 +1,16 @@
+var n = 10
+var steps = 0
+while n != 1:
+    if n mod 2 == 0:
+        n = n div 2
+    elif n == 3:
+        break
+    else:
+        n = 3 * n + 1
+    ;
+    steps += 1
+;
+let parity = if steps mod 2 == 0 then "even" else "odd"
+let half = if n > 0 then n div 2 else n / 2
+if steps > 100: return ;
+show("{parity} {half}")

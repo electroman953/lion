@@ -1,0 +1,4 @@
+exit: 0
+----- stdout
+27 atteint 1 en 111 étapes, en passant par 9232
+----- stderr

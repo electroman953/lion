@@ -1,0 +1,10 @@
+// `return` ends a script (§20.1)
+var count = 0
+while true:
+    count += 1
+    if count == 3:
+        show("stopping at {count}")
+        return
+    ;
+;
+show("never shown")

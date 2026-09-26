@@ -32,7 +32,30 @@ pub fn print_stmt(stmt: &Stmt) -> String {
             format!("({} {} {})", op.as_str(), print_expr(target), print_expr(value))
         }
         StmtKind::Expr(expr) => print_expr(expr),
+        StmtKind::If { branches, otherwise } => {
+            let mut out = String::from("(if");
+            for (index, branch) in branches.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(" elif");
+                }
+                out.push_str(&format!(" {} {}", print_expr(&branch.cond), print_block(&branch.body)));
+            }
+            if let Some(otherwise) = otherwise {
+                out.push_str(&format!(" else {}", print_block(otherwise)));
+            }
+            out + ")"
+        }
+        StmtKind::While { cond, body } => format!("(while {} {})", print_expr(cond), print_block(body)),
+        StmtKind::Break => "break".to_string(),
+        StmtKind::Continue => "continue".to_string(),
+        StmtKind::Return(None) => "(return)".to_string(),
+        StmtKind::Return(Some(value)) => format!("(return {})", print_expr(value)),
     }
+}
+
+fn print_block(block: &Block) -> String {
+    let stmts: Vec<String> = block.stmts.iter().map(print_stmt).collect();
+    format!("[{}]", stmts.join(" "))
 }
 
 pub fn print_expr(expr: &Expr) -> String {
@@ -96,6 +119,19 @@ pub fn print_expr(expr: &Expr) -> String {
         ExprKind::Field { object, name } => format!("(. {} {})", print_expr(object), name.name),
         ExprKind::Index { object, index } => {
             format!("(index {} {})", print_expr(object), print_expr(index))
+        }
+        ExprKind::If { branches, otherwise } => {
+            let mut out = String::from("(if-expr");
+            for (index, (cond, value)) in branches.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(" elif");
+                }
+                out.push_str(&format!(" {} {}", print_expr(cond), print_expr(value)));
+            }
+            if let Some(otherwise) = otherwise {
+                out.push_str(&format!(" else {}", print_expr(otherwise)));
+            }
+            out + ")"
         }
     }
 }

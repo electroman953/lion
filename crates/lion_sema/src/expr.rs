@@ -46,7 +46,80 @@ impl Checker {
                 self.not_implemented(span, "indexing", "§16.2");
                 None
             }
+            ast::ExprKind::If { branches, otherwise } => self.if_expr(branches, otherwise.as_deref(), span),
         }
+    }
+
+    /// The condition of an `if`, `elif` or `while`, which must be a Bool.
+    pub(crate) fn condition(&mut self, cond: &ast::Expr, keyword: &str) -> Option<ir::Expr> {
+        let cond = self.expr(cond)?;
+        if cond.ty == Type::Bool {
+            return Some(cond);
+        }
+        let mut error = Diagnostic::error(format!("the condition of `{keyword}` must be a Bool"))
+            .with_primary(cond.span, format!("this is {}", article(cond.ty)));
+        if cond.ty.is_numeric() {
+            error = error.with_help("compare the number, for instance `x != 0`");
+        }
+        self.diagnostics.push(error);
+        None
+    }
+
+    /// `if c then a elif d then b else e` (§10.1). The branches have one type; an Int
+    /// branch next to a Float one is converted, as everywhere else (§8.5).
+    fn if_expr(
+        &mut self,
+        branches: &[(ast::Expr, ast::Expr)],
+        otherwise: Option<&ast::Expr>,
+        span: Span,
+    ) -> Option<ir::Expr> {
+        let mut checked = Vec::new();
+        for (cond, value) in branches {
+            checked.push((self.condition(cond, "if"), self.expr(value)));
+        }
+        let Some(otherwise) = otherwise else {
+            self.not_implemented(
+                span,
+                "`if ... then` without `else` (its value is a `maybe`, which needs union types)",
+                "§10.1, §7.3",
+            );
+            return None;
+        };
+        let otherwise = self.expr(otherwise);
+        let mut valid = otherwise.is_some();
+        let mut values = Vec::new();
+        let mut conds = Vec::new();
+        for (cond, value) in checked {
+            valid &= cond.is_some() && value.is_some();
+            conds.extend(cond);
+            values.extend(value);
+        }
+        if !valid {
+            return None;
+        }
+        values.push(otherwise.expect("checked above"));
+        let first = values[0].ty;
+        let ty = if values.iter().all(|value| value.ty == first) {
+            first
+        } else if values.iter().all(|value| value.ty.is_numeric()) {
+            Type::Float
+        } else {
+            self.not_implemented(
+                span,
+                "`if` expressions whose branches have different types (the value would be a union such as `Int or Text`)",
+                "§7.3, §10.1",
+            );
+            return None;
+        };
+        let mut values =
+            values.into_iter().map(|value| if ty == Type::Float { to_float(value) } else { value });
+        let mut result = values.next_back().expect("an `else` value");
+        for (cond, then) in conds.into_iter().zip(values).rev() {
+            let kind =
+                ir::ExprKind::If { cond: Box::new(cond), then: Box::new(then), otherwise: Box::new(result) };
+            result = typed(kind, ty, span);
+        }
+        Some(result)
     }
 
     /// A text literal; interpolated values are written as `show` would (§4.5, D24).

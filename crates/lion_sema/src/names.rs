@@ -31,7 +31,11 @@ impl Checker {
 
     /// "cannot find `x`", with a suggestion when a close name exists.
     pub(crate) fn unknown_name_error(&self, name: &str, span: Span) -> Diagnostic {
-        let visible = self.scope.keys().map(String::as_str).chain(IMPLEMENTED_FUNCTIONS.iter().copied());
+        let visible = self
+            .scopes
+            .iter()
+            .flat_map(|scope| scope.names.keys().map(String::as_str))
+            .chain(IMPLEMENTED_FUNCTIONS.iter().copied());
         let mut error =
             Diagnostic::error(format!("cannot find `{name}` in this scope")).with_primary(span, "not found");
         if let Some(help) = other_language_help(name) {

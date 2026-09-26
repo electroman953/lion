@@ -164,9 +164,9 @@ fn recovery_skips_the_blocks_of_a_failed_statement() {
     let (tree, errors) = parse_text(text);
     assert_eq!(errors, ["not implemented yet: functions"]);
     assert_eq!(tree, "(let after 2)\n");
-    let text = "if a:\n    b = 1\nelif c:\n    d = 2\nelse:\n    e = 3\n;\nlet after = 2\n";
+    let text = "struct S:\n    if a:\n        b = 1\n    elif c:\n        d = 2\n    else:\n        e = 3\n    ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
-    assert_eq!(errors, ["not implemented yet: `if` blocks"]);
+    assert_eq!(errors, ["not implemented yet: structures"]);
     assert_eq!(tree, "(let after 2)\n");
 }
 
@@ -174,17 +174,126 @@ fn recovery_skips_the_blocks_of_a_failed_statement() {
 fn unsupported_constructions_are_reported() {
     let cases = [
         ("fun f() = 1", "not implemented yet: functions"),
-        ("if x: show(x) ;", "not implemented yet: `if` blocks"),
-        ("while x: x = 1 ;", "not implemented yet: loops"),
+        (
+            "for i in 1..3: show(i) ;",
+            "not implemented yet: `for` loops, which need collections and intervals",
+        ),
         ("struct S:\n;", "not implemented yet: structures"),
         ("Color = {red, green}", "not implemented yet: type definitions (enumerations and named unions)"),
         ("let l = [1, 2]", "not implemented yet: lists"),
         ("let s = {1, 2}", "not implemented yet: sets and comprehensions"),
         ("let t = (1, 2)", "not implemented yet: tuples"),
-        ("let v = if c then 1 else 2", "not implemented yet: `if ... then ... else` expressions"),
         ("let v = try f()", "not implemented yet: `try`"),
     ];
     for (text, message) in cases {
         assert_eq!(first_error(text), message, "for {text:?}");
     }
+}
+
+#[test]
+fn if_blocks() {
+    assert_eq!(
+        ast(
+            "if x > 0:\n    show(\"positif\")\nelif x == 0:\n    show(\"nul\")\nelse:\n    show(\"négatif\")\n;"
+        ),
+        "(if (> x 0) [(call show \"positif\")] elif (== x 0) [(call show \"nul\")] else [(call show \"négatif\")])"
+    );
+    assert_eq!(ast("if x > 0: show(x) ;"), "(if (> x 0) [(call show x)])");
+    assert_eq!(
+        ast("if a: show(1) elif b: show(2) else: show(3) ;"),
+        "(if a [(call show 1)] elif b [(call show 2)] else [(call show 3)])"
+    );
+    assert_eq!(ast("if a:\n    x = 1\nelse: x = 2 ;"), "(if a [(= x 1)] else [(= x 2)])");
+    assert_eq!(ast("if a:\n;"), "(if a [])");
+    assert_eq!(ast("if a: if b: show(1) ; ;"), "(if a [(if b [(call show 1)])])");
+    assert_eq!(ast("if a:\n\n    x = 1\n\n    y = 2\n\n;"), "(if a [(= x 1) (= y 2)])");
+}
+
+#[test]
+fn loops_and_jumps() {
+    assert_eq!(ast("while n > 1:\n    n = n div 2\n;"), "(while (> n 1) [(= n (div n 2))])");
+    assert_eq!(ast("while true: break ;"), "(while true [break])");
+    assert_eq!(
+        ast("while a:\n    if b: continue ;\n    return\n;"),
+        "(while a [(if b [continue]) (return)])"
+    );
+    assert_eq!(ast("return"), "(return)");
+    assert_eq!(ast("return x + 1"), "(return (+ x 1))");
+    assert_eq!(ast("if a: return ;"), "(if a [(return)])");
+}
+
+#[test]
+fn if_expressions() {
+    assert_eq!(
+        ast("let sign = if x > 0 then 1 elif x == 0 then 0 else -1"),
+        "(let sign (if-expr (> x 0) 1 elif (== x 0) 0 else (neg 1)))"
+    );
+    assert_eq!(ast("let bonus = if late then 0"), "(let bonus (if-expr late 0))");
+    // The last branch covers everything to its right (§9.1), up to an annotation.
+    assert_eq!(ast("let v = if c then 1 else 2 + 3"), "(let v (if-expr c 1 else (+ 2 3)))");
+    assert_eq!(ast("let v = if c then 1 else 2 in Float"), "(let v (if-expr c 1 else 2) : Float)");
+    assert_eq!(
+        ast("let v = if a then if b then 1 else 2 else 3"),
+        "(let v (if-expr a (if-expr b 1 else 2) else 3))"
+    );
+    assert_eq!(ast("let v = 1 + (if c then 2 else 3)"), "(let v (+ 1 (paren (if-expr c 2 else 3))))");
+    assert_eq!(ast("if c then show(1) else show(2)"), "(if-expr c (call show 1) else (call show 2))");
+}
+
+#[test]
+fn block_errors() {
+    assert_eq!(first_error("if a: show(1)\nshow(2)"), "the one-line `if` block is not closed");
+    assert_eq!(first_error("if a:\n    show(1) ;"), "`;` must start a new line here");
+    assert_eq!(first_error("if a:\n    show(1)"), "the `if` block is never closed");
+    assert_eq!(
+        first_error("if a:\n    show(1)\nelse:\n    show(2)\nelse:\n    show(3)\n;"),
+        "unexpected `else`"
+    );
+    assert_eq!(first_error("while a:\n    show(1)\nelse:\n    show(2)\n;"), "unexpected `else`");
+    assert_eq!(first_error("else:\n    show(2)\n;"), "`else` without `if`");
+    assert_eq!(first_error("if a show(1) ;"), "expected `:` to open the block, found name `show`");
+    assert_eq!(first_error("let v = if a 1"), "expected `then`, found a number");
+    assert_eq!(first_error("if a: ;"), "a one-line block needs a statement");
+}
+
+#[test]
+fn a_forgotten_semicolon_is_located_with_indentation() {
+    let parse_diagnostic = |text: &str| {
+        let mut map = SourceMap::new();
+        let id = map.add("t.lion", text);
+        let lexed = lex(id, text);
+        let mut diagnostics = parse(&lexed.tokens).diagnostics;
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        let diagnostic = diagnostics.remove(0);
+        let lines: Vec<usize> =
+            diagnostic.labels.iter().map(|label| map.get(id).line_col(label.span.start).0).collect();
+        (diagnostic.message, lines)
+    };
+    // The next statement is less indented than the block: the `;` was forgotten before it.
+    assert_eq!(
+        parse_diagnostic("if a:\n    show(1)\nshow(2)\n"),
+        ("the `if` block is never closed".to_string(), vec![1, 3])
+    );
+    // The `;` of line 5 closes the inner `if`, although it is aligned with the `while`.
+    assert_eq!(
+        parse_diagnostic("while c:\n    if a:\n        show(1)\n    show(2)\n;\n"),
+        ("the `while` block is never closed".to_string(), vec![1, 4])
+    );
+    // `else` aligned with its `if` is not a sign of a forgotten `;`.
+    assert_eq!(
+        parse_diagnostic(
+            "while c:\n    if a:\n        show(1)\n    else:\n        show(2)\n    show(3)\n;\n"
+        ),
+        ("the `while` block is never closed".to_string(), vec![1, 6])
+    );
+    // Lines are counted in the source, blank lines and comments included.
+    assert_eq!(
+        parse_diagnostic("// note\n\nwhile c:\n\n    if a:\n        show(1)\n    show(2)\n;\n"),
+        ("the `while` block is never closed".to_string(), vec![3, 7])
+    );
+    // Nothing is less indented: no guess.
+    assert_eq!(
+        parse_diagnostic("if a:\n    show(1)\n"),
+        ("the `if` block is never closed".to_string(), vec![1])
+    );
 }

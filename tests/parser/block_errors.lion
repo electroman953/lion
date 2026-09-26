@@ -1,0 +1,20 @@
+if a: show(1)
+show(2)
+if a:
+    show(1) ;
+if a:
+    show(1)
+else:
+    show(2)
+else:
+    show(3)
+;
+while a:
+    show(1)
+else:
+    show(2)
+;
+else:
+    show(2)
+;
+if a: ;

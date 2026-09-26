@@ -1,0 +1,21 @@
+// Prime numbers below 60, by trial division, with `while` loops.
+var found = ""
+var count = 0
+var n = 2
+while n < 60:
+    var prime = true
+    var d = 2
+    while d * d <= n:
+        if n mod d == 0:
+            prime = false
+            break
+        ;
+        d += 1
+    ;
+    if prime:
+        found = "{found}{n} "
+        count += 1
+    ;
+    n += 1
+;
+show("{count} nombres premiers : {found}")

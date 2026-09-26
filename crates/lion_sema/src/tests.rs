@@ -156,3 +156,59 @@ fn unsupported_types_are_reported() {
         ]
     );
 }
+
+#[test]
+fn definite_assignment_follows_every_path() {
+    // Both branches assign: the value is certain after the `if`.
+    assert!(check_text("let e in Text\nif true:\n    e = \"a\"\nelse:\n    e = \"b\"\n;\nshow(e)").is_ok());
+    // `while true` is left only through `break`, which comes after the assignment.
+    assert!(check_text("var x in Int\nwhile true:\n    x = 1\n    break\n;\nshow(x)").is_ok());
+    // Code that cannot be reached reports nothing.
+    assert!(check_text("return\nlet e in Text\nshow(e)").is_ok());
+    // A branch that ends the script does not reach the read.
+    assert!(check_text("var x in Int\nif false:\n    return\n;\nx = 1\nshow(x)").is_ok());
+    assert!(check_text("var x in Int\nif false:\n    return\nelse:\n    x = 2\n;\nshow(x)").is_ok());
+}
+
+#[test]
+fn definite_assignment_errors() {
+    assert_eq!(errors("var x in Int\nif true: x = 1 ;\nshow(x)"), ["`x` may not have a value here"]);
+    assert_eq!(
+        errors("var x in Int\nwhile false:\n    x = 1\n;\nshow(x)"),
+        ["`x` may not have a value here"]
+    );
+    // In a loop, a read before the assignment sees the first turn without a value.
+    assert_eq!(
+        errors("var x in Int\nwhile true:\n    show(x)\n    x = 1\n;"),
+        ["`x` may not have a value here"]
+    );
+    assert_eq!(
+        errors("let e in Text\nwhile true:\n    e = \"a\"\n    break\n;"),
+        ["the constant `e` may already have a value"]
+    );
+    assert_eq!(
+        errors("let e in Text\nif true: e = \"a\" ;"),
+        ["the constant `e` does not receive a value on every path"]
+    );
+}
+
+#[test]
+fn scopes_of_blocks() {
+    assert_eq!(
+        errors("let n = 1\nif true:\n    let n = 2\n;"),
+        ["`n` is already declared in an enclosing block"]
+    );
+    assert_eq!(errors("if true:\n    let inner = 1\n;\nshow(inner)"), ["cannot find `inner` in this scope"]);
+    // Sibling blocks may reuse a name, and so may the outer block once the inner one is closed.
+    assert!(check_text("if true:\n    let t = 1\n;\nif false:\n    let t = 2\n;\nlet t = 3").is_ok());
+    // Redeclaring in the same inner block is allowed (§6.3).
+    assert!(check_text("while true:\n    let a = 1\n    let a = \"one\"\n    break\n;").is_ok());
+}
+
+#[test]
+fn if_expressions() {
+    assert_eq!(body("let s = if true then 1 else 2"), "s#0 = (if true 1 2)");
+    assert_eq!(body("let s = if true then 1 elif false then 2 else 3"), "s#0 = (if true 1 (if false 2 3))");
+    assert_eq!(body("let s = if true then 1 else 2.5"), "s#0 = (if true (int_to_float 1) 2.5)");
+    assert_eq!(errors("let s = if 1 then 1 else 2"), ["the condition of `if` must be a Bool"]);
+}

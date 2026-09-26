@@ -1,0 +1,61 @@
+exit: 1
+----- stdout
+(call show 2)
+(if a [(call show 1)])
+----- stderr
+error: the one-line `if` block is not closed
+  --> tests/parser/block_errors.lion:1:14
+   |
+ 1 | if a: show(1)
+   | -- block opened here
+   |              ^ expected `;` here
+   |
+   = help: a block written on one line ends with `;` on the same line: `if x > 0: show(x) ;`; for several lines, start the block on a new line after `:` (§5.2)
+
+error: `;` must start a new line here
+  --> tests/parser/block_errors.lion:4:13
+   |
+ 4 |     show(1) ;
+   |             ^ this ends the block opened on line 3
+   |
+   = help: a block of several lines ends with `;`, `elif` or `else` at the start of a line; a block on one line is written `if x > 0: show(x) ;` (§5.2)
+
+error: unexpected `else`
+  --> tests/parser/block_errors.lion:9:1
+   |
+ 5 | if a:
+   | -- in this `if`
+  ...
+ 9 | else:
+   | ^^^^
+   |
+   = an `if` has at most one `else`, which comes last (§5.2)
+
+error: unexpected `else`
+   --> tests/parser/block_errors.lion:14:1
+    |
+ 12 | while a:
+    | ----- in this `while`
+   ...
+ 14 | else:
+    | ^^^^
+    |
+    = only an `if` has `elif` and `else` branches (§5.2)
+
+error: `else` without `if`
+   --> tests/parser/block_errors.lion:17:1
+    |
+ 17 | else:
+    | ^^^^
+    |
+    = `elif` and `else` continue the block of an `if` (§5.2)
+
+error: a one-line block needs a statement
+   --> tests/parser/block_errors.lion:20:7
+    |
+ 20 | if a: ;
+    |       ^
+    |
+    = help: an empty block is written with `:` at the end of the line and `;` on the next one (§5.2)
+
+6 errors found

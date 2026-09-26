@@ -1,0 +1,13 @@
+exit: 0
+----- stdout
+(if (> x 0) [(call show "positif")] elif (== x 0) [(call show "nul")] else [(call show "négatif")])
+(if (> x 0) [(call show x)])
+(if a [(call show 1)] elif b [(call show 2)] else [(call show 3)])
+(if a [(= x 1)] else [(= x 2)])
+(if a [])
+(while (> n 1) [(= n (div n 2)) (if (== n 7) [break]) (if (== n 9) [continue])])
+(while true [(+= n 1)])
+(return)
+(let sign (if-expr (> x 0) 1 elif (== x 0) 0 else (neg 1)))
+(let bonus (if-expr late 0))
+----- stderr
