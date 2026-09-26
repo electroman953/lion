@@ -12,7 +12,7 @@ L'implémentation est au début de l'étape 2 de la feuille de route (§28). Ell
 - **Contrôle de flux** : blocs `if`/`elif`/`else`, `while` et `for` (sur plusieurs lignes ou sur une seule), intervalles `a..b` et `x in a..b`, `break`, `continue`, `return` pour terminer le script, expression `if … then … else`. Les portées suivent les blocs ; un nom ne peut pas être redéclaré dans un bloc intérieur (§6.5).
 - **Fonctions** (§11) : déclarations `fun` en bloc ou en forme courte (`fun square(x) = x * x`), paramètres sans type qui rendent la fonction générique (une version par types d'arguments, §15.3), types de retour écrits ou inférés, `return` vérifié sur tous les chemins, récursion, paramètres `var` qui modifient la variable de l'appelant, valeurs par défaut, arguments nommés, globales lues par les fonctions et modifiées avec `modifies`.
 - **Listes** (§16) : `[1, 2, 3]`, `List of T`, indices à partir de 1 et extraits `l[2..4]` (bug hors limites), `size`, `first`, `last`, `add`, `l[i] = v`, `x in l`, égalité par contenu, `for x in l`, compréhensions `[f(x), x in l, condition]`, `sum`, avec la sémantique de valeur (§17.1). Les Text s'indexent aussi par caractère.
-- **Unions et erreurs** (§7.3, §7.4, §18) : `maybe T`, `A or B`, tests de type `x in T`, affinage après un test ou une sortie anticipée, `if … then` sans `else`, `Error`, `error("…")`, `e.message()`, `"12" as Int` qui donne `Int or Error`, `try` dans une fonction ou au niveau du script.
+- **Unions et erreurs** (§7.3, §7.4, §18) : `maybe T`, `A or B`, tests de type `x in T`, affinage après un test ou une sortie anticipée, `if … then` sans `else`, `Error`, `error("…")`, `e.message()`, `"12" as Int` qui donne `Int or Error`, `try` dans une fonction ou au niveau du script, `match` en instruction et en expression (motifs de valeur, de type `in Int g`, d'appartenance `in 1..9`, conditions, `otherwise`, exhaustivité vérifiée).
 - **Types** : `Int` (64 bits, débordement = bug), `Float` (IEEE 754), `Bool`, `Text`, `None`, avec conversion automatique Int → Float.
 - **Opérateurs** :
   - `+ - * /` ;
@@ -26,7 +26,7 @@ L'implémentation est au début de l'étape 2 de la feuille de route (§28). Ell
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, exposant négatif, conversion Float → Int impossible, récursion sans fin (plus de 100 000 appels imbriqués). Chacun est signalé avec l'emplacement, les appels en cours, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 
-**Pas encore implémenté** : variables de type (`T in Comparable`), fonctions comme valeurs, closures et curryfication, méthodes, ensembles et `Map`, structures, énumérations, `match`, modules, concurrence, compilateur natif, formateur, tests intégrés, mode interactif.
+**Pas encore implémenté** : variables de type (`T in Comparable`), fonctions comme valeurs, closures et curryfication, méthodes, ensembles et `Map`, structures, énumérations, modules, concurrence, compilateur natif, formateur, tests intégrés, mode interactif.
 
 ## Construire et utiliser
 

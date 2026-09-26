@@ -1,0 +1,15 @@
+exit: 0
+----- stdout
+15 : admis
+7 : recalé
+Échec : "abc" is not an Int: it is not a whole number
+0 → zéro
+5 → petit
+40 → dizaine ronde
+42 → grand
+1000 → grand
+d'accord
+vrai
+premier pair : 8
+80
+----- stderr

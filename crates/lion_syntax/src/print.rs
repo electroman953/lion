@@ -54,6 +54,13 @@ pub fn print_stmt(stmt: &Stmt) -> String {
         StmtKind::Return(None) => "(return)".to_string(),
         StmtKind::Return(Some(value)) => format!("(return {})", print_expr(value)),
         StmtKind::Fun(decl) => print_fun(decl),
+        StmtKind::Match { scrutinee, cases } => {
+            let cases: Vec<String> = cases
+                .iter()
+                .map(|(case, body)| format!("({} {})", print_case(case), print_block(body)))
+                .collect();
+            format!("(match {} {})", print_expr(scrutinee), cases.join(" "))
+        }
     }
 }
 
@@ -93,6 +100,21 @@ fn print_fun(decl: &FunDecl) -> String {
         FunBody::Expr(expr) => out.push_str(&format!(" = {}", print_expr(expr))),
     }
     out + ")"
+}
+
+fn print_case(case: &Case) -> String {
+    let binding =
+        |binding: &Option<Ident>| binding.as_ref().map_or(String::new(), |name| format!(" {}", name.name));
+    let mut out = match &case.pattern {
+        Pattern::Otherwise => "otherwise".to_string(),
+        Pattern::Value(value) => print_expr(value),
+        Pattern::Type { ty, binding: name } => format!("in-type {}{}", print_type(ty), binding(name)),
+        Pattern::In { set, binding: name } => format!("in {}{}", print_expr(set), binding(name)),
+    };
+    for condition in &case.conditions {
+        out.push_str(&format!(", {}", print_expr(condition)));
+    }
+    out
 }
 
 fn print_block(block: &Block) -> String {
@@ -168,6 +190,13 @@ pub fn print_expr(expr: &Expr) -> String {
         }
         ExprKind::TypeTest { value, ty } => format!("(in-type {} {})", print_expr(value), print_type(ty)),
         ExprKind::Try(value) => format!("(try {})", print_expr(value)),
+        ExprKind::Match { scrutinee, cases } => {
+            let cases: Vec<String> = cases
+                .iter()
+                .map(|(case, value)| format!("({} then {})", print_case(case), print_expr(value)))
+                .collect();
+            format!("(match-expr {} {})", print_expr(scrutinee), cases.join(" "))
+        }
         ExprKind::If { branches, otherwise } => {
             let mut out = String::from("(if-expr");
             for (index, (cond, value)) in branches.iter().enumerate() {

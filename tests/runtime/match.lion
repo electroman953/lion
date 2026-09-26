@@ -1,0 +1,47 @@
+fun load_grade(text in Text) in Int or Error = text as Int
+for text in ["15", "7", "abc"]:
+    match load_grade(text):
+        in Error e: show("Échec : {e.message()}") ;
+        in Int g, g >= 10: show("{g} : admis") ;
+        in Int g: show("{g} : recalé") ;
+    ;
+;
+fun describe(n in Int) in Text:
+    return match n:
+        0 then "zéro"
+        in 1..9 then "petit"
+        in 10..99 d, d mod 10 == 0 then "dizaine ronde"
+        otherwise then "grand"
+    ;
+;
+for n in [0, 5, 40, 42, 1000]: show("{n} → {describe(n)}") ;
+let answer = "oui"
+match answer:
+    "oui": show("d'accord") ;
+    "non": show("dommage") ;
+    otherwise: show("?") ;
+;
+let flag = 3 > 2
+let label = match flag:
+    true then "vrai"
+    false then "faux"
+;
+show(label)
+fun first_even(values in List of Int) in maybe Int:
+    for v in values:
+        if v mod 2 == 0: return v ;
+    ;
+    return none
+;
+let found = first_even([3, 5, 8, 9])
+let text = match found:
+    in None then "aucun"
+    in Int n then "premier pair : {n}"
+;
+show(text)
+match found:
+    in Int:
+        show(found * 10)
+    ;
+    in None: show("rien") ;
+;

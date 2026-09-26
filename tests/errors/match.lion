@@ -1,0 +1,26 @@
+let v = "12" as Int
+match v:
+    in Int n: show(n) ;
+;
+match v:
+    in Error e: show(e.message()) ;
+    in Int n, n > 0: show(n) ;
+;
+let n = 5
+let size = match n:
+    0 then "zéro"
+    in 1..9 then "petit"
+;
+match v:
+    in Error: show("erreur") ;
+    in Int: show("entier") ;
+    otherwise: show("jamais") ;
+;
+match n:
+    in Text t: show(t) ;
+    otherwise: show("x") ;
+;
+let flag = true
+match flag:
+    true: show("oui") ;
+;

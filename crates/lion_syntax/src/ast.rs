@@ -54,6 +54,32 @@ pub enum StmtKind {
     Return(Option<Expr>),
     /// `fun name(params) in T modifies x: ... ;` or `fun name(params) = expr` (§11.1).
     Fun(FunDecl),
+    /// `match value: pattern: ... ; ... ;` (§10.3).
+    Match {
+        scrutinee: Expr,
+        cases: Vec<(Case, Block)>,
+    },
+}
+
+/// A case of `match`: a pattern, then conditions that all hold (§10.3).
+#[derive(Clone, Debug)]
+pub struct Case {
+    pub pattern: Pattern,
+    /// After the pattern, separated by commas: the comma means `and`.
+    pub conditions: Vec<Expr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum Pattern {
+    /// Every remaining value (§10.3, D16).
+    Otherwise,
+    /// Equal to this value: `42`, `"oui"`, `red`.
+    Value(Expr),
+    /// Of this type: `in Int g`, where `g` names the narrowed value.
+    Type { ty: TypeExpr, binding: Option<Ident> },
+    /// In this set of values: `in 1..9`, `in primes` (D76).
+    In { set: Expr, binding: Option<Ident> },
 }
 
 #[derive(Clone, Debug)]
@@ -191,6 +217,11 @@ pub enum ExprKind {
     },
     /// `try expr`: the value, or the Error it gives leaves the function (§18.3).
     Try(Box<Expr>),
+    /// `match value: pattern then result ... ;` (§10.3, D51).
+    Match {
+        scrutinee: Box<Expr>,
+        cases: Vec<(Case, Expr)>,
+    },
     /// `if c then a elif d then b else e` (§10.1).
     If {
         branches: Vec<(Expr, Expr)>,

@@ -87,6 +87,7 @@ impl<'t> Parser<'t> {
             TokenKind::Keyword(Keyword::If) => self.if_statement(),
             TokenKind::Keyword(Keyword::While) => self.while_statement(),
             TokenKind::Keyword(Keyword::For) => self.for_statement(),
+            TokenKind::Keyword(Keyword::Match) => self.match_statement(),
             TokenKind::Keyword(Keyword::Break) => Ok(Stmt { kind: StmtKind::Break, span: self.bump().span }),
             TokenKind::Keyword(Keyword::Continue) => {
                 Ok(Stmt { kind: StmtKind::Continue, span: self.bump().span })
@@ -117,7 +118,6 @@ impl<'t> Parser<'t> {
         }
         let TokenKind::Keyword(keyword) = self.peek() else { return None };
         Some(match keyword {
-            Keyword::Match => ("`match`", "§10.3"),
             Keyword::Struct => ("structures", "§12"),
             Keyword::Trait => ("traits", "§14"),
             Keyword::Use => ("modules", "§20"),
@@ -339,6 +339,111 @@ impl<'t> Parser<'t> {
         let body = self.block(opener)?;
         let end = self.close_block(opener)?;
         Ok(Stmt { kind: StmtKind::For { var, iterable, body }, span: start.to(end) })
+    }
+
+    /// `match value:`, then one case per line, each `pattern: body ;`, then `;` (§10.3).
+    fn match_statement(&mut self) -> PResult<Stmt> {
+        let index = self.pos;
+        let start = self.bump().span;
+        let scrutinee = self.nested(Self::expr)?;
+        let opener = Opener { keyword: "match", index, branch: index };
+        self.start_cases()?;
+        let mut cases = Vec::new();
+        loop {
+            while self.eat(&TokenKind::Newline) {}
+            if self.at(&TokenKind::Semicolon) {
+                break;
+            }
+            if self.at(&TokenKind::Eof) {
+                return Err(self.unclosed_block(opener));
+            }
+            let case_index = self.pos;
+            let case = self.case()?;
+            let body = self.block(Opener { branch: case_index, ..opener })?;
+            self.close_block(Opener { keyword: "case", index: case_index, branch: case_index })?;
+            cases.push((case, body));
+            if !self.at_line_end() && !self.at(&TokenKind::Semicolon) {
+                return Err(self.expected("the end of the line after the case"));
+            }
+        }
+        let end = self.close_block(opener)?;
+        Ok(Stmt { kind: StmtKind::Match { scrutinee, cases }, span: start.to(end) })
+    }
+
+    /// `match value:`, then one case per line, each `pattern then result`, then `;` (D51).
+    fn match_expression(&mut self) -> PResult<Expr> {
+        let index = self.pos;
+        let start = self.bump().span;
+        let scrutinee = self.nested(Self::expr)?;
+        let opener = Opener { keyword: "match", index, branch: index };
+        self.start_cases()?;
+        let mut cases = Vec::new();
+        loop {
+            while self.eat(&TokenKind::Newline) {}
+            if self.at(&TokenKind::Semicolon) {
+                break;
+            }
+            if self.at(&TokenKind::Eof) {
+                return Err(self.unclosed_block(opener));
+            }
+            let case = self.case()?;
+            if !self.eat_keyword(Keyword::Then) {
+                return Err(self.expected("`then` and the value of the case"));
+            }
+            let value = self.nested(Self::expr)?;
+            cases.push((case, value));
+            if !self.at_line_end() {
+                return Err(self.expected("the end of the line after the case"));
+            }
+        }
+        let end = self.close_block(opener)?;
+        Ok(Expr { kind: ExprKind::Match { scrutinee: Box::new(scrutinee), cases }, span: start.to(end) })
+    }
+
+    /// The `:` and the line end that open the cases of a `match`.
+    fn start_cases(&mut self) -> PResult<()> {
+        if !self.eat(&TokenKind::Colon) {
+            return Err(self.expected("`:` and the cases"));
+        }
+        if !self.at_line_end() {
+            let error = Diagnostic::error("the cases of a `match` start on the next line")
+                .with_primary(self.span(), "")
+                .with_note("each case of a `match` is on its own line (§10.3)")
+                .with_note("inside parentheses or brackets, line ends are ignored (§5.1): give the `match` a name first, `let v = match ...`");
+            return Err(self.error(error));
+        }
+        Ok(())
+    }
+
+    /// A pattern, then conditions separated by commas (§10.3, §26 `pattern`).
+    fn case(&mut self) -> PResult<Case> {
+        let start = self.span();
+        let pattern = if self.eat_keyword(Keyword::Otherwise) {
+            Pattern::Otherwise
+        } else if self.eat_keyword(Keyword::In) {
+            if self.type_starts_at(self.pos) {
+                let ty = self.type_expr()?;
+                Pattern::Type { ty, binding: self.binding()? }
+            } else {
+                let set = self.nested(Self::as_expr)?;
+                Pattern::In { set, binding: self.binding()? }
+            }
+        } else {
+            Pattern::Value(self.nested(Self::unary)?)
+        };
+        let mut conditions = Vec::new();
+        while self.eat(&TokenKind::Comma) {
+            conditions.push(self.nested(Self::expr)?);
+        }
+        Ok(Case { pattern, conditions, span: start.to(self.previous_span()) })
+    }
+
+    /// The optional name after `in T` or `in set`.
+    fn binding(&mut self) -> PResult<Option<Ident>> {
+        match self.peek() {
+            TokenKind::LowerIdent(_) => Ok(Some(self.binding_name()?)),
+            _ => Ok(None),
+        }
     }
 
     fn return_statement(&mut self) -> PResult<Stmt> {
@@ -597,13 +702,15 @@ impl<'t> Parser<'t> {
             if *keyword == Keyword::If {
                 return self.if_expression();
             }
+            if *keyword == Keyword::Match {
+                return self.match_expression();
+            }
             if *keyword == Keyword::Try {
                 let start = self.bump().span;
                 let value = self.expr()?;
                 return Ok(Expr { span: start.to(value.span), kind: ExprKind::Try(Box::new(value)) });
             }
             let unsupported = match keyword {
-                Keyword::Match => Some(("`match`", "§10.3")),
                 Keyword::Fun => Some(("anonymous functions", "§11.1")),
                 Keyword::Task | Keyword::Wait => Some(("tasks", "§19.1")),
                 Keyword::Parallel => Some(("parallelism", "§19.2")),

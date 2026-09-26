@@ -13,6 +13,7 @@ mod collections;
 mod expr;
 mod flow;
 mod functions;
+mod matching;
 mod names;
 mod narrowing;
 mod stmt;

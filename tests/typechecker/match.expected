@@ -1,0 +1,12 @@
+exit: 0
+----- stdout
+script
+  locals
+    v#0 let Int or Error
+    size#1 let Int
+    %t#2 temp Int or Error
+    n#3 let Int
+  body
+    v#0 = (text_to_int "12")
+    size#1 = (let %t#2 v#0 (if (in_type %t#2 Error) 0 (if (and (in_type %t#2 Int) (let n#3 %t#2 (gt_int n#3 100))) (let n#3 %t#2 2) 1)))
+----- stderr

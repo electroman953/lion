@@ -1,0 +1,6 @@
+let v = "12" as Int
+let size = match v:
+    in Error then 0
+    in Int n, n > 100 then 2
+    otherwise then 1
+;

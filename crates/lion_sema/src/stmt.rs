@@ -42,6 +42,7 @@ impl Checker<'_> {
             ast::StmtKind::If { branches, otherwise } => self.if_stmt(branches, otherwise.as_ref()),
             ast::StmtKind::While { cond, body } => self.while_stmt(cond, body),
             ast::StmtKind::For { var, iterable, body } => self.for_stmt(var, iterable, body),
+            ast::StmtKind::Match { scrutinee, cases } => self.match_stmt(scrutinee, cases, stmt.span),
             ast::StmtKind::Break => self.jump(stmt.span, true),
             ast::StmtKind::Continue => self.jump(stmt.span, false),
             ast::StmtKind::Return(value) => match self.ctx.kind {
@@ -385,6 +386,11 @@ impl Checker<'_> {
                 }
                 ast::StmtKind::While { body, .. } | ast::StmtKind::For { body, .. } => {
                     found.extend(self.assigned_in(&body.stmts))
+                }
+                ast::StmtKind::Match { cases, .. } => {
+                    for (_, body) in cases {
+                        found.extend(self.assigned_in(&body.stmts));
+                    }
                 }
                 _ => {}
             }

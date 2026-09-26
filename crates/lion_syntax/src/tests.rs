@@ -381,3 +381,38 @@ fn type_tests_and_try() {
     assert_eq!(ast("let g = try r.get(1) as Float"), "(let g (try (as (call (. r get) 1) Float)))");
     assert_eq!(ast("return try text as Int"), "(return (try (as text Int)))");
 }
+
+#[test]
+fn match_statements_and_expressions() {
+    assert_eq!(
+        ast(
+            "match load(\"notes.txt\"):\n    in Error e: show(e) ;\n    in Int g, g >= 10: show(\"Admis\") ;\n    in Int g: show(\"Recalé\") ;\n;"
+        ),
+        "(match (call load \"notes.txt\") (in-type Error e [(call show e)]) (in-type Int g, (>= g 10) [(call show \"Admis\")]) (in-type Int g [(call show \"Recalé\")]))"
+    );
+    assert_eq!(
+        ast(
+            "match x:\n    in Error e:\n        show(1)\n        show(2)\n    ;\n    otherwise: show(3) ;\n;"
+        ),
+        "(match x (in-type Error e [(call show 1) (call show 2)]) (otherwise [(call show 3)]))"
+    );
+    assert_eq!(
+        ast(
+            "let label = match status:\n    0 then \"Aucune\"\n    in 1..9 then \"Peu\"\n    otherwise then \"Beaucoup\"\n;"
+        ),
+        "(let label (match-expr status (0 then \"Aucune\") (in (.. 1 9) then \"Peu\") (otherwise then \"Beaucoup\")))"
+    );
+    assert_eq!(
+        ast("let v = match s:\n    in List of Int l then l.size\n    -1 then 0\n    otherwise then 1\n;"),
+        "(let v (match-expr s (in-type (List of Int) l then (. l size)) ((neg 1) then 0) (otherwise then 1)))"
+    );
+    assert_eq!(
+        first_error("show(match s:\n    1 then 2\n;)"),
+        "the cases of a `match` start on the next line"
+    );
+    assert_eq!(first_error("match x: 1: show(1) ; ;"), "the cases of a `match` start on the next line");
+    assert_eq!(
+        first_error("let v = match x:\n    1: 2\n;"),
+        "expected `then` and the value of the case, found `:`"
+    );
+}

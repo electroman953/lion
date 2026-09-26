@@ -1,0 +1,19 @@
+match load_grade("notes.txt"):
+    in Error e: show("Échec : {e.message()}") ;
+    in Int g, g >= 10: show("Admis") ;
+    in Int g: show("Recalé") ;
+;
+let label = match status:
+    0 then "Aucune donnée"
+    in 1..9 then "Peu"
+    otherwise then "Prêt"
+;
+match result:
+    in Error e:
+        show(1)
+        show(2)
+    ;
+    in List of notes_data.Student l:
+        show(l)
+    ;
+;

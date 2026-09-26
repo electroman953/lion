@@ -1,0 +1,52 @@
+exit: 1
+----- stdout
+----- stderr
+error: this `match` has no case for an Error
+  --> tests/errors/match.lion:2:1
+   |
+ 2 | match v:
+   | ^^^^^^^^
+   |
+   = help: add a case such as `in Error ...`, or `otherwise` at the end
+
+error: this `match` has no case for an Int
+  --> tests/errors/match.lion:5:1
+   |
+ 5 | match v:
+   | ^^^^^^^^
+   |
+   = help: add a case such as `in Int ...`, or `otherwise` at the end
+
+error: this `match` has no case for some values of an Int
+   --> tests/errors/match.lion:10:12
+    |
+ 10 | let size = match n:
+    |            ^^^^^^^^
+    |
+    = help: add a case such as `in Int ...`, or `otherwise` at the end
+
+warning: this case can never be reached
+   --> tests/errors/match.lion:17:5
+    |
+ 17 |     otherwise: show("jamais") ;
+    |     ^^^^^^^^^
+    |
+    = the cases above it already cover every value (§10.3)
+
+error: this case never matches: the value is an Int
+   --> tests/errors/match.lion:20:8
+    |
+ 20 |     in Text t: show(t) ;
+    |        ^^^^
+    |
+    = an Int is never a Text
+
+error: this `match` has no case for `false`
+   --> tests/errors/match.lion:24:1
+    |
+ 24 | match flag:
+    | ^^^^^^^^^^^
+    |
+    = help: add a case such as `in Bool ...`, or `otherwise` at the end
+
+5 errors found

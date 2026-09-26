@@ -102,6 +102,9 @@ Le 2026-09-26, l'auteur a délégué toutes les décisions « jusqu'à la fin du
 | C39 | `try` au niveau du script arrête le script sur une Error : le message est affiché avec l'endroit du `try`, et le code de sortie est 1 | 18.3 |
 | C40 | Dans une fonction sans type de retour écrit, `try` ajoute `Error` au type de retour inféré | 11.4, 18.3 |
 | C41 | Une Error s'affiche comme un littéral : `error("message")` | 18.2 |
+| C43 | Un `match` ne s'écrit pas entre parenthèses ni entre crochets : chaque cas est sur sa ligne, et les fins de ligne y sont ignorées (§5.1). Le message propose de le nommer d'abord : `let v = match ...` | 10.3, 5.1 |
+| C44 | Exhaustivité d'un `match` : chaque cas sans condition retire le type qu'il couvre (`in T`), ou la valeur `none`, `true` ou `false`. Sans `otherwise`, ce qui reste doit être vide ; sinon c'est une erreur qui nomme ce qui manque. Un cas placé après une couverture complète déclenche l'avertissement de D77 | 10.3 |
+| C45 | Dans un cas `in T`, la variable examinée par le `match`, si c'en est une, est aussi affinée, même sans nom lié : `in Int: show(x + 1)` | 7.4, 10.3 |
 | C42 | `Error` est pour l'instant un type prédéfini : les erreurs créées par `error(...)` et par la bibliothèque standard. Les types d'erreur définis par le programme (le trait du §18.2) viendront avec les structures et les traits | 18.2 |
 
 ## 5. Points de la spec à trancher plus tard (non bloquants aujourd'hui)

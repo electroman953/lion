@@ -1,0 +1,6 @@
+exit: 0
+----- stdout
+(match (call load_grade "notes.txt") (in-type Error e [(call show (text "Échec : " {(call (. e message))}))]) (in-type Int g, (>= g 10) [(call show "Admis")]) (in-type Int g [(call show "Recalé")]))
+(let label (match-expr status (0 then "Aucune donnée") (in (.. 1 9) then "Peu") (otherwise then "Prêt")))
+(match result (in-type Error e [(call show 1) (call show 2)]) (in-type (List of notes_data.Student) l [(call show l)]))
+----- stderr

@@ -44,6 +44,7 @@ impl Checker<'_> {
             ast::ExprKind::If { branches, otherwise } => self.if_expr(branches, otherwise.as_deref(), span),
             ast::ExprKind::TypeTest { value, ty } => self.type_test(value, ty, span),
             ast::ExprKind::Try(value) => self.try_expr(value, span),
+            ast::ExprKind::Match { scrutinee, cases } => self.match_expr(scrutinee, cases, span),
         }
     }
 
@@ -245,6 +246,12 @@ impl Checker<'_> {
         valid.then(|| {
             typed(ir::ExprKind::Range { start: Box::new(start), end: Box::new(end) }, Type::Range, span)
         })
+    }
+
+    /// `x in values`, for the patterns `in set` of `match` (D76).
+    pub(crate) fn membership_test(&mut self, value: ir::Expr, set: ir::Expr, span: Span) -> Option<ir::Expr> {
+        let set_span = set.span;
+        self.membership(value, set, set_span, span)
     }
 
     /// `x in values` (§16).
@@ -830,6 +837,14 @@ fn convert(conversion: ir::Conversion, value: ir::Expr, ty: Type) -> ir::Expr {
 
 fn to_float(expr: ir::Expr) -> ir::Expr {
     if expr.ty == Type::Int { convert(ir::Conversion::IntToFloat, expr, Type::Float) } else { expr }
+}
+
+impl Checker<'_> {
+    /// `lhs == rhs`, for the value patterns of `match` (§10.3).
+    pub(crate) fn equality_test(&mut self, lhs: ir::Expr, rhs: ir::Expr, span: Span) -> Option<ir::Expr> {
+        let comparison = self.comparison(ast::CompareOp::Eq, span, &lhs, &rhs)?;
+        Some(compare_pair(comparison, lhs, rhs, span))
+    }
 }
 
 fn compare_pair(comparison: Comparison, lhs: ir::Expr, rhs: ir::Expr, span: Span) -> ir::Expr {
