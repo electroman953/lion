@@ -46,6 +46,9 @@ pub fn print_stmt(stmt: &Stmt) -> String {
             out + ")"
         }
         StmtKind::While { cond, body } => format!("(while {} {})", print_expr(cond), print_block(body)),
+        StmtKind::For { var, iterable, body } => {
+            format!("(for {} {} {})", var.name, print_expr(iterable), print_block(body))
+        }
         StmtKind::Break => "break".to_string(),
         StmtKind::Continue => "continue".to_string(),
         StmtKind::Return(None) => "(return)".to_string(),

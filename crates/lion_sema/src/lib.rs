@@ -55,6 +55,8 @@ struct LocalInfo {
     initialized: bool,
     /// The first assignment met, for messages.
     first_assignment: Option<Span>,
+    /// The variable of a `for` loop.
+    loop_variable: bool,
 }
 
 impl LocalInfo {
@@ -68,6 +70,7 @@ impl LocalInfo {
             decl_span: name.span,
             initialized,
             first_assignment: None,
+            loop_variable: false,
         }
     }
 }
@@ -266,6 +269,7 @@ impl<'a> Checker<'a> {
             decl_span: span,
             initialized: true,
             first_assignment: None,
+            loop_variable: false,
         });
         self.ctx.flow.set(id, Assigned::Yes);
         id
@@ -335,14 +339,12 @@ fn typed(kind: ir::ExprKind, ty: Type, span: Span) -> ir::Expr {
     ir::Expr { kind, ty, span }
 }
 
-/// "an Int", "a Text": how a value of the type is named in messages.
-fn article(ty: Type) -> &'static str {
+/// "an Int", "a List of Text": how a value of the type is named in messages.
+fn article(ty: Type) -> String {
     match ty {
-        Type::Int => "an Int",
-        Type::Float => "a Float",
-        Type::Bool => "a Bool",
-        Type::Text => "a Text",
-        Type::None => "`none`",
+        Type::Int => "an Int".to_string(),
+        Type::None => "`none`".to_string(),
+        other => format!("a {other}"),
     }
 }
 

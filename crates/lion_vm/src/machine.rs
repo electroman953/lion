@@ -280,6 +280,31 @@ impl Machine<'_> {
                     let target = self.reference(reference);
                     self.stack[target] = self.stack[self.base + src as usize].clone();
                 }
+                Instr::MakeRange { dst, a, b } => {
+                    let bounds = [self.int(a), self.int(b)];
+                    self.set(dst, Value::Range(Rc::new(bounds)));
+                }
+                Instr::InRange { dst, a, b } => {
+                    let value = self.int(a);
+                    let [start, end] = self.range(b);
+                    self.set(dst, Value::Bool(start <= value && value <= end));
+                }
+                Instr::ForRange { range, counter, target } => {
+                    let [start, end] = self.range(range);
+                    if start > end {
+                        pc = target as usize;
+                    } else {
+                        self.set(counter, Value::Int(start));
+                    }
+                }
+                Instr::NextRange { range, counter, target } => {
+                    let [_, end] = self.range(range);
+                    let current = self.int(counter);
+                    if current < end {
+                        self.set(counter, Value::Int(current + 1));
+                        pc = target as usize;
+                    }
+                }
                 Instr::Halt => return Ok(()),
             }
         }
@@ -389,6 +414,13 @@ impl Machine<'_> {
         match &self.stack[self.base + reg as usize] {
             Value::Text(text) => text,
             other => self.mismatch("Text", other),
+        }
+    }
+
+    fn range(&self, reg: Reg) -> [i64; 2] {
+        match &self.stack[self.base + reg as usize] {
+            Value::Range(bounds) => **bounds,
+            other => self.mismatch("Range", other),
         }
     }
 

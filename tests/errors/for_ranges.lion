@@ -1,0 +1,8 @@
+let i = 0
+for i in 1..3: show(i) ;
+for x in 1.5..2: show(x) ;
+for c in 5: show(c) ;
+for k in 1..3:
+    k = 2
+;
+show(2.5 in 1..3)

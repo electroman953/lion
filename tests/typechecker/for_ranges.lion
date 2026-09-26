@@ -1,0 +1,6 @@
+var total = 0
+for i in 1..10:
+    if i mod 2 == 0: continue ;
+    total += i
+;
+let inside = 4 in 1..total

@@ -42,6 +42,12 @@ pub enum StmtKind {
         cond: Expr,
         body: Block,
     },
+    /// `for x in values: ... ;` (§10.2).
+    For {
+        var: Ident,
+        iterable: Expr,
+        body: Block,
+    },
     Break,
     Continue,
     /// `return`, with an optional value (§11.4, §20.1).

@@ -73,6 +73,15 @@ impl Printer<'_> {
                     self.block(body, depth + 1, out);
                     out.push_str(&format!("{indent}end\n"));
                 }
+                Stmt::For { var, iterable, body } => {
+                    out.push_str(&format!(
+                        "{indent}for {} in {}\n",
+                        self.local(var.index()),
+                        self.expr(iterable)
+                    ));
+                    self.block(body, depth + 1, out);
+                    out.push_str(&format!("{indent}end\n"));
+                }
                 Stmt::Break => out.push_str(&format!("{indent}break\n")),
                 Stmt::Continue => out.push_str(&format!("{indent}continue\n")),
                 Stmt::Return(None) => out.push_str(&format!("{indent}return\n")),
@@ -113,6 +122,7 @@ impl Printer<'_> {
             ExprKind::If { cond, then, otherwise } => {
                 format!("(if {} {} {})", print(cond), print(then), print(otherwise))
             }
+            ExprKind::Range { start, end } => format!("(range {} {})", print(start), print(end)),
             ExprKind::Concat(parts) => {
                 let parts: Vec<String> = parts.iter().map(print).collect();
                 format!("(concat {})", parts.join(" "))

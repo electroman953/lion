@@ -77,6 +77,17 @@ pub enum Instr {
     LoadRef { dst: Reg, reference: Reg },
     StoreRef { reference: Reg, src: Reg },
 
+    /// `a..b` from two Int registers.
+    MakeRange { dst: Reg, a: Reg, b: Reg },
+    /// Whether the Int in `a` is in the Range in `b`.
+    InRange { dst: Reg, a: Reg, b: Reg },
+    /// Starts going through the Range in `range`: jumps to `target` when it is empty,
+    /// else puts its first value in `counter`.
+    ForRange { range: Reg, counter: Reg, target: u32 },
+    /// Goes to the next value of the Range: jumps back to `target` with `counter`
+    /// increased, unless it was the last value. Never overflows.
+    NextRange { range: Reg, counter: Reg, target: u32 },
+
     Show { src: Reg },
     Halt,
 }

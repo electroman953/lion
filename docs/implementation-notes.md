@@ -81,6 +81,9 @@ Le 2026-09-26, l'auteur a délégué toutes les décisions « jusqu'à la fin du
 | C18 | `f()` sans argument alors que `f` a des paramètres obligatoires est une erreur. Un appel avec une partie des arguments est une curryfication (§11.3), « not implemented » jusqu'au sous-slice 3c | 11.3 |
 | C19 | Les diagnostics sont présentés dans l'ordre du fichier, même si les corps de fonction sont vérifiés dans un autre ordre | 24.3 |
 | C20 | Une fonction générique jamais appelée ne peut pas être vérifiée, faute de types : un avertissement le dit | 15.3, 24 |
+| C21 | `show(1..5)` affiche `1..5`, la forme du littéral | 16.3 |
+| C22 | La variable d'une boucle `for` est une constante du corps, redéclarée à chaque tour ; lui affecter une valeur est une erreur | 10.2 |
+| C23 | `x in a..b` demande un Int ; un Float est refusé, comme les autres comparaisons entre types différents (R2) | 16.3 |
 
 ## 5. Points de la spec à trancher plus tard (non bloquants aujourd'hui)
 
@@ -120,4 +123,6 @@ Le 2026-09-26, l'auteur a délégué toutes les décisions « jusqu'à la fin du
   - `fib(32)` récursif prend 0,25 s contre 0,15 s, soit environ 1,7 fois plus lent.
 
   Le chemin d'appel et la représentation des valeurs, un `enum` de 16 octets avec comptage de références, sont à optimiser dans une passe dédiée : registres spécialisés par type, opérandes immédiats, cadres plus légers.
+- **Types composés.** `Type` reste une petite valeur copiable : les types qui en contiennent d'autres, comme `List of T`, désignent ces derniers par une référence vers une table globale, où chaque type n'est stocké qu'une fois. L'égalité des types est ainsi une simple comparaison.
+- **Intervalles.** Un `Range` ne stocke que ses deux bornes (D46). La boucle `for` sur un intervalle compare le compteur à la borne avant de l'augmenter, si bien que `for i in 1..9223372036854775807` se termine sans débordement.
 

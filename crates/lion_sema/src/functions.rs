@@ -432,6 +432,7 @@ impl<'a> Checker<'a> {
                     decl_span: param.span,
                     initialized: true,
                     first_assignment: None,
+                    loop_variable: false,
                 });
                 self.ctx.flow.set(id, Assigned::Yes);
                 id

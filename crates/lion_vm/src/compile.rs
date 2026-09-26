@@ -70,8 +70,8 @@ struct Compiler<'f> {
 }
 
 struct Loop {
-    /// Where each turn starts, with the test of the condition.
-    head: u32,
+    /// The jumps of `continue`, to point at the next turn.
+    continues: Vec<usize>,
     /// The jumps of `break`, to point at the end of the loop.
     breaks: Vec<usize>,
 }
@@ -97,22 +97,26 @@ impl Compiler<'_> {
             ir::Stmt::While { cond, body } => {
                 let head = self.code.len() as u32;
                 let to_end = self.jump_unless(cond);
-                self.loops.push(Loop { head, breaks: Vec::new() });
+                self.loops.push(Loop { continues: Vec::new(), breaks: Vec::new() });
                 self.block(body);
-                self.emit(Instr::Jump { target: head }, None);
                 let finished = self.loops.pop().expect("the loop is open");
+                for at in finished.continues {
+                    self.patch_to(at, head);
+                }
+                self.emit(Instr::Jump { target: head }, None);
                 self.patch(to_end);
                 for at in finished.breaks {
                     self.patch(at);
                 }
             }
+            ir::Stmt::For { var, iterable, body } => self.for_range(*var, iterable, body),
             ir::Stmt::Break => {
                 let at = self.jump();
                 self.loops.last_mut().expect("`break` is inside a loop").breaks.push(at);
             }
             ir::Stmt::Continue => {
-                let head = self.loops.last().expect("`continue` is inside a loop").head;
-                self.emit(Instr::Jump { target: head }, None);
+                let at = self.jump();
+                self.loops.last_mut().expect("`continue` is inside a loop").continues.push(at);
             }
             ir::Stmt::Return(Some(value)) => {
                 let src = self.operand(value);
@@ -147,6 +151,30 @@ impl Compiler<'_> {
                 let src = self.operand(value);
                 self.emit(Instr::StoreGlobal { global: global.0, src }, span);
             }
+        }
+    }
+
+    /// `for var in a..b`: the Range and a counter live in temporaries during the loop.
+    fn for_range(&mut self, var: ir::LocalId, iterable: &ir::Expr, body: &[ir::Stmt]) {
+        let span = Some(iterable.span);
+        let range = self.temp();
+        self.expr_into(iterable, range);
+        let counter = self.temp();
+        let start = self.code.len();
+        self.emit(Instr::ForRange { range, counter, target: 0 }, span);
+        let head = self.code.len() as u32;
+        self.emit(Instr::Move { dst: register(var), src: counter }, span);
+        self.loops.push(Loop { continues: Vec::new(), breaks: Vec::new() });
+        self.block(body);
+        let finished = self.loops.pop().expect("the loop is open");
+        let step = self.code.len() as u32;
+        for at in finished.continues {
+            self.patch_to(at, step);
+        }
+        self.emit(Instr::NextRange { range, counter, target: head }, span);
+        self.patch(start);
+        for at in finished.breaks {
+            self.patch(at);
         }
     }
 
@@ -285,6 +313,11 @@ impl Compiler<'_> {
                 self.expr_into(otherwise, dst);
                 self.patch(to_end);
             }
+            ExprKind::Range { start, end } => {
+                let a = self.operand_before(start, end);
+                let b = self.operand(end);
+                self.emit(Instr::MakeRange { dst, a, b }, span);
+            }
             ExprKind::Concat(parts) => {
                 let start = self.next_temp;
                 for _ in parts {
@@ -357,12 +390,16 @@ impl Compiler<'_> {
 
     /// Points the jump at `at` to the next instruction.
     fn patch(&mut self, at: usize) {
-        let here = self.code.len() as u32;
+        self.patch_to(at, self.code.len() as u32);
+    }
+
+    fn patch_to(&mut self, at: usize, destination: u32) {
         match &mut self.code[at] {
             Instr::Jump { target }
             | Instr::JumpIfFalse { target, .. }
             | Instr::JumpIfTrue { target, .. }
-            | Instr::JumpIfArgs { target, .. } => *target = here,
+            | Instr::JumpIfArgs { target, .. }
+            | Instr::ForRange { target, .. } => *target = destination,
             other => unreachable!("not a jump: {other:?}"),
         }
     }
@@ -405,6 +442,7 @@ fn calls_function(expr: &ir::Expr) -> bool {
         ExprKind::If { cond, then, otherwise } => {
             calls_function(cond) || calls_function(then) || calls_function(otherwise)
         }
+        ExprKind::Range { start, end } => calls_function(start) || calls_function(end),
         ExprKind::Concat(parts) => parts.iter().any(calls_function),
         ExprKind::CallBuiltin { args, .. } => args.iter().any(calls_function),
     }
@@ -439,6 +477,7 @@ fn binary_instr(op: BinaryOp, dst: Reg, a: Reg, b: Reg) -> Instr {
         BinaryOp::NeBool => Instr::NeBool { dst, a, b },
         BinaryOp::EqText => Instr::EqText { dst, a, b },
         BinaryOp::NeText => Instr::NeText { dst, a, b },
+        BinaryOp::InRange => Instr::InRange { dst, a, b },
         BinaryOp::EqNone | BinaryOp::NeNone => unreachable!("compiled to a constant"),
     }
 }

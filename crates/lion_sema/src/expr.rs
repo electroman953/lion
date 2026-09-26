@@ -208,9 +208,8 @@ impl Checker<'_> {
         use ast::BinaryOp::*;
         let unsupported = match op {
             Over => Some(("Rational numbers (`over`)", "§8.3")),
-            Range => Some(("intervals (`..`)", "§16.3")),
             Inter | Union | Minus | Subset => Some(("set operations", "§16.6")),
-            In => Some(("membership tests with `in`", "§7.1, §16")),
+            In if matches!(rhs.kind, ast::ExprKind::TypeName(_)) => Some(("type tests (`x in T`)", "§7.1")),
             Same => Some(("`same`", "§9.4, §17.2")),
             _ => None,
         };
@@ -221,10 +220,55 @@ impl Checker<'_> {
         let lhs = self.expr(lhs);
         let rhs = self.expr(rhs);
         let (lhs, rhs) = (lhs?, rhs?);
-        if matches!(op, And | Or) {
-            self.logical(op, lhs, rhs, span)
-        } else {
-            self.arithmetic(op, op_span, lhs, rhs, span)
+        match op {
+            And | Or => self.logical(op, lhs, rhs, span),
+            Range => self.range(lhs, rhs, span),
+            In => self.membership(lhs, rhs, op_span, span),
+            _ => self.arithmetic(op, op_span, lhs, rhs, span),
+        }
+    }
+
+    /// `a..b`: the integers from `a` to `b` included, increasing (§16.3).
+    fn range(&mut self, start: ir::Expr, end: ir::Expr, span: Span) -> Option<ir::Expr> {
+        let mut valid = true;
+        for bound in [&start, &end] {
+            if bound.ty != Type::Int {
+                self.diagnostics.push(
+                    Diagnostic::error("an interval goes from an Int to an Int")
+                        .with_primary(bound.span, format!("this is {}", article(bound.ty)))
+                        .with_note("`a..b` holds the integers from `a` to `b`; there is no interval of Float (§16.3)"),
+                );
+                valid = false;
+            }
+        }
+        valid.then(|| {
+            typed(ir::ExprKind::Range { start: Box::new(start), end: Box::new(end) }, Type::Range, span)
+        })
+    }
+
+    /// `x in values` (§16).
+    fn membership(&mut self, value: ir::Expr, set: ir::Expr, op_span: Span, span: Span) -> Option<ir::Expr> {
+        match set.ty {
+            Type::Range if value.ty == Type::Int => {
+                let kind = ir::ExprKind::Binary {
+                    op: ir::BinaryOp::InRange,
+                    lhs: Box::new(value),
+                    rhs: Box::new(set),
+                };
+                Some(typed(kind, Type::Bool, span))
+            }
+            Type::Range => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("an interval holds Int values, not {}", article(value.ty)))
+                        .with_primary(value.span, format!("this is {}", article(value.ty)))
+                        .with_note("Lion 0.1 does not define membership between values of different types"),
+                );
+                None
+            }
+            other => {
+                self.not_implemented(op_span, &format!("membership tests in {}", article(other)), "§16");
+                None
+            }
         }
     }
 

@@ -21,7 +21,7 @@ error: `break` outside a loop
  4 | break
    | ^^^^^
    |
-   = `break` is used inside a `while` loop (§10.2)
+   = `break` is used inside a `while` or `for` loop (§10.2)
 
 error: `continue` outside a loop
   --> tests/errors/control_flow.lion:5:1
@@ -29,7 +29,7 @@ error: `continue` outside a loop
  5 | continue
    | ^^^^^^^^
    |
-   = `continue` is used inside a `while` loop (§10.2)
+   = `continue` is used inside a `while` or `for` loop (§10.2)
 
 error: not implemented yet: `if` expressions whose branches have different types (the value would be a union such as `Int or Text`)
   --> tests/errors/control_flow.lion:6:9

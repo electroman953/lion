@@ -86,6 +86,7 @@ impl<'t> Parser<'t> {
             TokenKind::Keyword(Keyword::Let | Keyword::Var) => self.let_statement(),
             TokenKind::Keyword(Keyword::If) => self.if_statement(),
             TokenKind::Keyword(Keyword::While) => self.while_statement(),
+            TokenKind::Keyword(Keyword::For) => self.for_statement(),
             TokenKind::Keyword(Keyword::Break) => Ok(Stmt { kind: StmtKind::Break, span: self.bump().span }),
             TokenKind::Keyword(Keyword::Continue) => {
                 Ok(Stmt { kind: StmtKind::Continue, span: self.bump().span })
@@ -116,7 +117,6 @@ impl<'t> Parser<'t> {
         }
         let TokenKind::Keyword(keyword) = self.peek() else { return None };
         Some(match keyword {
-            Keyword::For => ("`for` loops, which need collections and intervals", "§10.2, §16"),
             Keyword::Match => ("`match`", "§10.3"),
             Keyword::Struct => ("structures", "§12"),
             Keyword::Trait => ("traits", "§14"),
@@ -324,6 +324,21 @@ impl<'t> Parser<'t> {
                 return Ok(params);
             }
         }
+    }
+
+    /// `for x in values: ... ;` (§10.2).
+    fn for_statement(&mut self) -> PResult<Stmt> {
+        let index = self.pos;
+        let start = self.bump().span;
+        let var = self.binding_name()?;
+        if !self.eat_keyword(Keyword::In) {
+            return Err(self.expected("`in` and the values to go through"));
+        }
+        let iterable = self.nested(Self::expr)?;
+        let opener = Opener { keyword: "for", index, branch: index };
+        let body = self.block(opener)?;
+        let end = self.close_block(opener)?;
+        Ok(Stmt { kind: StmtKind::For { var, iterable, body }, span: start.to(end) })
     }
 
     fn return_statement(&mut self) -> PResult<Stmt> {

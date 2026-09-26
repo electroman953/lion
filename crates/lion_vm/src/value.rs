@@ -11,6 +11,8 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Text(Rc<String>),
+    /// `start..end`: only the bounds are stored (§16.3, D46).
+    Range(Rc<[i64; 2]>),
     /// A reference to a register of the stack, held by a `var` parameter (§11.2).
     Ref(u32),
 }
@@ -24,6 +26,7 @@ impl Value {
             Value::Int(value) => value.to_string(),
             Value::Float(value) => format_float(*value),
             Value::Text(text) => text.to_string(),
+            Value::Range(bounds) => format!("{}..{}", bounds[0], bounds[1]),
             Value::Ref(_) => "<reference>".to_string(),
         }
     }
@@ -35,6 +38,7 @@ impl Value {
             Value::Int(_) => "Int",
             Value::Float(_) => "Float",
             Value::Text(_) => "Text",
+            Value::Range(_) => "Range",
             Value::Ref(_) => "reference",
         }
     }

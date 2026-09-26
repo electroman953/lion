@@ -109,6 +109,15 @@ impl Checker<'_> {
             return true;
         }
         let name = &info.name;
+        if info.loop_variable {
+            self.diagnostics.push(
+                Diagnostic::error(format!("cannot assign to the loop variable `{name}`"))
+                    .with_primary(span, "")
+                    .with_secondary(info.decl_span, "it takes each value in turn")
+                    .with_help(format!("to change a copy, declare one: `var current = {name}`")),
+            );
+            return false;
+        }
         if info.initialized {
             self.diagnostics.push(
                 Diagnostic::error(format!("cannot assign to the constant `{name}`"))

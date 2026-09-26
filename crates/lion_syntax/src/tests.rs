@@ -173,10 +173,7 @@ fn recovery_skips_the_blocks_of_a_failed_statement() {
 #[test]
 fn unsupported_constructions_are_reported() {
     let cases = [
-        (
-            "for i in 1..3: show(i) ;",
-            "not implemented yet: `for` loops, which need collections and intervals",
-        ),
+        ("parallel for f in files: show(f) ;", "not implemented yet: parallelism"),
         ("struct S:\n;", "not implemented yet: structures"),
         ("Color = {red, green}", "not implemented yet: type definitions (enumerations and named unions)"),
         ("let l = [1, 2]", "not implemented yet: lists"),
@@ -341,4 +338,19 @@ fn function_declaration_errors() {
     assert_eq!(first_error("fun f():\n    show(1)\n"), "the `fun` block is never closed");
     assert_eq!(first_error("fun Area() = 1"), "`Area` cannot name a value");
     assert_eq!(first_error("fun(x) = x"), "not implemented yet: anonymous functions");
+}
+
+#[test]
+fn for_loops() {
+    assert_eq!(ast("for i in 1..3: show(i) ;"), "(for i (.. 1 3) [(call show i)])");
+    assert_eq!(
+        ast("for s in students:\n    if s > 10: continue ;\n    show(s)\n;"),
+        "(for s students [(if (> s 10) [continue]) (call show s)])"
+    );
+    assert_eq!(ast("for d in 2..isqrt(n): show(d) ;"), "(for d (.. 2 (call isqrt n)) [(call show d)])");
+    assert_eq!(
+        first_error("for i 1..3: show(i) ;"),
+        "expected `in` and the values to go through, found a number"
+    );
+    assert_eq!(first_error("for i in 1..3:\n    show(i)\n"), "the `for` block is never closed");
 }

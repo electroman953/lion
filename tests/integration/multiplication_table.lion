@@ -1,0 +1,9 @@
+// A multiplication table, with nested `for` loops and a function.
+fun pad(n in Int) in Text = if n < 10 then "  {n}" elif n < 100 then " {n}" else "{n}"
+for row in 1..9:
+    var line = ""
+    for column in 1..9:
+        line = "{line}{pad(row * column)}"
+    ;
+    show(line)
+;

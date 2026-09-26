@@ -10,7 +10,7 @@ mod print;
 mod types;
 
 pub use print::print_program;
-pub use types::Type;
+pub use types::{Type, TypeRef};
 
 use lion_diagnostics::Span;
 
@@ -105,6 +105,12 @@ pub enum Stmt {
         cond: Expr,
         body: Vec<Stmt>,
     },
+    /// Goes through the elements of `iterable`, evaluated once, in `var` (§10.2).
+    For {
+        var: LocalId,
+        iterable: Expr,
+        body: Vec<Stmt>,
+    },
     /// Leaves the innermost loop.
     Break,
     /// Goes to the next turn of the innermost loop.
@@ -164,6 +170,11 @@ pub enum ExprKind {
     Convert {
         conversion: Conversion,
         value: Box<Expr>,
+    },
+    /// `start..end`: the integers from `start` to `end` included (§16.3).
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
     },
     /// Joins Text values, in order (text interpolation).
     Concat(Vec<Expr>),
@@ -227,6 +238,8 @@ pub enum BinaryOp {
     NeText,
     EqNone,
     NeNone,
+    /// An Int in a Range (§16.3).
+    InRange,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -278,6 +291,7 @@ impl BinaryOp {
             NeText => "ne_text",
             EqNone => "eq_none",
             NeNone => "ne_none",
+            InRange => "in_range",
         }
     }
 }

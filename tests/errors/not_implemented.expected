@@ -33,14 +33,6 @@ error: not implemented yet: Rational numbers (`over`)
    |
    = this part of Lion (spec §8.3) is not supported by this version of the implementation
 
-error: not implemented yet: intervals (`..`)
-  --> tests/errors/not_implemented.lion:5:10
-   |
- 5 | let s = 1..9
-   |          ^^
-   |
-   = this part of Lion (spec §16.3) is not supported by this version of the implementation
-
 error: not implemented yet: fields and methods
   --> tests/errors/not_implemented.lion:6:9
    |
@@ -57,12 +49,12 @@ error: not implemented yet: the standard function `sum`
    |
    = this part of Lion (spec §23) is not supported by this version of the implementation
 
-error: not implemented yet: membership tests with `in`
+error: not implemented yet: type tests (`x in T`)
   --> tests/errors/not_implemented.lion:8:12
    |
  8 | let v = (3 in Int)
    |            ^^
    |
-   = this part of Lion (spec §7.1, §16) is not supported by this version of the implementation
+   = this part of Lion (spec §7.1) is not supported by this version of the implementation
 
-8 errors found
+7 errors found

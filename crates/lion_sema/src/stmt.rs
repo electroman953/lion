@@ -33,6 +33,7 @@ impl Checker<'_> {
             ast::StmtKind::Expr(expr) => self.expr(expr).map(ir::Stmt::Expr),
             ast::StmtKind::If { branches, otherwise } => self.if_stmt(branches, otherwise.as_ref()),
             ast::StmtKind::While { cond, body } => self.while_stmt(cond, body),
+            ast::StmtKind::For { var, iterable, body } => self.for_stmt(var, iterable, body),
             ast::StmtKind::Break => self.jump(stmt.span, true),
             ast::StmtKind::Continue => self.jump(stmt.span, false),
             ast::StmtKind::Return(value) => match self.ctx.kind {
@@ -225,6 +226,41 @@ impl Checker<'_> {
         Some(ir::Stmt::While { cond: cond_ir?, body: body_ir })
     }
 
+    /// `for x in values: ... ;` (§10.2). The loop variable is a constant of the body,
+    /// which may run zero times.
+    fn for_stmt(&mut self, var: &ast::Ident, iterable: &ast::Expr, body: &ast::Block) -> Option<ir::Stmt> {
+        let iterable = self.expr(iterable);
+        let element = match &iterable {
+            Some(iterable) => match iterable.ty.element() {
+                Some(element) => Some(element),
+                None => {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!("`for` cannot go through {}", article(iterable.ty)))
+                            .with_primary(iterable.span, "")
+                            .with_note("`for` goes through an interval or a list (§10.2)"),
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
+        for local in self.assigned_in(&body.stmts) {
+            if self.ctx.flow.is_reachable() && self.ctx.flow.get(local) == Assigned::No {
+                self.ctx.flow.set(local, Assigned::Maybe);
+            }
+        }
+        let head = self.ctx.flow.clone();
+        self.ctx.loops.push(LoopExits::default());
+        self.ctx.scopes.push(Scope::default());
+        let var = self.declare(var, element, false, true);
+        self.ctx.locals[var.index()].loop_variable = true;
+        let body = self.stmts(&body.stmts);
+        self.close_scope();
+        let exits = self.ctx.loops.pop().expect("the loop is open");
+        self.ctx.flow = exits.breaks.into_iter().fold(head, Flow::join);
+        Some(ir::Stmt::For { var, iterable: iterable?, body })
+    }
+
     /// `break` or `continue`, in the innermost loop (§10.2).
     fn jump(&mut self, span: Span, is_break: bool) -> Option<ir::Stmt> {
         let keyword = if is_break { "break" } else { "continue" };
@@ -232,7 +268,7 @@ impl Checker<'_> {
             self.diagnostics.push(
                 Diagnostic::error(format!("`{keyword}` outside a loop"))
                     .with_primary(span, "")
-                    .with_note(format!("`{keyword}` is used inside a `while` loop (§10.2)")),
+                    .with_note(format!("`{keyword}` is used inside a `while` or `for` loop (§10.2)")),
             );
             return None;
         };
@@ -279,7 +315,9 @@ impl Checker<'_> {
                         found.extend(self.assigned_in(&otherwise.stmts));
                     }
                 }
-                ast::StmtKind::While { body, .. } => found.extend(self.assigned_in(&body.stmts)),
+                ast::StmtKind::While { body, .. } | ast::StmtKind::For { body, .. } => {
+                    found.extend(self.assigned_in(&body.stmts))
+                }
                 _ => {}
             }
         }
