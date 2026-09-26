@@ -25,13 +25,13 @@ error: a `var` parameter cannot have a default value
    |
    = the caller always gives the variable of a `var` parameter (§11.2)
 
-error: not implemented yet: parameters without a type, which make the function generic
-  --> tests/errors/function_declarations.lion:4:13
+warning: `generic` is never called, so it is not checked
+  --> tests/errors/function_declarations.lion:4:5
    |
  4 | fun generic(x) = x
-   |             ^
+   |     ^^^^^^^
    |
-   = this part of Lion (spec §11.1, §15.3) is not supported by this version of the implementation
+   = a function with parameters without a type is checked for the types of each call (§15.3)
 
 error: cannot find the type `Floot`
   --> tests/errors/function_declarations.lion:5:16
@@ -77,4 +77,4 @@ error: not implemented yet: functions declared inside a block or a function (clo
     |
     = this part of Lion (spec §11.5) is not supported by this version of the implementation
 
-9 errors found
+8 errors found

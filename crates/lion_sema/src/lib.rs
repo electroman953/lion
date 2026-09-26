@@ -23,7 +23,7 @@ use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
 use crate::flow::{Assigned, Flow};
-use crate::functions::{FunctionInfo, ScriptCall};
+use crate::functions::{FunctionInfo, Instance, ScriptCall};
 
 pub struct Checked {
     /// Present only when there are no errors.
@@ -90,7 +90,7 @@ struct LoopExits {
 enum ContextKind {
     /// The top-level statements of the file.
     Script,
-    /// The body of a top-level function, by index.
+    /// The body of an instance of a top-level function, by index.
     Function(usize),
 }
 
@@ -162,6 +162,9 @@ struct Checker<'a> {
     global_names: HashMap<ir::LocalId, String>,
     functions: Vec<FunctionInfo<'a>>,
     function_names: HashMap<String, usize>,
+    /// The checked versions of the functions: one per function, or one per set of
+    /// argument types for a generic function (C1).
+    instances: Vec<Instance>,
     /// Calls made by the script, checked once every function is known (C3).
     script_calls: Vec<ScriptCall>,
     /// The calls that required checking a function body early, innermost last.
@@ -177,6 +180,7 @@ impl<'a> Checker<'a> {
             global_names: HashMap::new(),
             functions: Vec::new(),
             function_names: HashMap::new(),
+            instances: Vec::new(),
             script_calls: Vec::new(),
             demands: Vec::new(),
         };
@@ -283,11 +287,14 @@ impl<'a> Checker<'a> {
 
     fn finish(mut self) -> Checked {
         let mut diagnostics = std::mem::take(&mut self.diagnostics);
-        // Function bodies are checked out of order: report in the order of the file.
-        diagnostics.sort_by_key(|diagnostic| {
+        // Function bodies are checked out of order: report in the order of the file,
+        // once, even when several instances of a generic function find the same problem.
+        let position = |diagnostic: &Diagnostic| {
             let primary = diagnostic.labels.iter().find(|label| label.primary).or(diagnostic.labels.first());
-            primary.map(|label| (label.span.source, label.span.start))
-        });
+            primary.map(|label| (label.span.source, label.span.start, label.span.end))
+        };
+        diagnostics.sort_by_key(position);
+        diagnostics.dedup_by(|a, b| a.message == b.message && position(a) == position(b));
         if diagnostics.iter().any(Diagnostic::is_fatal) {
             return Checked { program: None, diagnostics };
         }
@@ -301,8 +308,9 @@ impl<'a> Checker<'a> {
             body: script.body,
             span: None,
         };
+        let functions = self.functions;
         let mut functions: Vec<ir::Function> =
-            self.functions.into_iter().map(|function| function.into_ir()).collect();
+            self.instances.into_iter().map(|instance| instance.into_ir(&functions)).collect();
         functions.push(main);
         let main = ir::FunctionId(functions.len() as u32 - 1);
         Checked { program: Some(ir::Program { functions, main }), diagnostics }

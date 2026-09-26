@@ -1,12 +1,16 @@
 //! Functions (spec §11): declarations, bodies, calls, and the globals they reach.
 //!
 //! Top-level functions are registered before the script is checked, so they can be
-//! called before their declaration (C4). Each body records the globals it reads and
-//! the functions it calls; once every body is known, the reads are closed over the
-//! calls, and each call made by the script is checked: the function must not read a
-//! global that may have no value at that point (§6.1, C3).
+//! called before their declaration (C4). A function whose parameters all have a type
+//! has one *instance*. A parameter without a type makes the function generic (C1): each
+//! call creates, or reuses, the instance for the types of its arguments, checked and
+//! compiled on its own (§15.3).
+//!
+//! Each instance records the globals it reads and the instances it calls; once every
+//! body is known, the reads are closed over the calls, and each call made by the script
+//! is checked: it must not read a global that may have no value at that point (§6.1, C3).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use lion_diagnostics::{Diagnostic, Span};
 use lion_ir::{self as ir, Type};
@@ -20,23 +24,46 @@ pub(crate) struct FunctionInfo<'a> {
     pub(crate) decl: &'a ast::FunDecl,
     /// `None` when the declaration has an error or needs what is not implemented.
     signature: Option<Vec<ParamInfo>>,
-    ret: Ret,
-    state: BodyState,
+    /// The return type, when written.
+    declared_ret: Option<Type>,
     /// The globals named after `modifies` (§11.5).
     modifies: Vec<ir::LocalId>,
-    /// Known once the body is checked.
-    reads: Vec<ir::LocalId>,
-    calls: Vec<usize>,
-    checked: Option<CheckedBody>,
+    /// The instances of a generic function, by the types of the given arguments.
+    instances: HashMap<Vec<Type>, usize>,
+    /// The only instance of a function whose parameters all have a type.
+    instance: Option<usize>,
+}
+
+impl FunctionInfo<'_> {
+    fn is_generic(&self) -> bool {
+        self.signature.as_ref().is_some_and(|params| params.iter().any(|param| param.ty.is_none()))
+    }
 }
 
 #[derive(Clone)]
 struct ParamInfo {
     name: String,
-    ty: Type,
+    /// `None` for a parameter without a type, which makes the function generic.
+    ty: Option<Type>,
     by_reference: bool,
     has_default: bool,
     span: Span,
+}
+
+/// One checked version of a function.
+pub(crate) struct Instance {
+    function: usize,
+    /// For a generic function: the types of the arguments given by the calls of this
+    /// instance, which gave that many arguments. Empty otherwise.
+    arg_types: Vec<Type>,
+    /// The call that created a generic instance, for messages.
+    origin: Option<Span>,
+    ret: Ret,
+    state: BodyState,
+    /// Known once the body is checked.
+    reads: Vec<ir::LocalId>,
+    calls: Vec<usize>,
+    checked: Option<CheckedBody>,
 }
 
 #[derive(Clone, Copy)]
@@ -58,6 +85,7 @@ enum BodyState {
 }
 
 struct CheckedBody {
+    params: Vec<Type>,
     locals: Vec<LocalInfo>,
     body: Vec<ir::Stmt>,
     defaults: Vec<(u32, ir::Expr)>,
@@ -65,7 +93,7 @@ struct CheckedBody {
 
 /// A call made by the script.
 pub(crate) struct ScriptCall {
-    function: usize,
+    instance: usize,
     span: Span,
     /// The globals that may have no value at the call.
     unassigned: Vec<ir::LocalId>,
@@ -74,27 +102,43 @@ pub(crate) struct ScriptCall {
 /// An argument once checked, before the call is built.
 enum Pending {
     Value(ir::Expr),
-    /// A variable given to a `var` parameter.
-    Place(ir::Place),
+    /// A variable given to a `var` parameter, and its type.
+    Place(ir::Place, Type),
     /// Any other value given to a `var` parameter: the modification is lost (§11.2).
     Temporary(ir::Expr),
 }
 
-impl FunctionInfo<'_> {
-    pub(crate) fn into_ir(self) -> ir::Function {
-        let checked = self.checked.expect("every function of a valid program is checked");
+impl Pending {
+    fn ty(&self) -> Type {
+        match self {
+            Pending::Value(value) | Pending::Temporary(value) => value.ty,
+            Pending::Place(_, ty) => *ty,
+        }
+    }
+}
+
+impl Instance {
+    pub(crate) fn into_ir(self, functions: &[FunctionInfo]) -> ir::Function {
+        let decl = functions[self.function].decl;
+        let checked = self.checked.expect("every instance of a valid program is checked");
         let ret = match self.ret {
             Ret::Declared(ty) | Ret::Inferred(ty) => ty,
             _ => unreachable!("a valid program knows every return type"),
         };
+        let name = if self.arg_types.is_empty() {
+            decl.name.name.clone()
+        } else {
+            let types: Vec<String> = checked.params.iter().map(Type::to_string).collect();
+            format!("{}[{}]", decl.name.name, types.join(", "))
+        };
         ir::Function {
-            name: self.decl.name.name.clone(),
-            params: self.signature.map_or(0, |params| params.len() as u32),
+            name,
+            params: checked.params.len() as u32,
             defaults: checked.defaults,
             ret,
             locals: ir_locals(checked.locals),
             body: checked.body,
-            span: Some(self.decl.name.span),
+            span: Some(decl.name.span),
         }
     }
 }
@@ -134,6 +178,12 @@ impl<'a> Checker<'a> {
         }
         for index in 0..self.functions.len() {
             self.resolve_signature(index);
+            let function = &self.functions[index];
+            if function.signature.is_some() && !function.is_generic() {
+                let ret = function.declared_ret.map_or(Ret::Unknown, Ret::Declared);
+                let instance = self.new_instance(index, Vec::new(), None, ret);
+                self.functions[index].instance = Some(instance);
+            }
         }
     }
 
@@ -151,13 +201,31 @@ impl<'a> Checker<'a> {
         self.functions.push(FunctionInfo {
             decl,
             signature: None,
-            ret: Ret::Unknown,
-            state: BodyState::Unchecked,
+            declared_ret: None,
             modifies: Vec::new(),
+            instances: HashMap::new(),
+            instance: None,
+        });
+    }
+
+    fn new_instance(
+        &mut self,
+        function: usize,
+        arg_types: Vec<Type>,
+        origin: Option<Span>,
+        ret: Ret,
+    ) -> usize {
+        self.instances.push(Instance {
+            function,
+            arg_types,
+            origin,
+            ret,
+            state: BodyState::Unchecked,
             reads: Vec::new(),
             calls: Vec::new(),
             checked: None,
         });
+        self.instances.len() - 1
     }
 
     /// The types of the parameters, the return type and the `modifies` clause (§11.1).
@@ -216,40 +284,35 @@ impl<'a> Checker<'a> {
                 supported = false;
             }
             let ty = match &param.ty {
-                Some(ty) => self.resolve_type(ty),
-                None => {
-                    self.not_implemented(
-                        param.name.span,
-                        "parameters without a type, which make the function generic",
-                        "§11.1, §15.3",
-                    );
-                    None
-                }
+                Some(written) => match self.resolve_type(written) {
+                    Some(ty) => Some(ty),
+                    None => {
+                        supported = false;
+                        None
+                    }
+                },
+                // Without a type, the parameter takes the type of each call's argument (C1).
+                None => None,
             };
-            match ty {
-                Some(ty) => params.push(ParamInfo {
-                    name: param.name.name.clone(),
-                    ty,
-                    by_reference: param.var.is_some(),
-                    has_default: param.default.is_some(),
-                    span: param.name.span,
-                }),
-                None => supported = false,
-            }
+            params.push(ParamInfo {
+                name: param.name.name.clone(),
+                ty,
+                by_reference: param.var.is_some(),
+                has_default: param.default.is_some(),
+                span: param.name.span,
+            });
         }
-        let ret = match &decl.ret {
-            Some(ty) => match self.resolve_type(ty) {
-                Some(ty) => Ret::Declared(ty),
-                None => {
-                    supported = false;
-                    Ret::Failed
-                }
-            },
-            None => Ret::Unknown,
+        let declared_ret = match &decl.ret {
+            Some(ty) => {
+                let ty = self.resolve_type(ty);
+                supported &= ty.is_some();
+                ty
+            }
+            None => None,
         };
         let modifies = decl.modifies.iter().filter_map(|name| self.modified_global(name)).collect();
         let function = &mut self.functions[index];
-        function.ret = ret;
+        function.declared_ret = declared_ret;
         function.modifies = modifies;
         function.signature = supported.then_some(params);
     }
@@ -289,49 +352,80 @@ impl<'a> Checker<'a> {
         local
     }
 
-    /// Checks the bodies that no call required earlier, so that their errors are reported.
+    /// Checks the bodies that no call required earlier, so that their errors are
+    /// reported. A generic function is checked for the types it is called with: one
+    /// that is never called cannot be checked, which a warning says.
     pub(crate) fn check_remaining_functions(&mut self) {
-        for index in 0..self.functions.len() {
-            self.check_function_body(index);
+        let mut index = 0;
+        while index < self.instances.len() {
+            self.check_instance(index);
+            index += 1;
         }
-    }
-
-    fn check_function_body(&mut self, index: usize) {
-        if self.functions[index].state != BodyState::Unchecked {
-            return;
-        }
-        let Some(params) = self.functions[index].signature.clone() else {
-            let function = &mut self.functions[index];
-            function.state = BodyState::Checked;
-            if let Ret::Unknown = function.ret {
-                function.ret = Ret::Failed;
+        for function in &self.functions {
+            if function.is_generic() && function.instances.is_empty() {
+                let name = &function.decl.name.name;
+                self.diagnostics.push(
+                    Diagnostic::new(lion_diagnostics::Severity::Warning, format!("`{name}` is never called, so it is not checked"))
+                        .with_primary(function.decl.name.span, "")
+                        .with_note("a function with parameters without a type is checked for the types of each call (§15.3)"),
+                );
             }
-            return;
-        };
-        let function = &mut self.functions[index];
-        function.state = BodyState::Checking;
-        if let Ret::Unknown = function.ret {
-            function.ret = Ret::Inferring;
         }
-        let interrupted = std::mem::replace(&mut self.ctx, Context::new(ContextKind::Function(index)));
-        let checked = self.function_body(index, &params);
-        let ctx = std::mem::replace(&mut self.ctx, interrupted);
-        let function = &mut self.functions[index];
-        function.reads = ctx.reads;
-        function.calls = ctx.calls;
-        function.checked = Some(CheckedBody { locals: ctx.locals, body: checked.0, defaults: checked.1 });
-        function.state = BodyState::Checked;
     }
 
-    fn function_body(&mut self, index: usize, params: &[ParamInfo]) -> (Vec<ir::Stmt>, Vec<(u32, ir::Expr)>) {
-        let decl = self.functions[index].decl;
+    fn check_instance(&mut self, instance: usize) {
+        if self.instances[instance].state != BodyState::Unchecked {
+            return;
+        }
+        let function = self.instances[instance].function;
+        let params = self.functions[function].signature.clone().expect("an instance has a signature");
+        self.instances[instance].state = BodyState::Checking;
+        if let Ret::Unknown = self.instances[instance].ret {
+            self.instances[instance].ret = Ret::Inferring;
+        }
+        let first_diagnostic = self.diagnostics.len();
+        let interrupted = std::mem::replace(&mut self.ctx, Context::new(ContextKind::Function(instance)));
+        let (body, defaults, param_types) = self.function_body(instance, &params);
+        let ctx = std::mem::replace(&mut self.ctx, interrupted);
+        // An error in a generic function shows which call created the instance.
+        if let Some(origin) = self.instances[instance].origin {
+            let name = &self.functions[function].decl.name.name;
+            let types: Vec<String> = param_types.iter().map(Type::to_string).collect();
+            let label = format!("`{name}` is checked for ({}) because of this call", types.join(", "));
+            for diagnostic in &mut self.diagnostics[first_diagnostic..] {
+                diagnostic.labels.push(lion_diagnostics::Label {
+                    span: origin,
+                    message: label.clone(),
+                    primary: false,
+                });
+            }
+        }
+        let checked = &mut self.instances[instance];
+        checked.reads = ctx.reads;
+        checked.calls = ctx.calls;
+        checked.checked = Some(CheckedBody { params: param_types, locals: ctx.locals, body, defaults });
+        checked.state = BodyState::Checked;
+    }
+
+    /// The body of an instance, its default values, and the types of its parameters.
+    fn function_body(
+        &mut self,
+        instance: usize,
+        params: &[ParamInfo],
+    ) -> (Vec<ir::Stmt>, Vec<(u32, ir::Expr)>, Vec<Type>) {
+        let function = self.instances[instance].function;
+        let decl = self.functions[function].decl;
+        let arg_types = self.instances[instance].arg_types.clone();
+        let generic = self.functions[function].is_generic();
         // The parameters are the first locals (C6: they belong to the outermost block).
         let ids: Vec<ir::LocalId> = params
             .iter()
-            .map(|param| {
+            .enumerate()
+            .map(|(position, param)| {
+                let ty = param.ty.or_else(|| arg_types.get(position).copied());
                 let id = self.push_local(LocalInfo {
                     name: param.name.clone(),
-                    ty: Some(param.ty),
+                    ty,
                     mutable: param.by_reference,
                     temporary: false,
                     by_reference: param.by_reference,
@@ -343,29 +437,46 @@ impl<'a> Checker<'a> {
                 id
             })
             .collect();
-        // A default value sees the globals and the parameters before it (C10).
+        // A default value sees the globals and the parameters before it (C10). In a
+        // generic instance, only the omitted arguments need it, and a parameter without
+        // a type takes the type of its default value.
         let mut defaults = Vec::new();
+        let mut valid = true;
         for (position, (param, id)) in params.iter().zip(&ids).enumerate() {
-            if let Some(default) = &decl.params[position].default
-                && let Some(value) = self.expr(default)
-                && let Some(value) =
-                    self.coerce(value, param.ty, Some((param.span, "parameter declared here".to_string())))
-            {
-                defaults.push((position as u32, value));
+            let needed = !generic || position >= arg_types.len();
+            if let (true, Some(default)) = (needed, &decl.params[position].default) {
+                match self.expr(default) {
+                    Some(value) => {
+                        let expected = self.ctx.locals[id.index()].ty.unwrap_or(value.ty);
+                        self.ctx.locals[id.index()].ty = Some(expected);
+                        let context = (param.span, "parameter declared here".to_string());
+                        match self.coerce(value, expected, Some(context)) {
+                            Some(value) => defaults.push((position as u32, value)),
+                            None => valid = false,
+                        }
+                    }
+                    None => valid = false,
+                }
             }
             let scope = self.ctx.scopes.first_mut().expect("the outermost block");
             scope.names.insert(param.name.clone(), *id);
+        }
+        let param_types: Vec<Type> =
+            ids.iter().map(|id| self.ctx.locals[id.index()].ty.unwrap_or(Type::None)).collect();
+        if !valid {
+            self.instances[instance].ret = Ret::Failed;
+            return (Vec::new(), defaults, param_types);
         }
         let mut body = match &decl.body {
             ast::FunBody::Block(block) => self.stmts(&block.stmts),
             // `fun f(x) = expr` returns `expr` (§11.1).
             ast::FunBody::Expr(value) => {
-                self.return_in_function(index, Some(value), value.span).into_iter().collect()
+                self.return_in_function(instance, Some(value), value.span).into_iter().collect()
             }
         };
         let falls_through = self.ctx.flow.is_reachable();
         self.close_scope();
-        let ret = self.settle_return_type(index);
+        let ret = self.settle_return_type(instance);
         if falls_through && ret.is_some_and(|ty| ty != Type::None) {
             let name = &decl.name.name;
             self.diagnostics.push(
@@ -379,27 +490,28 @@ impl<'a> Checker<'a> {
         if ret == Some(Type::Float) {
             widen_returns(&mut body);
         }
-        (body, defaults)
+        (body, defaults, param_types)
     }
 
     /// The declared return type, or the one inferred from the `return` statements (C12).
-    fn settle_return_type(&mut self, index: usize) -> Option<Type> {
-        match self.functions[index].ret {
+    fn settle_return_type(&mut self, instance: usize) -> Option<Type> {
+        match self.instances[instance].ret {
             Ret::Declared(ty) => return Some(ty),
             Ret::Inferring => {}
             _ => return None,
         }
         if self.ctx.failed_return {
-            self.functions[index].ret = Ret::Failed;
+            self.instances[instance].ret = Ret::Failed;
             return None;
         }
+        let decl = self.functions[self.instances[instance].function].decl;
         let returns = std::mem::take(&mut self.ctx.returns);
         let values: Vec<(Type, Span)> =
             returns.iter().filter_map(|&(ty, span)| ty.map(|ty| (ty, span))).collect();
         let ret = if values.is_empty() {
             Some(Type::None)
         } else if let Some(&(_, bare)) = returns.iter().find(|(ty, _)| ty.is_none()) {
-            let name = &self.functions[index].decl.name.name;
+            let name = &decl.name.name;
             self.diagnostics.push(
                 Diagnostic::error(format!(
                     "this `return` has no value, but other returns of `{name}` give one"
@@ -416,29 +528,28 @@ impl<'a> Checker<'a> {
         } else if values.iter().all(|(ty, _)| ty.is_numeric()) {
             Some(Type::Float)
         } else {
-            let span = self.functions[index].decl.name.span;
             self.not_implemented(
-                span,
+                decl.name.span,
                 "functions that return values of different types (the result would be a union such as `Int or Text`)",
                 "§7.3, §11.4",
             );
             None
         };
-        self.functions[index].ret = ret.map_or(Ret::Failed, Ret::Inferred);
+        self.instances[instance].ret = ret.map_or(Ret::Failed, Ret::Inferred);
         ret
     }
 
-    /// The return type of a function, checking its body first if it is inferred.
-    fn return_type_of(&mut self, index: usize, call: Span) -> Option<Type> {
-        if let Ret::Unknown = self.functions[index].ret {
+    /// The return type of an instance, checking its body first if it is inferred.
+    fn return_type_of(&mut self, instance: usize, call: Span) -> Option<Type> {
+        if let Ret::Unknown = self.instances[instance].ret {
             self.demands.push(call);
-            self.check_function_body(index);
+            self.check_instance(instance);
             self.demands.pop();
         }
-        match self.functions[index].ret {
+        match self.instances[instance].ret {
             Ret::Declared(ty) | Ret::Inferred(ty) => Some(ty),
             Ret::Inferring => {
-                let decl = self.functions[index].decl;
+                let decl = self.functions[self.instances[instance].function].decl;
                 let name = &decl.name.name;
                 self.diagnostics.push(
                     Diagnostic::error(format!("the return type of `{name}` must be written"))
@@ -458,18 +569,19 @@ impl<'a> Checker<'a> {
     /// `return` inside a function (§11.4).
     pub(crate) fn return_in_function(
         &mut self,
-        index: usize,
+        instance: usize,
         value: Option<&ast::Expr>,
         span: Span,
     ) -> Option<ir::Stmt> {
-        let declared = match self.functions[index].ret {
+        let declared = match self.instances[instance].ret {
             Ret::Declared(ty) => Some(ty),
             _ => None,
         };
+        let decl = self.functions[self.instances[instance].function].decl;
         let stmt = match value {
             None => {
                 if let Some(ty) = declared.filter(|ty| *ty != Type::None) {
-                    let name = &self.functions[index].decl.name.name;
+                    let name = &decl.name.name;
                     self.diagnostics.push(
                         Diagnostic::error(format!(
                             "`{name}` returns {}: this `return` needs a value",
@@ -485,8 +597,8 @@ impl<'a> Checker<'a> {
                 let checked = self.expr(expr);
                 let value = match (checked, declared) {
                     (Some(checked), Some(ty)) => {
-                        let ret = self.functions[index].decl.ret.as_ref();
-                        let context = ret.map(|ret| (ret.span, "return type declared here".to_string()));
+                        let context =
+                            decl.ret.as_ref().map(|ret| (ret.span, "return type declared here".to_string()));
                         self.coerce(checked, ty, context)
                     }
                     (Some(checked), None) => {
@@ -550,14 +662,29 @@ impl<'a> Checker<'a> {
         for (arg, param) in args.iter().zip(&params) {
             pending.push(self.argument(&name, arg, param));
         }
-        let ret = self.return_type_of(index, callee)?;
         let pending: Vec<Pending> = pending.into_iter().collect::<Option<_>>()?;
-        self.ctx.calls.push(index);
+        let instance = match self.functions[index].instance {
+            Some(instance) => instance,
+            None => self.instantiate(index, pending.iter().map(Pending::ty).collect(), callee)?,
+        };
+        let ret = self.return_type_of(instance, callee)?;
+        self.ctx.calls.push(instance);
         if self.ctx.kind == ContextKind::Script {
             let unassigned = self.unassigned_globals();
-            self.script_calls.push(ScriptCall { function: index, span, unassigned });
+            self.script_calls.push(ScriptCall { instance, span, unassigned });
         }
-        Some(self.build_call(index, pending, ret, span))
+        Some(self.build_call(instance, pending, ret, span))
+    }
+
+    /// The instance of a generic function for the types of the given arguments (C1).
+    fn instantiate(&mut self, function: usize, arg_types: Vec<Type>, call: Span) -> Option<usize> {
+        if let Some(&instance) = self.functions[function].instances.get(&arg_types) {
+            return Some(instance);
+        }
+        let ret = self.functions[function].declared_ret.map_or(Ret::Unknown, Ret::Declared);
+        let instance = self.new_instance(function, arg_types.clone(), Some(call), ret);
+        self.functions[function].instances.insert(arg_types, instance);
+        Some(instance)
     }
 
     fn argument(&mut self, function: &str, arg: &ast::Arg, param: &ParamInfo) -> Option<Pending> {
@@ -597,9 +724,13 @@ impl<'a> Checker<'a> {
 
     fn value_argument(&mut self, arg: &ast::Arg, param: &ParamInfo) -> Option<Pending> {
         let value = self.expr(&arg.value)?;
-        let value =
-            self.coerce(value, param.ty, Some((param.span, "parameter declared here".to_string())))?;
-        Some(Pending::Value(value))
+        match param.ty {
+            Some(ty) => {
+                let context = (param.span, "parameter declared here".to_string());
+                Some(Pending::Value(self.coerce(value, ty, Some(context))?))
+            }
+            None => Some(Pending::Value(value)),
+        }
     }
 
     /// The argument of a `var` parameter: a `var` variable, which the call may change,
@@ -607,8 +738,12 @@ impl<'a> Checker<'a> {
     fn reference_argument(&mut self, arg: &ast::Arg, param: &ParamInfo) -> Option<Pending> {
         let ast::ExprKind::Name(name) = &arg.value.kind else {
             let value = self.expr(&arg.value)?;
-            let value =
-                self.coerce(value, param.ty, Some((param.span, "parameter declared here".to_string())))?;
+            let value = match param.ty {
+                Some(ty) => {
+                    self.coerce(value, ty, Some((param.span, "parameter declared here".to_string())))?
+                }
+                None => value,
+            };
             return Some(Pending::Temporary(value));
         };
         let span = arg.value.span;
@@ -649,21 +784,23 @@ impl<'a> Checker<'a> {
             );
             return None;
         }
-        if ty != param.ty {
+        if let Some(expected) = param.ty
+            && ty != expected
+        {
             self.diagnostics.push(
                 Diagnostic::error("mismatched types")
                     .with_primary(span, format!("this is {}", article(ty)))
-                    .with_secondary(param.span, format!("this `var` parameter is {}", article(param.ty)))
+                    .with_secondary(param.span, format!("this `var` parameter is {}", article(expected)))
                     .with_note("a `var` parameter works on the caller's variable itself, so both have the same type (§11.2)"),
             );
             return None;
         }
-        Some(Pending::Place(place))
+        Some(Pending::Place(place, ty))
     }
 
     /// The call, keeping the left-to-right order of the arguments (§9.2) when some of
     /// them are stored in temporaries to be passed by reference.
-    fn build_call(&mut self, index: usize, pending: Vec<Pending>, ret: Type, span: Span) -> ir::Expr {
+    fn build_call(&mut self, instance: usize, pending: Vec<Pending>, ret: Type, span: Span) -> ir::Expr {
         let needs_temporaries = pending.iter().any(|arg| matches!(arg, Pending::Temporary(_)));
         let mut lets = Vec::new();
         let mut args = Vec::new();
@@ -675,7 +812,7 @@ impl<'a> Checker<'a> {
                     lets.push((temp, value));
                 }
                 Pending::Value(value) => args.push(ir::Arg::Value(value)),
-                Pending::Place(place) => args.push(ir::Arg::Reference(place)),
+                Pending::Place(place, _) => args.push(ir::Arg::Reference(place)),
                 Pending::Temporary(value) => {
                     let temp = self.temporary(value.ty, value.span);
                     args.push(ir::Arg::Reference(ir::Place::Local(temp)));
@@ -683,7 +820,8 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        let mut call = typed(ir::ExprKind::Call { function: ir::FunctionId(index as u32), args }, ret, span);
+        let function = ir::FunctionId(instance as u32);
+        let mut call = typed(ir::ExprKind::Call { function, args }, ret, span);
         for (local, value) in lets.into_iter().rev() {
             call =
                 typed(ir::ExprKind::Let { local, value: Box::new(value), body: Box::new(call) }, ret, span);
@@ -702,7 +840,8 @@ impl<'a> Checker<'a> {
 
     /// Whether the current function may assign the global `local` (§11.5).
     pub(crate) fn check_global_assignment(&mut self, local: ir::LocalId, span: Span) -> bool {
-        let ContextKind::Function(index) = self.ctx.kind else { return true };
+        let ContextKind::Function(instance) = self.ctx.kind else { return true };
+        let function = &self.functions[self.instances[instance].function];
         let global = &self.globals[&self.global_names[&local]];
         let (decl, name) = (global.decl, &global.decl.name.name);
         let error = if !decl.mutable && decl.value.is_none() {
@@ -715,11 +854,10 @@ impl<'a> Checker<'a> {
             Diagnostic::error(format!("cannot assign to the constant `{name}`"))
                 .with_primary(span, "")
                 .with_secondary(decl.name.span, "declared with `let`")
-        } else if !self.functions[index].modifies.contains(&local) {
-            let function = self.functions[index].decl;
-            Diagnostic::error(format!("`{}` modifies `{name}` without saying so", function.name.name))
+        } else if !function.modifies.contains(&local) {
+            Diagnostic::error(format!("`{}` modifies `{name}` without saying so", function.decl.name.name))
                 .with_primary(span, "")
-                .with_secondary(function.name.span, format!("add `modifies {name}` to this declaration"))
+                .with_secondary(function.decl.name.span, format!("add `modifies {name}` to this declaration"))
                 .with_note("a function announces the variables of the script it changes (§11.5)")
         } else {
             return true;
@@ -732,11 +870,11 @@ impl<'a> Checker<'a> {
     /// the functions it calls, a global that may have no value there (C3).
     pub(crate) fn check_script_calls(&mut self) {
         let mut reads: Vec<HashSet<ir::LocalId>> =
-            self.functions.iter().map(|function| function.reads.iter().copied().collect()).collect();
+            self.instances.iter().map(|instance| instance.reads.iter().copied().collect()).collect();
         loop {
             let mut changed = false;
-            for caller in 0..self.functions.len() {
-                for &callee in &self.functions[caller].calls {
+            for caller in 0..self.instances.len() {
+                for &callee in &self.instances[caller].calls {
                     let missing: Vec<ir::LocalId> =
                         reads[callee].difference(&reads[caller]).copied().collect();
                     if !missing.is_empty() {
@@ -754,17 +892,20 @@ impl<'a> Checker<'a> {
                 .unassigned
                 .iter()
                 .copied()
-                .filter(|global| reads[call.function].contains(global))
+                .filter(|global| reads[call.instance].contains(global))
                 .collect();
             unassigned.sort_by_key(|local| local.0);
             for global in unassigned {
                 let decl = self.globals[&self.global_names[&global]].decl;
-                let function = &self.functions[call.function].decl.name.name;
+                let function = &self.functions[self.instances[call.instance].function].decl.name.name;
                 self.diagnostics.push(
-                    Diagnostic::error(format!("`{function}` may read `{}`, which may have no value at this call", decl.name.name))
-                        .with_primary(call.span, "")
-                        .with_secondary(decl.name.span, "declared here")
-                        .with_note("a function may read a variable declared further down, but only once it has a value (§6.1, §6.5)"),
+                    Diagnostic::error(format!(
+                        "`{function}` may read `{}`, which may have no value at this call",
+                        decl.name.name
+                    ))
+                    .with_primary(call.span, "")
+                    .with_secondary(decl.name.span, "declared here")
+                    .with_note("a function may read a variable declared further down, but only once it has a value (§6.1, §6.5)"),
                 );
             }
         }

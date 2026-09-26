@@ -61,7 +61,7 @@ Le 2026-09-26, l'auteur a délégué toutes les décisions « jusqu'à la fin du
 
 | # | Choix | § |
 | --- | --- | --- |
-| C1 | Un paramètre sans type rend la fonction générique : elle est spécialisée pour les types de chaque appel, comme le prévoit le §15.3 pour les génériques. Implémentation prévue au sous-slice 3b ; en attendant, ces paramètres sont signalés « not implemented » | 11.1, 15 |
+| C1 | Un paramètre sans type rend la fonction générique : chaque combinaison de types d'arguments crée une instance, vérifiée et compilée séparément, comme le prévoit le §15.3. Un paramètre omis prend le type de sa valeur par défaut, et un paramètre `var` celui de la variable donnée. Une erreur trouvée dans une instance désigne aussi l'appel qui l'a créée ; la même erreur trouvée dans plusieurs instances n'est signalée qu'une fois | 11.1, 15 |
 | C2 | Une déclaration peut masquer une fonction standard (`var sum = 0`, `fun show(...)`). La bibliothèque standard n'est pas un bloc du programme, donc le §6.5 ne s'applique pas. Appeler une variable qui masque une fonction standard donne un message qui le signale | 6.5, 23 |
 | C3 | Un appel fait depuis le script exige que toutes les globales que la fonction peut lire, directement ou via les fonctions qu'elle appelle, aient une valeur à ce point. C'est le même calcul transitif que les effets du §11.5 | 6.1, 11.5 |
 | C4 | Les fonctions de premier niveau sont hissées : on peut les appeler avant leur déclaration. Leurs noms sont uniques (pas de surcharge) et distincts des noms de variables du script | 11 |
@@ -80,6 +80,7 @@ Le 2026-09-26, l'auteur a délégué toutes les décisions « jusqu'à la fin du
 | C17 | Quand un appel oblige à vérifier un corps de fonction avant que le script ait atteint la déclaration d'une globale que ce corps utilise, c'est une erreur. Elle désigne l'appel, qui serait de toute façon refusé par C3 | 6.1, 6.5 |
 | C18 | `f()` sans argument alors que `f` a des paramètres obligatoires est une erreur. Un appel avec une partie des arguments est une curryfication (§11.3), « not implemented » jusqu'au sous-slice 3c | 11.3 |
 | C19 | Les diagnostics sont présentés dans l'ordre du fichier, même si les corps de fonction sont vérifiés dans un autre ordre | 24.3 |
+| C20 | Une fonction générique jamais appelée ne peut pas être vérifiée, faute de types : un avertissement le dit | 15.3, 24 |
 
 ## 5. Points de la spec à trancher plus tard (non bloquants aujourd'hui)
 

@@ -1,0 +1,10 @@
+fun square(x) = x * x
+show(square(3))
+show(square("a"))
+fun broken(x) = x + missing
+show(broken(1))
+show(broken(2.5))
+fun fact(n) = if n <= 1 then 1 else n * fact(n - 1)
+show(fact(5))
+fun fact2(n) in Int = if n <= 1 then 1 else n * fact2(n - 1)
+show(fact2(10))

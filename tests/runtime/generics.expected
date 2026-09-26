@@ -1,0 +1,22 @@
+exit: 0
+----- stdout
+144
+6.25
+6
+3.0
+1.5
+droite gauche
+2 1
+valeur : true
+valeur : none
+7
+2.5
+----- stderr
+warning: `unused` is never called, so it is not checked
+   --> tests/runtime/generics.lion:10:5
+    |
+ 10 | fun unused(x) = x + 1
+    |     ^^^^^^
+    |
+    = a function with parameters without a type is checked for the types of each call (§15.3)
+

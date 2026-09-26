@@ -220,3 +220,34 @@ fn declarations_may_hide_standard_functions() {
     assert_eq!(errors("let show = 1\nshow(show)"), ["`show` is not a function"]);
     assert_eq!(body("fun show(x in Int) = x + 1\nlet y = show(1)"), "y#0 = (call show 1)");
 }
+
+#[test]
+fn generic_functions_have_one_instance_per_argument_types() {
+    let ir = check_text("fun square(x) = x * x\nlet a = square(3)\nlet b = square(2)\nlet c = square(1.5)")
+        .unwrap();
+    let instances: Vec<&str> = ir.lines().filter(|line| line.starts_with("fun ")).collect();
+    assert_eq!(instances, ["fun square[Int] in Int", "fun square[Float] in Float"]);
+    // An omitted argument takes the type of its default value.
+    let ir = check_text("fun scale(value, factor = 2) = value * factor\nlet a = scale(1.5)").unwrap();
+    assert!(ir.contains("fun scale[Float, Int] in Float"), "{ir}");
+    // A `var` parameter without a type takes the type of the variable.
+    assert!(check_text("fun reset(var v, to) = 0\nvar t = \"a\"\nreset(t, 1)").is_ok());
+}
+
+#[test]
+fn errors_in_generic_functions() {
+    assert_eq!(
+        errors("fun square(x) = x * x\nshow(square(\"a\"))"),
+        ["`*` cannot be applied to Text and Text"]
+    );
+    // The same error in two instances is reported once.
+    assert_eq!(
+        errors("fun f(x) = x + missing\nshow(f(1))\nshow(f(2.5))"),
+        ["cannot find `missing` in this scope"]
+    );
+    assert_eq!(
+        errors("fun fact(n) = if n <= 1 then 1 else n * fact(n - 1)\nshow(fact(3))"),
+        ["the return type of `fact` must be written"]
+    );
+    assert!(check_text("fun fact(n) in Int = if n <= 1 then 1 else n * fact(n - 1)\nshow(fact(3))").is_ok());
+}

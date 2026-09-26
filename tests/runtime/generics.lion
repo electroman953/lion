@@ -1,0 +1,27 @@
+fun square(x) = x * x
+fun twice(value, times = 2) = value * times
+fun swap(var a, var b):
+    let t = a
+    a = b
+    b = t
+;
+fun describe(x) = "valeur : {x}"
+fun biggest(a, b) = if a > b then a else b
+fun unused(x) = x + 1
+show(square(12))
+show(square(2.5))
+show(twice(3))
+show(twice(1.5))
+show(twice(3, 0.5))
+var p = "gauche"
+var q = "droite"
+swap(p, q)
+show("{p} {q}")
+var i = 1
+var j = 2
+swap(i, j)
+show("{i} {j}")
+show(describe(true))
+show(describe(none))
+show(biggest(3, 7))
+show(biggest(2.5, 1))

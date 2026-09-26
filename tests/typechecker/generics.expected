@@ -1,0 +1,38 @@
+exit: 0
+----- stdout
+script
+  locals
+    a#0 let Int
+    b#1 let Float
+    c#2 let Int
+    d#3 let Float
+  body
+    a#0 = (call square[Int] 3)
+    b#1 = (call square[Float] 1.5)
+    c#2 = (call scale[Int, Int] a#0)
+    d#3 = (call scale[Float, Float] b#1 0.5)
+fun square[Int] in Int
+  locals
+    x#0 param Int
+  body
+    return (mul_int x#0 x#0)
+fun square[Float] in Float
+  locals
+    x#0 param Float
+  body
+    return (mul_float x#0 x#0)
+fun scale[Int, Int] in Int
+  locals
+    value#0 param Int
+    factor#1 param Int
+  defaults
+    factor#1 = 2
+  body
+    return (mul_int value#0 factor#1)
+fun scale[Float, Float] in Float
+  locals
+    value#0 param Float
+    factor#1 param Float
+  body
+    return (mul_float value#0 factor#1)
+----- stderr

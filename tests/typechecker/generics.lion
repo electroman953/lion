@@ -1,0 +1,7 @@
+// One instance per set of argument types (C1, §15.3)
+fun square(x) = x * x
+fun scale(value, factor = 2) = value * factor
+let a = square(3)
+let b = square(1.5)
+let c = scale(a)
+let d = scale(b, 0.5)

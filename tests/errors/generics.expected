@@ -1,0 +1,36 @@
+exit: 1
+----- stdout
+----- stderr
+error: `*` cannot be applied to Text and Text
+  --> tests/errors/generics.lion:1:19
+   |
+ 1 | fun square(x) = x * x
+   |                 - this is a Text
+   |                   ^
+   |                     - this is a Text
+  ...
+ 3 | show(square("a"))
+   |      ------ `square` is checked for (Text) because of this call
+   |
+   = `*` is defined for Int and Float values
+
+error: cannot find `missing` in this scope
+  --> tests/errors/generics.lion:4:21
+   |
+ 4 | fun broken(x) = x + missing
+   |                     ^^^^^^^ not found
+ 5 | show(broken(1))
+   |      ------ `broken` is checked for (Int) because of this call
+
+error: the return type of `fact` must be written
+  --> tests/errors/generics.lion:7:41
+   |
+ 7 | fun fact(n) = if n <= 1 then 1 else n * fact(n - 1)
+   |     ---- declared here
+   |                                         ^^^^ `fact` is called here before its return type is known
+ 8 | show(fact(5))
+   |      ---- `fact` is checked for (Int) because of this call
+   |
+   = help: write it after the parameters: `fun fact(...) in Type`
+
+3 errors found
