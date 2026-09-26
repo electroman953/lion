@@ -48,6 +48,12 @@ impl Value {
         }
     }
 
+    /// Whether the value keeps memory alive, which a finished frame must release.
+    #[inline]
+    pub fn holds_memory(&self) -> bool {
+        matches!(self, Value::Text(_) | Value::List(_) | Value::Error(_) | Value::Range(_))
+    }
+
     /// The kind of the value, as one bit, for type tests (§7.1).
     pub fn kind(&self) -> u16 {
         match self {

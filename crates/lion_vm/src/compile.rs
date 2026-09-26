@@ -11,7 +11,7 @@ use std::rc::Rc;
 use lion_diagnostics::Span;
 use lion_ir::{self as ir, BinaryOp, Builtin, Conversion, ExprKind, UnaryOp};
 
-use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
+use crate::bytecode::{Chunk, Cmp, Instr, Program, Reg, Target};
 
 pub fn compile(program: &ir::Program) -> Program {
     let functions = program
@@ -132,10 +132,7 @@ impl Compiler<'_> {
                 let at = self.jump();
                 self.loops.last_mut().expect("`continue` is inside a loop").continues.push(at);
             }
-            ir::Stmt::Return(Some(value)) => {
-                let src = self.operand(value);
-                self.emit(Instr::Return { src }, Some(value.span));
-            }
+            ir::Stmt::Return(Some(value)) => self.return_value(value),
             ir::Stmt::Return(None) => {
                 self.emit(if self.is_script { Instr::Halt } else { Instr::ReturnNone }, None);
             }
@@ -166,6 +163,22 @@ impl Compiler<'_> {
                 self.emit(Instr::StoreGlobal { global: global.0, src }, span);
             }
         }
+    }
+
+    /// `return value`; `return if c then a else b` returns from each branch, without
+    /// going through a register.
+    fn return_value(&mut self, value: &ir::Expr) {
+        if let ExprKind::If { cond, then, otherwise } = &value.kind {
+            let to_otherwise = self.jump_unless(cond);
+            self.return_value(then);
+            self.patch(to_otherwise);
+            self.return_value(otherwise);
+            return;
+        }
+        let mark = self.next_temp;
+        let src = self.operand(value);
+        self.emit(Instr::Return { src }, Some(value.span));
+        self.next_temp = mark;
     }
 
     /// `for var in a..b`: the Range and a counter live in temporaries during the loop.
@@ -243,9 +256,26 @@ impl Compiler<'_> {
     /// Evaluates a condition and jumps when it is false; returns the jump to patch.
     fn jump_unless(&mut self, cond: &ir::Expr) -> usize {
         let mark = self.next_temp;
-        let reg = self.operand(cond);
+        // A comparison of Ints jumps directly, without a Bool in a register.
+        let instr = match &cond.kind {
+            ExprKind::Binary { op, lhs, rhs } if int_comparison(*op).is_some() => {
+                let cmp = int_comparison(*op).expect("checked");
+                let a = self.operand_before(lhs, rhs);
+                match small_int(rhs) {
+                    Some(imm) => Instr::JumpUnlessIntImm { cmp, a, imm, target: 0 },
+                    None => {
+                        let b = self.operand(rhs);
+                        Instr::JumpUnlessInt { cmp, a, b, target: 0 }
+                    }
+                }
+            }
+            _ => {
+                let reg = self.operand(cond);
+                Instr::JumpIfFalse { cond: reg, target: 0 }
+            }
+        };
         let at = self.code.len();
-        self.emit(Instr::JumpIfFalse { cond: reg, target: 0 }, Some(cond.span));
+        self.emit(instr, Some(cond.span));
         self.next_temp = mark;
         at
     }
@@ -335,6 +365,13 @@ impl Compiler<'_> {
                 self.operand_before(lhs, rhs);
                 self.operand(rhs);
                 self.emit(Instr::LoadBool { dst, value: *op == BinaryOp::EqNone }, span);
+            }
+            ExprKind::Binary { op, lhs, rhs }
+                if small_int(rhs).and_then(|imm| immediate_instr(*op, dst, 0, imm)).is_some() =>
+            {
+                let imm = small_int(rhs).expect("checked");
+                let a = self.operand(lhs);
+                self.emit(immediate_instr(*op, dst, a, imm).expect("checked"), span);
             }
             ExprKind::Binary { op, lhs, rhs } => {
                 let a = self.operand_before(lhs, rhs);
@@ -515,6 +552,8 @@ impl Compiler<'_> {
             | Instr::JumpIfFalse { target, .. }
             | Instr::JumpIfTrue { target, .. }
             | Instr::JumpIfArgs { target, .. }
+            | Instr::JumpUnlessInt { target, .. }
+            | Instr::JumpUnlessIntImm { target, .. }
             | Instr::ForRange { target, .. }
             | Instr::ForList { target, .. } => *target = destination,
             other => unreachable!("not a jump: {other:?}"),
@@ -589,6 +628,39 @@ fn kinds_of(ty: ir::Type) -> u16 {
             ir::Type::Union(_) => unreachable!("the members of a union are not unions"),
         })
         .fold(0, |all, kind| all | kind)
+}
+
+/// An Int literal that fits in the immediate operand of an instruction.
+fn small_int(expr: &ir::Expr) -> Option<i32> {
+    match expr.kind {
+        ExprKind::Int(value) => i32::try_from(value).ok(),
+        _ => None,
+    }
+}
+
+fn int_comparison(op: BinaryOp) -> Option<Cmp> {
+    Some(match op {
+        BinaryOp::EqInt => Cmp::Eq,
+        BinaryOp::NeInt => Cmp::Ne,
+        BinaryOp::LtInt => Cmp::Lt,
+        BinaryOp::LeInt => Cmp::Le,
+        BinaryOp::GtInt => Cmp::Gt,
+        BinaryOp::GeInt => Cmp::Ge,
+        _ => return None,
+    })
+}
+
+/// The instruction for `a op imm`, when there is one. Dividing by a constant 0 keeps
+/// the general instruction, which reports the bug.
+fn immediate_instr(op: BinaryOp, dst: Reg, a: Reg, imm: i32) -> Option<Instr> {
+    Some(match op {
+        BinaryOp::AddInt => Instr::AddIntImm { dst, a, imm },
+        BinaryOp::SubInt => Instr::SubIntImm { dst, a, imm },
+        BinaryOp::MulInt => Instr::MulIntImm { dst, a, imm },
+        BinaryOp::DivInt if imm != 0 => Instr::DivIntImm { dst, a, imm },
+        BinaryOp::ModInt if imm != 0 => Instr::ModIntImm { dst, a, imm },
+        _ => return None,
+    })
 }
 
 fn binary_instr(op: BinaryOp, dst: Reg, a: Reg, b: Reg) -> Instr {

@@ -100,28 +100,32 @@ pub fn run(program: &Program, out: &mut dyn Write, on_alert: &mut dyn FnMut(Aler
         chunk: main,
         base: 0,
         stack: vec![Value::None; main.registers as usize],
-        frames: vec![Frame { function: program.main, base: 0, resume: 0, dst: 0, args: 0, call: 0 }],
+        frames: vec![Frame { function: program.main as u32, base: 0, resume: 0, dst: 0, args: 0, call: 0 }],
         out,
         on_alert,
         alerted: HashSet::new(),
     };
-    machine.run()
+    machine.run().map_err(|fault| *fault)
 }
+
+/// A trap, boxed so that the results of the operations stay small on the path where
+/// nothing fails.
+type Fault = Box<Trap>;
 
 /// A call in progress. The script's frame is at the bottom of the stack; its
 /// registers are the globals.
 struct Frame {
-    function: usize,
+    function: u32,
     /// Where its registers start in the stack.
-    base: usize,
+    base: u32,
     /// Where the function resumes once the call it made returns.
-    resume: usize,
+    resume: u32,
     /// The caller's register that receives the result.
     dst: Reg,
     /// How many arguments the call gave.
     args: u32,
     /// The call instruction in the caller.
-    call: usize,
+    call: u32,
 }
 
 struct Machine<'a> {
@@ -139,7 +143,7 @@ struct Machine<'a> {
 }
 
 impl Machine<'_> {
-    fn run(&mut self) -> Result<(), Trap> {
+    fn run(&mut self) -> Result<(), Fault> {
         let mut pc = 0;
         // The code of the running function, reloaded when a call enters or leaves one.
         let mut code: &[Instr] = &self.chunk.code;
@@ -170,6 +174,11 @@ impl Machine<'_> {
                     self.set(dst, Value::Int(value));
                 }
 
+                Instr::AddIntImm { dst, a, imm } => self.int_imm(dst, a, imm, at, ops::int_add)?,
+                Instr::SubIntImm { dst, a, imm } => self.int_imm(dst, a, imm, at, ops::int_sub)?,
+                Instr::MulIntImm { dst, a, imm } => self.int_imm(dst, a, imm, at, ops::int_mul)?,
+                Instr::DivIntImm { dst, a, imm } => self.int_imm(dst, a, imm, at, ops::int_div)?,
+                Instr::ModIntImm { dst, a, imm } => self.int_imm(dst, a, imm, at, ops::int_mod)?,
                 Instr::AddFloat { dst, a, b } => self.float_op(dst, a, b, at, |x, y| x + y)?,
                 Instr::SubFloat { dst, a, b } => self.float_op(dst, a, b, at, |x, y| x - y)?,
                 Instr::MulFloat { dst, a, b } => self.float_op(dst, a, b, at, |x, y| x * y)?,
@@ -243,6 +252,16 @@ impl Machine<'_> {
                         pc = target as usize;
                     }
                 }
+                Instr::JumpUnlessInt { cmp, a, b, target } => {
+                    if !cmp.holds(self.int(a), self.int(b)) {
+                        pc = target as usize;
+                    }
+                }
+                Instr::JumpUnlessIntImm { cmp, a, imm, target } => {
+                    if !cmp.holds(self.int(a), i64::from(imm)) {
+                        pc = target as usize;
+                    }
+                }
                 Instr::JumpIfTrue { cond, target } => {
                     if self.bool(cond) {
                         pc = target as usize;
@@ -251,7 +270,7 @@ impl Machine<'_> {
 
                 Instr::Show { src } => {
                     let text = self.stack[self.base + src as usize].to_text();
-                    writeln!(self.out, "{text}").map_err(Trap::Io)?;
+                    writeln!(self.out, "{text}").map_err(|error| Box::new(Trap::Io(error)))?;
                 }
                 Instr::Call { function, dst, args, count } => {
                     pc = self.call(function as usize, dst, args, count, pc, at)?;
@@ -432,10 +451,8 @@ impl Machine<'_> {
                     let value = self.stack[self.base + src as usize].clone();
                     if let Value::Error(message) = &value {
                         if self.frames.len() == 1 {
-                            return Err(Trap::Failure {
-                                message: message.to_string(),
-                                span: self.chunk.spans[at],
-                            });
+                            let span = self.chunk.spans[at];
+                            return Err(Box::new(Trap::Failure { message: message.to_string(), span }));
                         }
                         pc = self.return_to_caller(value);
                         code = &self.chunk.code;
@@ -482,19 +499,26 @@ impl Machine<'_> {
         count: u32,
         resume: usize,
         at: usize,
-    ) -> Result<usize, Trap> {
+    ) -> Result<usize, Fault> {
         if self.frames.len() >= MAX_CALL_DEPTH {
             return Err(self.bug(BugKind::StackOverflow, at));
         }
         let program = self.program;
         let callee = &program.functions[function];
-        let base = self.base + self.chunk.registers as usize;
-        self.stack.resize(base + callee.registers as usize, Value::None);
-        for offset in 0..count as usize {
-            self.stack[base + offset] = std::mem::take(&mut self.stack[self.base + args as usize + offset]);
+        // The frame of the callee starts at the arguments, which become its first
+        // registers without being copied: the compiler puts the arguments in the last
+        // registers it has reserved, so the ones above are free during the call. The
+        // other registers are not reset, as the compiler writes every register before
+        // reading it; the stack only grows.
+        let _ = count;
+        let base = self.base + args as usize;
+        let needed = base + callee.registers as usize;
+        if self.stack.len() < needed {
+            self.stack.resize(needed, Value::None);
         }
-        self.frames.last_mut().expect("a frame runs").resume = resume;
-        self.frames.push(Frame { function, base, resume: 0, dst, args: count, call: at });
+        self.frames.last_mut().expect("a frame runs").resume = resume as u32;
+        let (function, call) = (function as u32, at as u32);
+        self.frames.push(Frame { function, base: base as u32, resume: 0, dst, args: count, call });
         self.chunk = callee;
         self.base = base;
         Ok(0)
@@ -503,15 +527,37 @@ impl Machine<'_> {
     /// Leaves the current function with its result; returns where the caller resumes.
     fn return_to_caller(&mut self, value: Value) -> usize {
         let finished = self.frames.pop().expect("a function returns");
-        self.stack.truncate(finished.base);
+        // The values of the finished frame that hold memory are released now (§17.3);
+        // the others are overwritten later.
+        let end = finished.base as usize + self.chunk.registers as usize;
+        for value in &mut self.stack[finished.base as usize..end] {
+            if value.holds_memory() {
+                *value = Value::None;
+            }
+        }
         let caller = self.frames.last().expect("the script does not return");
         let program = self.program;
-        self.chunk = &program.functions[caller.function];
-        self.base = caller.base;
+        self.chunk = &program.functions[caller.function as usize];
+        self.base = caller.base as usize;
         self.stack[self.base + finished.dst as usize] = value;
-        caller.resume
+        caller.resume as usize
     }
 
+    #[inline]
+    fn int_imm(
+        &mut self,
+        dst: Reg,
+        a: Reg,
+        imm: i32,
+        at: usize,
+        op: fn(i64, i64) -> Result<i64, BugKind>,
+    ) -> Result<(), Fault> {
+        let value = op(self.int(a), i64::from(imm)).map_err(|kind| self.bug(kind, at))?;
+        self.set(dst, Value::Int(value));
+        Ok(())
+    }
+
+    #[inline]
     fn int_op(
         &mut self,
         dst: Reg,
@@ -519,13 +565,20 @@ impl Machine<'_> {
         b: Reg,
         at: usize,
         op: fn(i64, i64) -> Result<i64, BugKind>,
-    ) -> Result<(), Trap> {
+    ) -> Result<(), Fault> {
         let value = op(self.int(a), self.int(b)).map_err(|kind| self.bug(kind, at))?;
         self.set(dst, Value::Int(value));
         Ok(())
     }
 
-    fn float_op(&mut self, dst: Reg, a: Reg, b: Reg, at: usize, op: fn(f64, f64) -> f64) -> Result<(), Trap> {
+    fn float_op(
+        &mut self,
+        dst: Reg,
+        a: Reg,
+        b: Reg,
+        at: usize,
+        op: fn(f64, f64) -> f64,
+    ) -> Result<(), Fault> {
         let (x, y) = (self.float(a), self.float(b));
         let value = op(x, y);
         if !value.is_finite() && x.is_finite() && y.is_finite() {
@@ -672,20 +725,20 @@ impl Machine<'_> {
         )
     }
 
-    fn bug(&self, kind: BugKind, at: usize) -> Trap {
+    fn bug(&self, kind: BugKind, at: usize) -> Fault {
         // Each frame but the script's was entered by a call in the frame below it.
         let calls = self
             .frames
             .windows(2)
             .rev()
-            .filter_map(|pair| self.program.functions[pair[0].function].spans[pair[1].call])
+            .filter_map(|pair| self.program.functions[pair[0].function as usize].spans[pair[1].call as usize])
             .collect();
-        Trap::Bug { kind, span: self.chunk.spans[at], calls }
+        Box::new(Trap::Bug { kind, span: self.chunk.spans[at], calls })
     }
 
     fn alert(&mut self, kind: AlertKind, at: usize) {
         let function = self.frames.last().expect("a frame runs").function;
-        if self.alerted.insert((function, at)) {
+        if self.alerted.insert((function as usize, at)) {
             // What the program wrote so far comes before the alert.
             let _ = self.out.flush();
             (self.on_alert)(Alert { kind, span: self.chunk.spans[at] });

@@ -1,0 +1,23 @@
+// Calls nested in every position: arguments, texts, lists, arithmetic, defaults.
+fun double(x in Int) = x * 2
+fun add(a in Int, b in Int, c in Int = double(10)) = a + b + c
+fun label(n in Int) in Text = "<{n}>"
+fun repeat(text in Text, times in Int) in Text:
+    if times <= 0: return "" ;
+    return "{text}{repeat(text, times - 1)}"
+;
+fun bump(var n in Int) in Int:
+    n += 1
+    return n
+;
+show(add(double(1), add(2, 3, 4), double(add(1, 1))))
+show("{label(1)}{label(double(2))}{repeat("ab", 3)}")
+show([double(1), add(1, 2), double(double(3))])
+show(double(2) + add(1, 1) * double(3) - add(double(1), 1, 1))
+var counter = 0
+show(counter + bump(counter) + bump(counter))
+show(counter)
+show(add(1, 2))
+show(repeat(label(7), double(2)))
+fun deep(n in Int) in Int = if n == 0 then 0 else 1 + deep(n - 1)
+show(deep(50_000))

@@ -26,6 +26,14 @@ pub enum Instr {
     PowInt { dst: Reg, a: Reg, b: Reg },
     NegInt { dst: Reg, a: Reg },
 
+    /// Int operations with a constant right operand, which fits in 32 bits (never 0
+    /// for `div` and `mod`).
+    AddIntImm { dst: Reg, a: Reg, imm: i32 },
+    SubIntImm { dst: Reg, a: Reg, imm: i32 },
+    MulIntImm { dst: Reg, a: Reg, imm: i32 },
+    DivIntImm { dst: Reg, a: Reg, imm: i32 },
+    ModIntImm { dst: Reg, a: Reg, imm: i32 },
+
     AddFloat { dst: Reg, a: Reg, b: Reg },
     SubFloat { dst: Reg, a: Reg, b: Reg },
     MulFloat { dst: Reg, a: Reg, b: Reg },
@@ -59,6 +67,11 @@ pub enum Instr {
 
     Jump { target: u32 },
     JumpIfFalse { cond: Reg, target: u32 },
+    /// Compares two Int registers and jumps when the comparison is false: the test of
+    /// an `if` or a `while`, in one instruction.
+    JumpUnlessInt { cmp: Cmp, a: Reg, b: Reg, target: u32 },
+    /// The same, with a constant right operand.
+    JumpUnlessIntImm { cmp: Cmp, a: Reg, imm: i32, target: u32 },
     JumpIfTrue { cond: Reg, target: u32 },
 
     /// Calls a function with the `count` values of registers `args ..`; its result goes
@@ -128,6 +141,31 @@ pub enum Instr {
 
     Show { src: Reg },
     Halt,
+}
+
+/// A comparison of two Int values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cmp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl Cmp {
+    #[inline]
+    pub fn holds(self, a: i64, b: i64) -> bool {
+        match self {
+            Cmp::Eq => a == b,
+            Cmp::Ne => a != b,
+            Cmp::Lt => a < b,
+            Cmp::Le => a <= b,
+            Cmp::Gt => a > b,
+            Cmp::Ge => a >= b,
+        }
+    }
 }
 
 /// The variable in which a change happens.

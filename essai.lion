@@ -1,0 +1,13 @@
+fun note(texte in Text) in Float or Error:
+    let n = try texte as Float
+    if not (0 <= n <= 20): return error("{n} n'est pas une note sur 20") ;
+    return n
+;
+
+for t in ["14", "vingt", "25", "9.5"]:
+    match note(t):
+        in Error e: show("{t} : refusé ({e.message()})") ;
+        in Float n, n >= 10: show("{t} : admis") ;
+        in Float n: show("{t} : recalé") ;
+    ;
+;

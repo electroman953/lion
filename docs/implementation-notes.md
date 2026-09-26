@@ -140,11 +140,27 @@ Le 2026-09-26, l'auteur a délégué toutes les décisions « jusqu'à la fin du
 - **Ordre d'évaluation.** Dans `total + bump()`, si `bump` modifie `total`, l'opérande de gauche est d'abord copié, pour garder l'ordre de gauche à droite (§9.2).
 - **Traces de bug.** Un bug dans une fonction affiche les appels en cours (au plus trois lieux distincts), pour qu'on voie d'où vient l'appel fautif.
 - **Erreurs internes de la VM.** Une valeur du mauvais type dans un registre est un défaut de l'implémentation : la VM panique et la commande `lion` l'annonce comme « internal compiler error ».
-- **Performance de la VM** (mesurée le 2026-09-26 face à CPython 3.13) :
-  - une boucle de 10 millions de tours prend 0,19 s contre 0,80 s, soit environ 4 fois plus vite ;
-  - `fib(32)` récursif prend 0,25 s contre 0,15 s, soit environ 1,7 fois plus lent.
+- **Performance de la VM** (mesurée le 2026-09-26 face à CPython 3.13, meilleur de trois essais) :
 
-  Le chemin d'appel et la représentation des valeurs, un `enum` de 16 octets avec comptage de références, sont à optimiser dans une passe dédiée : registres spécialisés par type, opérandes immédiats, cadres plus légers.
+  | Programme | Lion | Python |
+  | --- | --- | --- |
+  | boucle `while` de 10 millions de tours | 0,14 s | 0,70 s |
+  | boucle `for` sur 10 millions d'entiers | 0,11 s | 0,52 s |
+  | `fib(32)` récursif, environ 7 millions d'appels | 0,10 s | 0,15 s |
+  | 2 millions d'éléments de liste, compréhension et somme | 0,08 s | 0,22 s |
+
+  Ce qui a compté :
+  - des opérandes immédiats pour les opérations sur Int (`n - 1`) ;
+  - une comparaison et un saut fusionnés (`if n < 2` en une instruction) ;
+  - `return if … then … else` compilé en deux `return` ;
+  - un rapport de bug en boîte, pour des résultats petits sur le chemin sans erreur.
+
+  Pour les appels :
+  - le cadre de la fonction appelée commence sur ses arguments, sans copie, comme dans Lua. C'est sûr parce que le compilateur réserve les arguments dans ses derniers registres ;
+  - les registres ne sont pas remis à zéro à l'appel, puisque le compilateur écrit chaque registre avant de le lire ;
+  - au retour, seuls les registres qui tiennent de la mémoire (Text, List…) sont libérés (§17.3).
+
+  Le mode compilé (étape 5) reste le levier principal de vitesse.
 - **Types composés.** `Type` reste une petite valeur copiable : les types qui en contiennent d'autres, comme `List of T`, désignent ces derniers par une référence vers une table globale, où chaque type n'est stocké qu'une fois. L'égalité des types est ainsi une simple comparaison.
 - **Intervalles.** Un `Range` ne stocke que ses deux bornes (D46). La boucle `for` sur un intervalle compare le compteur à la borne avant de l'augmenter, si bien que `for i in 1..9223372036854775807` se termine sans débordement.
 - **Listes.** Une liste est partagée tant que personne ne la modifie ; la première modification d'une liste partagée la copie. Cette copie à l'écriture donne la sémantique de valeur du §17.1 sans copier les grandes listes qu'on ne fait que lire. Les modifications en place (`l[i] = v`, `l.add(v)`) descendent dans les listes imbriquées depuis une variable locale, une globale ou un paramètre `var`.
