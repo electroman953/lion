@@ -15,6 +15,8 @@ lion_sema = { path = "crates/lion_sema" }
 lion_runtime = { path = "crates/lion_runtime" }
 lion_vm = { path = "crates/lion_vm" }
 lion_std = { path = "crates/lion_std" }
+lion_native = { path = "crates/lion_native" }
+lion_codegen = { path = "crates/lion_codegen" }
 
 # The golden tests run real programs, such as those of §27, with the `dev` binary:
 # a little optimization keeps them fast without slowing builds much.

@@ -2,6 +2,18 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceId(u32);
 
+impl SourceId {
+    /// The file registered in position `index` of its [`SourceMap`], from 0: a program
+    /// compiled to native code refers to its files this way (§22).
+    pub const fn from_index(index: u32) -> SourceId {
+        SourceId(index)
+    }
+
+    pub fn index(self) -> u32 {
+        self.0
+    }
+}
+
 /// A half-open byte range `start..end` inside one source file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -94,6 +106,11 @@ impl SourceMap {
 
     pub fn get(&self, id: SourceId) -> &SourceFile {
         &self.files[id.0 as usize]
+    }
+
+    /// The files, in the order of their `SourceId`s.
+    pub fn files(&self) -> &[SourceFile] {
+        &self.files
     }
 }
 

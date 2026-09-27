@@ -1,0 +1,82 @@
+// The order of evaluation (§9.2), and the variables that calls change: both modes
+// must agree on every value (§22.2).
+var total = 1
+
+fun bump(n in Int) in Int modifies total:
+    total += n
+    return total
+;
+
+show(total + bump(10))
+show(bump(1) + total)
+show(0 <= bump(0) <= 100)
+
+fun double_in(var x in Int) in Int:
+    x = x * 2
+    return x
+;
+
+var a = 5
+show(a + double_in(a))
+show(a)
+show([a, double_in(a), a])
+
+// Defaults read the parameters before them, in the called function (§11.2).
+fun describe(first in Int, second in Int = first * 2, third in Int = second + 1) in Text:
+    return "{first} {second} {third}"
+;
+show(describe(1))
+show(describe(1, 5))
+show(describe(1, 5, 0))
+let described = describe
+show(described(2))
+show(described(2, 3))
+
+// Partial application (§11.3).
+fun digits(a in Int, b in Int, c in Int) in Int = a + b * 10 + c * 100
+let g = digits(1)
+show(g(2, 3))
+let h = g(4)
+show(h(5))
+
+// Two closures share the variable they modify (§11.5).
+fun counters() in List of fun() in Int:
+    var count = 0
+    fun up() in Int modifies count:
+        count += 1
+        return count
+    ;
+    fun twice() in Int modifies count:
+        count += 2
+        return count
+    ;
+    return [up, twice]
+;
+let pair = counters()
+let up = pair[1]
+let twice = pair[2]
+show(up())
+show(twice())
+show(up())
+
+// `for` goes through the list as it was when the loop started (§10.2).
+var items = [1, 2, 3]
+for x in items:
+    items.add(x * 10)
+;
+show(items)
+
+// `and` and `or` stop as soon as the result is known.
+fun noisy(label in Text, value in Bool) in Bool:
+    show(label)
+    return value
+;
+show(noisy("a", false) and noisy("b", true))
+show(noisy("c", true) or noisy("d", true))
+
+// `try` in a comprehension leaves the function (§18.3).
+fun parse_all(texts in List of Text) in List of Int or Error:
+    return [try t as Int, t in texts]
+;
+show(parse_all(["1", "2"]))
+show(parse_all(["1", "x", "3"]))

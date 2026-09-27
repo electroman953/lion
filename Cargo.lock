@@ -6,11 +6,23 @@ version = 4
 name = "lion_cli"
 version = "0.1.0"
 dependencies = [
+ "lion_codegen",
  "lion_diagnostics",
  "lion_ir",
  "lion_runtime",
  "lion_sema",
  "lion_std",
+ "lion_syntax",
+ "lion_vm",
+]
+
+[[package]]
+name = "lion_codegen"
+version = "0.1.0"
+dependencies = [
+ "lion_diagnostics",
+ "lion_ir",
+ "lion_sema",
  "lion_syntax",
  "lion_vm",
 ]
@@ -25,6 +37,16 @@ version = "0.1.0"
 dependencies = [
  "lion_diagnostics",
  "lion_runtime",
+]
+
+[[package]]
+name = "lion_native"
+version = "0.1.0"
+dependencies = [
+ "lion_diagnostics",
+ "lion_ir",
+ "lion_runtime",
+ "lion_vm",
 ]
 
 [[package]]

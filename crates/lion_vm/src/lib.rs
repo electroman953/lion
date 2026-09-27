@@ -11,12 +11,12 @@ mod constants;
 mod ffi;
 mod machine;
 mod map;
-mod natives;
+pub mod natives;
 mod set;
 pub mod shared;
 mod value;
 
-pub use bytecode::{Chunk, Cmp, Instr, Program, Reg, Target, disassemble};
+pub use bytecode::{Chunk, Cmp, EnumLayout, Instr, Layout, Program, Reg, Target, disassemble};
 pub use compile::compile;
 pub use constants::evaluate_compile;
 pub use machine::{Alert, AlertKind, Failure, Session, Trap, run, run_from, run_test};

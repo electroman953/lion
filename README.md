@@ -4,7 +4,7 @@ Lion est un langage polyvalent, interprété ou compilé, dont l'écriture et la
 
 ## État
 
-Les étapes 2 à 4 de la feuille de route (§28) sont atteintes : les programmes 27.1 et 27.2 de la spec tournent tels quels (`tests/programs`). Le bilan détaillé, avec les limites connues et la prochaine étape (le compilateur natif), est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
+Les étapes 2 à 5 de la feuille de route (§28) sont atteintes : les programmes 27.1 et 27.2 de la spec tournent tels quels (`tests/programs`), et le compilateur natif `lion build` donne les mêmes résultats que le mode interprété sur tous les programmes de test. Le bilan détaillé, avec les limites connues et la prochaine étape (le parallélisme réel), est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
 
 **Ce qui fonctionne aujourd'hui**
 
@@ -43,8 +43,9 @@ Les étapes 2 à 4 de la feuille de route (§28) sont atteintes : les programmes
 - **Vérifications à la compilation** : types, noms inconnus (avec suggestions), constantes réaffectées, lecture d'une variable qui peut ne pas avoir de valeur sur un des chemins (§6.1), `;` oublié localisé grâce à l'indentation (§5.3).
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, fraction de dénominateur nul, exposant négatif, conversion Float → Int impossible, récursion sans fin (plus de 100 000 appels imbriqués). Chacun est signalé avec l'emplacement, les appels en cours, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
+- **Mode compilé** (§22) : `lion build f.lion` produit un exécutable natif, par Rust et LLVM, qui donne exactement la même sortie, les mêmes bugs et le même code de sortie que `lion run`, sans les alertes. Il va de 3 à 13 fois plus vite que la machine virtuelle sur nos mesures.
 
-**Pas encore implémenté** : structures et traits génériques (`Pair of (A, B)`), fonctions anonymes génériques, égalité définie par `equals`, lecture des éléments d'un n-uplet, `Domain` et `Map`, valeurs `shared`, appel de code C, exécution concurrente des tâches et sur plusieurs cœurs, compilateur natif, débogueur.
+**Pas encore implémenté** : traits génériques, méthodes d'une structure générique, types et fonctions standard comme valeurs, lecture des éléments d'un n-uplet, modules `sets`, `json`, `dates`, `time`, `net` et `ui`, exécution concurrente des tâches et sur plusieurs cœurs, débogueur. La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ## Construire et utiliser
 
@@ -67,12 +68,20 @@ show(z)          // 30
 | --- | --- |
 | `lion run f.lion` | vérifie puis exécute en mode interprété, avec les alertes |
 | `lion check f.lion` | vérifie sans exécuter |
+| `lion build f.lion [-o exécutable]` | compile en code natif (il faut Rust, voir plus bas) |
 | `lion test [f.lion \| dossier]` | lance les blocs `test "nom": ... ;` et leurs `expect` |
 | `lion fmt [--check] [f.lion \| dossier]` | met en page selon le style officiel (4 espaces par bloc) |
 | `lion` | mode interactif : on tape du Lion ligne par ligne |
-| `lion debug tokens\|ast\|ir\|bytecode f.lion` | montre une étape du compilateur |
+| `lion debug tokens\|ast\|ir\|bytecode\|rust f.lion` | montre une étape du compilateur |
 
-Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 ligne de commande incorrecte, 70 erreur interne.
+Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 ligne de commande incorrecte, 70 erreur interne. Un programme compilé sort avec les mêmes codes que `lion run`.
+
+`lion build` traduit le programme en Rust, puis le compile avec cargo : il faut donc Rust sur la machine qui compile, pas sur celle qui exécute. La première compilation prépare le runtime des programmes compilés dans un cache (`~/.cache/lion`), une fois pour toutes ; les suivantes prennent moins d'une seconde pour un petit programme.
+
+```sh
+lion build notes.lion        # crée l'exécutable ./notes
+./notes
+```
 
 ## Tests
 
@@ -97,6 +106,8 @@ cargo test --workspace
 
 Après un changement voulu de sortie, régénérer avec `LION_BLESS=1 cargo test --test golden`, puis relire le diff.
 
+- **Tests du mode compilé** (`cargo test --test native`) : tous les programmes de `tests/runtime`, `tests/integration` et `tests/programs` sont compilés en natif, puis comparés aux **mêmes** fichiers `.expected`, sans les alertes. C'est la garantie « deux modes, une sémantique » (§22.2). Un second test lance `lion build` lui-même.
+
 ## Architecture
 
 ```
@@ -105,7 +116,9 @@ source .lion
   → lion_sema     résolution des noms, vérification des types → IR typé
   → lion_ir       IR typé : le contrat commun aux backends
       ├→ lion_vm      bytecode à registres + machine virtuelle (mode interprété)
-      └→ (à venir)    compilateur natif
+      └→ lion_codegen traduction en Rust, compilée par rustc et LLVM (mode compilé)
+  lion_native        runtime des programmes compilés, qui partage les valeurs et les
+                     opérations de lion_vm
   lion_runtime       sémantique des opérations primitives, partagée par les backends
   lion_std           les modules de la bibliothèque standard, écrits en Lion
   lion_diagnostics   positions, erreurs, bugs, alertes et leur rendu

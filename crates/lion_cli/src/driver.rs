@@ -60,6 +60,47 @@ pub fn run(path: &str) -> ExitCode {
     }
 }
 
+/// `lion build`: compiles a program to native code (§22.1). The executable is `output`,
+/// or has the name of the file, without its extension, in the current folder.
+pub fn build(path: &str, output: Option<&str>) -> ExitCode {
+    let Some((mut sources, id)) = load(path) else { return ExitCode::from(exit::REFUSED) };
+    let Some(program) = front_end(&mut sources, id) else { return ExitCode::from(exit::REFUSED) };
+    let code = rust_code(&program, &sources);
+    let output = match output {
+        Some(output) => std::path::PathBuf::from(output),
+        None => std::path::PathBuf::from(Path::new(path).file_stem().unwrap_or_default()),
+    };
+    let empty = SourceMap::new();
+    match crate::native::build(&code, &output) {
+        Ok(()) => {
+            println!("built `{}` from `{path}`", output.display());
+            ExitCode::SUCCESS
+        }
+        Err(crate::native::BuildError::NoCargo) => {
+            let diagnostic =
+                Diagnostic::error("`lion build` needs Rust to compile the program to native code")
+                    .with_note(
+                        "no `cargo` was found in `LION_CARGO`, in the `PATH` or in `~/.cargo/bin` (§22.1)",
+                    )
+                    .with_help("install Rust from https://rustup.rs, or run the program with `lion run`");
+            eprint!("{}", render(&diagnostic, &empty));
+            ExitCode::from(exit::REFUSED)
+        }
+        Err(crate::native::BuildError::Io(message)) => {
+            eprint!("{}", render(&Diagnostic::error(message), &empty));
+            ExitCode::from(exit::REFUSED)
+        }
+        Err(crate::native::BuildError::Rust(errors)) => {
+            eprintln!("internal compiler error: the Rust code of the program does not compile");
+            eprint!("{errors}");
+            eprintln!(
+                "  = note: this is a defect in the Lion implementation, not in your program; please report it"
+            );
+            ExitCode::from(exit::INTERNAL)
+        }
+    }
+}
+
 /// `lion test`: the tests of a file, or of every Lion file of a folder (§24.1).
 pub fn test(path: &str) -> ExitCode {
     let files = if path.ends_with(".lion") {
@@ -200,8 +241,8 @@ fn collect_lion_files(folder: &Path, files: &mut Vec<std::path::PathBuf>) {
 }
 
 pub fn debug(stage: &str, path: &str) -> ExitCode {
-    if !matches!(stage, "tokens" | "ast" | "ir" | "bytecode") {
-        eprintln!("error: unknown stage `{stage}`; the stages are tokens, ast, ir and bytecode");
+    if !matches!(stage, "tokens" | "ast" | "ir" | "bytecode" | "rust") {
+        eprintln!("error: unknown stage `{stage}`; the stages are tokens, ast, ir, bytecode and rust");
         return ExitCode::from(exit::USAGE);
     }
     let Some((mut sources, id)) = load(path) else { return ExitCode::from(exit::REFUSED) };
@@ -227,6 +268,7 @@ pub fn debug(stage: &str, path: &str) -> ExitCode {
             return exit_code(&diagnostics);
         }
         "ir" => front_end(&mut sources, id).map(|program| ir::print_program(&program)),
+        "rust" => front_end(&mut sources, id).map(|program| rust_code(&program, &sources)),
         _ => front_end(&mut sources, id).map(|program| lion_vm::disassemble(&lion_vm::compile(&program))),
     };
     match output {
@@ -236,6 +278,12 @@ pub fn debug(stage: &str, path: &str) -> ExitCode {
         }
         None => ExitCode::from(exit::REFUSED),
     }
+}
+
+/// The Rust code of a program, which `lion build` compiles (§22.1).
+fn rust_code(program: &ir::Program, sources: &SourceMap) -> String {
+    let files: Vec<(&str, &str)> = sources.files().iter().map(|file| (file.name(), file.text())).collect();
+    lion_codegen::generate(program, &files)
 }
 
 /// Reads a source file, reporting why it cannot be used.

@@ -1,6 +1,7 @@
 //! The `lion` command (spec §24). Only the commands that work are offered.
 
 mod driver;
+mod native;
 
 use std::panic;
 use std::process::ExitCode;
@@ -11,15 +12,16 @@ const USAGE: &str = "\
 usage:
   lion run <file.lion>             check a program, then run it (interpreted mode)
   lion check <file.lion>           check a program without running it
+  lion build <file.lion> [-o <executable>]
+                                   compile a program to native code (compiled mode)
   lion test [file.lion | folder]   run the tests of a file, or of every file of a folder
   lion fmt [--check] [file.lion | folder]
                                    lay out files in the official style (4 spaces per block)
-  lion debug <stage> <file.lion>   show a stage of the compiler: tokens, ast, ir or bytecode
+  lion debug <stage> <file.lion>   show a stage of the compiler: tokens, ast, ir, bytecode
+                                   or rust
   lion --version
 
   lion                             the interactive mode: type Lion line by line
-
-not implemented yet: `lion build`
 ";
 
 fn main() -> ExitCode {
@@ -63,10 +65,8 @@ fn dispatch(args: &[String]) -> ExitCode {
         ["fmt", "--check"] => driver::fmt(".", true),
         ["fmt", "--check", path] | ["fmt", path, "--check"] => driver::fmt(path, true),
         ["fmt", path] => driver::fmt(path, false),
-        [command @ "build", ..] => {
-            eprintln!("error: `lion {command}` is not implemented yet\n\n{USAGE}");
-            ExitCode::from(exit::USAGE)
-        }
+        ["build", file] => driver::build(file, None),
+        ["build", file, "-o", output] | ["build", "-o", output, file] => driver::build(file, Some(output)),
         [] => driver::interactive(),
         _ => {
             eprintln!("error: unknown command `{}`\n\n{USAGE}", args.join(" "));
