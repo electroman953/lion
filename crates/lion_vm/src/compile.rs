@@ -55,7 +55,9 @@ pub fn compile(program: &ir::Program) -> Program {
         .functions
         .iter()
         .enumerate()
-        .map(|(index, function)| compile_function(function, index == program.main.index(), &mut shared))
+        .map(|(index, function)| {
+            compile_function(program, function, index == program.main.index(), &mut shared)
+        })
         .collect();
     let module_inits = program.module_inits.iter().map(|init| init.map(|function| function.0)).collect();
     // Before a test, the declarations of the globals of the script run, and nothing else.
@@ -78,7 +80,7 @@ pub fn compile(program: &ir::Program) -> Program {
             body,
             span: None,
         };
-        compile_function(&script, true, &mut shared)
+        compile_function(program, &script, true, &mut shared)
     });
     let custom_equality = layouts.iter().any(|layout| layout.equals.is_some());
     Program {
@@ -106,10 +108,17 @@ struct Shared {
     type_sets: Vec<Vec<u32>>,
 }
 
-fn compile_function(function: &ir::Function, is_script: bool, shared: &mut Shared) -> Chunk {
+fn compile_function(
+    program: &ir::Program,
+    function: &ir::Function,
+    is_script: bool,
+    shared: &mut Shared,
+) -> Chunk {
     let locals = function.locals.len() as u32;
     let mut compiler = Compiler {
+        program,
         function,
+        parallels: Vec::new(),
         shared,
         is_script,
         code: Vec::new(),
@@ -143,11 +152,14 @@ fn compile_function(function: &ir::Function, is_script: bool, shared: &mut Share
         spans: compiler.spans,
         texts: compiler.texts,
         registers: compiler.registers,
+        parallels: compiler.parallels,
     }
 }
 
 struct Compiler<'f> {
+    program: &'f ir::Program,
     function: &'f ir::Function,
+    parallels: Vec<crate::bytecode::ParallelInfo>,
     shared: &'f mut Shared,
     is_script: bool,
     code: Vec<Instr>,
@@ -163,6 +175,8 @@ struct Compiler<'f> {
 }
 
 struct Loop {
+    /// The turn of a parallel loop, which `break` leaves with `BreakTurn`.
+    turn: bool,
     /// The jumps of `continue`, to point at the next turn.
     continues: Vec<usize>,
     /// The jumps of `break`, to point at the end of the loop.
@@ -194,7 +208,7 @@ impl Compiler<'_> {
             ir::Stmt::While { cond, body } => {
                 let head = self.code.len() as u32;
                 let to_end = self.jump_unless(cond);
-                self.loops.push(Loop { continues: Vec::new(), breaks: Vec::new() });
+                self.loops.push(Loop { turn: false, continues: Vec::new(), breaks: Vec::new() });
                 self.block(body);
                 let finished = self.loops.pop().expect("the loop is open");
                 for at in finished.continues {
@@ -210,6 +224,7 @@ impl Compiler<'_> {
                 ir::Type::Range => self.for_range(*var, iterable, body),
                 _ => self.for_list(*var, iterable, body),
             },
+            ir::Stmt::Parallel(parallel) => self.parallel(parallel),
             ir::Stmt::Seq(stmts) => self.block(stmts),
             ir::Stmt::InitModule { module } => {
                 let dst = self.temp();
@@ -260,6 +275,9 @@ impl Compiler<'_> {
                 let (target, start, depth) = self.path(*root, path);
                 let src = self.operand(key);
                 self.emit(Instr::RemoveElement { target, indices: start, depth, src }, Some(key.span));
+            }
+            ir::Stmt::Break if self.loops.last().is_some_and(|innermost| innermost.turn) => {
+                self.emit(Instr::BreakTurn, None);
             }
             ir::Stmt::Break => {
                 let at = self.jump();
@@ -333,7 +351,7 @@ impl Compiler<'_> {
         self.emit(Instr::ForRange { range, counter, target: 0 }, span);
         let head = self.code.len() as u32;
         self.emit(Instr::Move { dst: register(var), src: counter }, span);
-        self.loops.push(Loop { continues: Vec::new(), breaks: Vec::new() });
+        self.loops.push(Loop { turn: false, continues: Vec::new(), breaks: Vec::new() });
         self.block(body);
         let finished = self.loops.pop().expect("the loop is open");
         let step = self.code.len() as u32;
@@ -357,7 +375,7 @@ impl Compiler<'_> {
         self.emit(Instr::ForList { list, counter, target: 0 }, span);
         let head = self.code.len() as u32;
         self.emit(Instr::ElementAt { dst: register(var), list, counter }, span);
-        self.loops.push(Loop { continues: Vec::new(), breaks: Vec::new() });
+        self.loops.push(Loop { turn: false, continues: Vec::new(), breaks: Vec::new() });
         self.block(body);
         let finished = self.loops.pop().expect("the loop is open");
         let step = self.code.len() as u32;
@@ -369,6 +387,46 @@ impl Compiler<'_> {
         for at in finished.breaks {
             self.patch(at);
         }
+    }
+
+    /// A parallel loop (§19.2): `Parallel` runs its turns, which are the code up to its
+    /// `EndTurn`, then goes on after it. Turns that must run in their order are an
+    /// ordinary loop (C84).
+    fn parallel(&mut self, parallel: &ir::ParallelLoop) {
+        let reach = ir::parallel::reach(self.program, self.function, parallel);
+        if reach.in_order {
+            let as_loop = ir::Stmt::For {
+                var: parallel.var,
+                iterable: parallel.iterable.clone(),
+                body: parallel.body.clone(),
+            };
+            self.stmt(&as_loop);
+            return;
+        }
+        let sequence = self.temp();
+        self.expr_into(&parallel.iterable, sequence);
+        let index = self.parallels.len() as u32;
+        self.parallels.push(crate::bytecode::ParallelInfo {
+            var: register(parallel.var),
+            sequence,
+            gather: parallel.gather.map(register),
+            body: 0,
+            end: 0,
+            modules: reach.modules,
+        });
+        self.emit(Instr::Parallel { index }, Some(parallel.iterable.span));
+        let body = self.code.len() as u32;
+        self.loops.push(Loop { turn: true, continues: Vec::new(), breaks: Vec::new() });
+        self.block(&parallel.body);
+        let finished = self.loops.pop().expect("the loop is open");
+        let end_turn = self.code.len() as u32;
+        for at in finished.continues {
+            self.patch_to(at, end_turn);
+        }
+        self.emit(Instr::EndTurn, None);
+        let info = &mut self.parallels[index as usize];
+        info.body = body;
+        info.end = self.code.len() as u32;
     }
 
     /// The variable of a change in place, and its steps evaluated into consecutive

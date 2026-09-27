@@ -6,6 +6,7 @@
 //! specialised to its operand types. Backends never reject a program and never redo
 //! type analysis, which keeps the interpreted and compiled modes in step (§22.2).
 
+pub mod parallel;
 mod print;
 mod types;
 pub mod visit;
@@ -122,6 +123,9 @@ pub struct Local {
     /// A `var` parameter: it designates the caller's variable (§11.2). Reading and
     /// assigning it go through the reference.
     pub by_reference: bool,
+    /// A name of a `shared synced` object, which tasks and parallel parts may use
+    /// (§17.2, §19.3).
+    pub synced: bool,
     pub span: Span,
 }
 
@@ -187,6 +191,8 @@ pub enum Stmt {
         iterable: Expr,
         body: Vec<Stmt>,
     },
+    /// A `for` whose turns may run on several threads at once (§19.2).
+    Parallel(Box<ParallelLoop>),
     /// Leaves the innermost loop.
     Break,
     /// Goes to the next turn of the innermost loop.
@@ -202,6 +208,21 @@ pub enum Stmt {
     Declare {
         local: LocalId,
     },
+}
+
+/// `parallel for`, or the loop of the first generator of a `parallel` comprehension
+/// (§19.2). The checker made sure that a turn changes nothing outside it, except the
+/// `shared synced` objects (§19.3), so the turns may run on several threads. The
+/// result is that of the turns one after the other: the values they gather join in
+/// their order, and the first turn that leaves the loop (a bug, `break`, `return`,
+/// `try`) decides what happens next.
+#[derive(Clone)]
+pub struct ParallelLoop {
+    pub var: LocalId,
+    pub iterable: Expr,
+    pub body: Vec<Stmt>,
+    /// For a comprehension, the local of its result, to which the turns add values.
+    pub gather: Option<LocalId>,
 }
 
 #[derive(Clone)]

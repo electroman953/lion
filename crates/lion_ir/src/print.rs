@@ -121,6 +121,19 @@ impl Printer<'_> {
                     self.block(body, depth + 1, out);
                     out.push_str(&format!("{indent}end\n"));
                 }
+                Stmt::Parallel(parallel) => {
+                    let gather = match parallel.gather {
+                        Some(local) => format!(" gathering {}", self.local(local.index())),
+                        None => String::new(),
+                    };
+                    out.push_str(&format!(
+                        "{indent}parallel for {} in {}{gather}\n",
+                        self.local(parallel.var.index()),
+                        self.expr(&parallel.iterable)
+                    ));
+                    self.block(&parallel.body, depth + 1, out);
+                    out.push_str(&format!("{indent}end\n"));
+                }
                 Stmt::Break => out.push_str(&format!("{indent}break\n")),
                 Stmt::InitModule { module } => out.push_str(&format!("{indent}init_module {module}\n")),
                 Stmt::Declare { local } if self.function.local(*local).boxed => {

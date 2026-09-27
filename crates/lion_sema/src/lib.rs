@@ -515,6 +515,7 @@ fn ir_locals(locals: Vec<LocalInfo>) -> Vec<ir::Local> {
             by_reference: info.by_reference,
             boxed: info.boxed,
             captured: info.captured,
+            synced: info.shared.is_some_and(|sharing| sharing.synced),
             span: info.decl_span,
         })
         .collect()

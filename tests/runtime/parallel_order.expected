@@ -1,0 +1,29 @@
+exit: 0
+----- stdout
+turn 1
+turn 2
+turn 3
+turn 4
+turn 5
+turn 6
+turn 7
+turn 8
+turn 9
+turn 10
+turn 11
+turn 12
+[1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225, 256, 289, 324, 361, 400, 441, 484, 529, 576, 625, 676, 729, 784, 841, 900]
+{1, 2, 3, 4, 5, 6, 0}
+[(1, 2), (2, 1), (3, 1), (3, 2)]
+[1, 2, 3, 4, 5]
+[15, 30, 45, 60]
+["Léa"]
+[1, 2, 3]
+error("\"x\" is not an Int: it is not a whole number")
+before the break: 1
+before the break: 2
+before the break: 3
+before the break: 4
+8
+[1, 2, 2, 3, 2, 4, 2, 4, 3, 4, 2, 6]
+----- stderr

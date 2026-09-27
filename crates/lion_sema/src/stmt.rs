@@ -453,7 +453,11 @@ impl Checker<'_> {
         self.close_scope();
         let exits = self.ctx.loops.pop().expect("the loop is open");
         self.ctx.flow = exits.breaks.into_iter().fold(head, Flow::join);
-        Some(ir::Stmt::For { var, iterable: iterable?, body })
+        let iterable = iterable?;
+        Some(match parallel {
+            Some(_) => ir::Stmt::Parallel(Box::new(ir::ParallelLoop { var, iterable, body, gather: None })),
+            None => ir::Stmt::For { var, iterable, body },
+        })
     }
 
     /// At the start of a turn, a local assigned in the body may hold a value from an

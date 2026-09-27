@@ -23,6 +23,7 @@ pub use lion_runtime::format::format_float;
 pub use lion_runtime::ops::{self, RationalOp};
 pub use lion_runtime::{BugKind, MAX_CALL_DEPTH};
 pub use lion_vm::natives;
+pub use lion_vm::parallel::{turn_count, turn_value};
 pub use lion_vm::shared::{self, Comparer, Stop};
 pub use lion_vm::{Closure, EnumLayout, Layout, MapValue, Record, SetValue, Trap, Value, kinds, lock};
 
@@ -165,10 +166,86 @@ fn run(program: &'static Program) -> u8 {
     }
 }
 
+/// Where a program writes: the standard output, or, for the turns of a parallel loop
+/// that a thread runs, a buffer that is written later, in the order of the turns.
+enum Output {
+    Stdout(BufWriter<io::Stdout>),
+    Buffer(Vec<u8>),
+}
+
+impl Write for Output {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match self {
+            Output::Stdout(out) => out.write(bytes),
+            Output::Buffer(buffer) => buffer.write(bytes),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Output::Stdout(out) => out.flush(),
+            Output::Buffer(_) => Ok(()),
+        }
+    }
+}
+
+/// How the turns of a parallel loop ended (§19.2).
+#[derive(Debug)]
+pub enum TurnExit {
+    /// All the turns ran.
+    End,
+    /// A turn left the loop with `break`.
+    Break,
+    /// A turn left the function of the loop with `return` or `try`: its value.
+    Return(Value),
+    /// A turn ended the script with `return` (§20.1).
+    Halt,
+}
+
+/// The turns `first..last` of a parallel loop, run on the `Rt` given; the values that a
+/// comprehension gathers go to the last argument.
+pub type Turns<'b> = dyn Fn(&mut Rt, usize, usize, &mut Value) -> R<TurnExit> + Sync + 'b;
+
+/// A value that the threads of a parallel loop may read, as the pointer of a `var`
+/// parameter: the turns only read what it points to (§19.3).
+pub struct Shared<T>(pub T);
+
+// SAFETY: the checker made sure that the turns of a parallel loop change nothing
+// outside them (§19.3); what the pointer designates is only read while they run.
+unsafe impl<T> Sync for Shared<T> {}
+unsafe impl<T> Send for Shared<T> {}
+
+/// The stack sizes tried for the threads of a parallel loop, whose calls are calls of
+/// the machine.
+const WORKER_STACKS: &[usize] = &[1 << 30, 256 << 20, 64 << 20];
+
+/// What a thread needs to make the `Rt` of the turns it runs.
+struct Seed {
+    depth: usize,
+    initialized: Vec<bool>,
+    layouts: Vec<Arc<Layout>>,
+    enums: Vec<Arc<EnumLayout>>,
+    texts: Vec<Arc<String>>,
+    names: Vec<Arc<str>>,
+    dynamic: &'static [Option<Dynamic>],
+    custom_equality: bool,
+    foreign: Vec<ForeignFunction>,
+}
+
+/// What the turns of a chunk did.
+struct ChunkResult {
+    output: Vec<u8>,
+    gathered: Value,
+    exit: R<TurnExit>,
+}
+
 /// The state of a running program.
 pub struct Rt {
-    out: BufWriter<io::Stdout>,
-    input: io::StdinLock<'static>,
+    out: Output,
+    input: Option<io::StdinLock<'static>>,
+    /// An `Rt` that runs turns of a parallel loop for another one: its parallel loops
+    /// run their turns one after the other.
+    worker: bool,
     /// The calls in progress, the script included (C13).
     depth: usize,
     /// For each file, whether its globals have their values, or are getting them (D81).
@@ -225,8 +302,9 @@ impl Rt {
             })
             .collect();
         Rt {
-            out: BufWriter::new(io::stdout()),
-            input: io::stdin().lock(),
+            out: Output::Stdout(BufWriter::new(io::stdout())),
+            input: Some(io::stdin().lock()),
+            worker: false,
             depth: 1,
             initialized: vec![false; program.modules],
             custom_equality: layouts.iter().any(|layout| layout.equals.is_some()),
@@ -296,9 +374,10 @@ impl Rt {
         writeln!(self.out, "{}", value.to_text()).map_err(|error| Box::new(Trap::Io(error)))
     }
 
-    /// `ask(prompt)` (§23, C59).
+    /// `ask(prompt)` (§23, C59). A turn that may ask runs on the main thread (C84).
     pub fn ask(&mut self, prompt: &Value) -> R<Value> {
-        match shared::ask(&mut self.out, &mut self.input, text(prompt)) {
+        let input = self.input.as_mut().expect("the turns that ask run on the main thread");
+        match shared::ask(&mut self.out, input, text(prompt)) {
             Ok(line) => Ok(Value::Text(Arc::new(line))),
             Err(error) => Err(Box::new(Trap::Io(error))),
         }
@@ -368,7 +447,106 @@ impl Rt {
     /// they are getting them (D81).
     #[inline]
     pub fn begin_module(&mut self, module: usize) -> bool {
-        !std::mem::replace(&mut self.initialized[module], true)
+        let first = !std::mem::replace(&mut self.initialized[module], true);
+        assert!(!(first && self.worker), "the modules of a parallel loop get their values first");
+        first
+    }
+
+    /// Runs the turns `0..turns` of a parallel loop (§19.2), on several threads, or one
+    /// after the other in an `Rt` that runs turns for another. Their output comes in
+    /// their order, the values they gather join `gather` in their order, and the first
+    /// turn that leaves the loop decides how it ends (C84).
+    pub fn parallel(
+        &mut self,
+        turns: usize,
+        gather: Option<&mut Value>,
+        span: Option<Span>,
+        body: &Turns,
+    ) -> R<TurnExit> {
+        let empty = match gather.as_deref() {
+            Some(Value::Set(_)) => new_set(SetValue::default()),
+            Some(_) => new_list(Vec::new()),
+            None => Value::None,
+        };
+        let threads = lion_vm::parallel::threads();
+        if self.worker || threads < 2 || turns < 2 {
+            let mut gathered = empty;
+            let exit = body(self, 0, turns, &mut gathered)?;
+            if let (TurnExit::End, Some(gather)) = (&exit, gather) {
+                self.join(gather, gathered, span)?;
+            }
+            return Ok(exit);
+        }
+        let seed = Seed {
+            depth: self.depth,
+            initialized: self.initialized.clone(),
+            layouts: self.layouts.clone(),
+            enums: self.enums.clone(),
+            texts: self.texts.clone(),
+            names: self.names.clone(),
+            dynamic: self.dynamic,
+            custom_equality: self.custom_equality,
+            foreign: self.foreign.clone(),
+        };
+        let work = |range: std::ops::Range<usize>| {
+            let mut rt = Rt::worker(&seed);
+            let mut gathered = empty.clone();
+            let exit = body(&mut rt, range.start, range.end, &mut gathered);
+            let Output::Buffer(output) = std::mem::replace(&mut rt.out, Output::Buffer(Vec::new())) else {
+                unreachable!("a thread writes to a buffer")
+            };
+            ChunkResult { output, gathered, exit }
+        };
+        let stops = |result: &ChunkResult| !matches!(result.exit, Ok(TurnExit::End));
+        let results = lion_vm::parallel::run_chunks(turns, threads, WORKER_STACKS, &work, &stops);
+        let mut gather = gather;
+        for result in results {
+            self.out.write_all(&result.output).map_err(|error| Box::new(Trap::Io(error)))?;
+            match result.exit? {
+                TurnExit::End => {
+                    if let Some(gather) = gather.as_deref_mut() {
+                        self.join(gather, result.gathered, span)?;
+                    }
+                }
+                exit => return Ok(exit),
+            }
+        }
+        Ok(TurnExit::End)
+    }
+
+    /// Adds the values that turns gathered to the result of their comprehension, in
+    /// their order.
+    fn join(&mut self, gather: &mut Value, gathered: Value, span: Option<Span>) -> R<()> {
+        let values = match gathered {
+            Value::List(values) => Arc::unwrap_or_clone(values),
+            Value::Set(set) => set.items().to_vec(),
+            _ => Vec::new(),
+        };
+        for value in values {
+            let result = shared::add_element(&mut self.at(span), gather, &[], value);
+            self.stop(result, span)?;
+        }
+        Ok(())
+    }
+
+    /// The `Rt` of a thread that runs turns of a parallel loop.
+    fn worker(seed: &Seed) -> Rt {
+        Rt {
+            out: Output::Buffer(Vec::new()),
+            input: None,
+            worker: true,
+            depth: seed.depth,
+            initialized: seed.initialized.clone(),
+            layouts: seed.layouts.clone(),
+            enums: seed.enums.clone(),
+            texts: seed.texts.clone(),
+            names: seed.names.clone(),
+            dynamic: seed.dynamic,
+            custom_equality: seed.custom_equality,
+            found: vec![None; seed.foreign.len()],
+            foreign: seed.foreign.clone(),
+            failures: Vec::new(),
+        }
     }
 
     /// A call of the C function `index` (§21.2).

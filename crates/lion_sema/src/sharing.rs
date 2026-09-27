@@ -9,8 +9,8 @@
 //! variable itself.
 //!
 //! Between tasks, a `shared` object is refused; a `shared synced` one is allowed, a lock
-//! protecting each access (§19.3). This version runs the parallel parts one after the
-//! other, so the lock has nothing to do yet (C60).
+//! protecting each access (§19.3). The turns of a parallel loop that use one run one
+//! after the other, in their order, which protects it as well (C84).
 
 use std::rc::Rc;
 

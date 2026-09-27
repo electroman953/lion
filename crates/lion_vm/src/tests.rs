@@ -44,6 +44,7 @@ impl Builder {
             by_reference: false,
             boxed: false,
             captured: false,
+            synced: false,
             span: self.span,
         });
         ir::LocalId(self.locals.len() as u32 - 1)

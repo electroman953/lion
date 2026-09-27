@@ -9,7 +9,7 @@ use lion_runtime::format::format_float;
 use lion_runtime::ops::RationalOp;
 use lion_runtime::{BugKind, MAX_CALL_DEPTH, ops};
 
-use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
+use crate::bytecode::{Chunk, Instr, ParallelInfo, Program, Reg, Target};
 use crate::map::MapValue;
 use crate::set::SetValue;
 use crate::shared::{self, Comparer, Stop};
@@ -83,6 +83,8 @@ pub struct Alert {
     pub span: Option<Span>,
     /// The calls in progress, innermost first.
     pub calls: Vec<Span>,
+    /// The instruction that reported it (function, index): each reports once (I5).
+    place: (usize, usize),
 }
 
 impl Alert {
@@ -146,7 +148,7 @@ pub fn run(
     on_alert: &mut dyn FnMut(Alert),
 ) -> Result<(), Trap> {
     let mut machine = Machine::new(program, out, input, on_alert);
-    machine.run().map_err(|fault| *fault)
+    machine.run().map(|_| ()).map_err(|fault| *fault)
 }
 
 /// What the interactive mode keeps from one input to the next: the registers of the
@@ -184,7 +186,7 @@ pub fn run_from(
     machine.stack.truncate(main.registers as usize);
     session.stack = std::mem::take(&mut machine.stack);
     session.initialized = machine.initialized;
-    result.map_err(|fault| *fault)
+    result.map(|_| ()).map_err(|fault| *fault)
 }
 
 /// Runs a function without arguments on a machine of its own, and gives its result:
@@ -237,6 +239,25 @@ pub fn run_test(
 /// nothing fails.
 type Fault = Box<Trap>;
 
+/// How a run of the code ended, when it met no trap.
+#[derive(Debug)]
+enum Exit {
+    /// The end of the script (`Halt`).
+    Halt,
+    /// A function that the machine called itself returned (`invoke`).
+    Returned,
+    /// A turn of a parallel loop reached its end, or `continue`.
+    EndTurn,
+    /// A turn left its loop with `break`.
+    BreakTurn,
+    /// A turn left the function of its loop, with `return` or `try`: the value that the
+    /// function gives.
+    TurnReturn(Value),
+}
+
+/// The place of a call that has none in the source, as the initialization of a module.
+const NO_PLACE: usize = u32::MAX as usize;
+
 /// A call in progress. The script's frame is at the bottom of the stack; its
 /// registers are the globals.
 struct Frame {
@@ -275,6 +296,14 @@ struct Machine<'a> {
     stop_depth: usize,
     /// The C functions found so far, by their position in `Program::foreign` (§21.2).
     foreign_functions: Vec<Option<*mut std::ffi::c_void>>,
+    /// A machine that runs turns of a parallel loop for another one (§19.2): its parallel
+    /// loops run their turns one after the other.
+    worker: bool,
+    /// The calls in progress below the first frame, in the machine that made this one.
+    depth_offset: usize,
+    /// The number of frames of the turn that runs, if one does: returning from its frame
+    /// leaves the turn.
+    turn_depth: usize,
 }
 
 impl<'a> Machine<'a> {
@@ -306,14 +335,17 @@ impl<'a> Machine<'a> {
             failures: Vec::new(),
             stop_depth: 0,
             foreign_functions: vec![None; program.foreign.len()],
+            worker: false,
+            depth_offset: 0,
+            turn_depth: 0,
         }
     }
 
-    fn run(&mut self) -> Result<(), Fault> {
+    fn run(&mut self) -> Result<Exit, Fault> {
         self.run_at(0)
     }
 
-    fn run_at(&mut self, start: usize) -> Result<(), Fault> {
+    fn run_at(&mut self, start: usize) -> Result<Exit, Fault> {
         let mut pc = start;
         // The code of the running function, reloaded when a call enters or leaves one.
         let mut code: &[Instr] = &self.chunk.code;
@@ -591,6 +623,7 @@ impl<'a> Machine<'a> {
                 Instr::InitModule { module, dst } => {
                     let module = module as usize;
                     if !self.initialized[module] {
+                        assert!(!self.worker, "the modules of a parallel loop get their values first");
                         self.initialized[module] = true;
                         if let Some(init) = self.program.module_inits[module] {
                             pc = self.call(init as usize, dst, dst, 0, pc, at)?;
@@ -608,18 +641,16 @@ impl<'a> Machine<'a> {
                 }
                 Instr::Return { src } => {
                     let value = std::mem::take(&mut self.stack[self.base + src as usize]);
-                    pc = self.return_to_caller(value);
-                    code = &self.chunk.code;
-                    if self.frames.len() < self.stop_depth {
-                        return Ok(());
+                    if let Some(exit) = self.leave(value, &mut pc) {
+                        return Ok(exit);
                     }
+                    code = &self.chunk.code;
                 }
                 Instr::ReturnNone => {
-                    pc = self.return_to_caller(Value::None);
-                    code = &self.chunk.code;
-                    if self.frames.len() < self.stop_depth {
-                        return Ok(());
+                    if let Some(exit) = self.leave(Value::None, &mut pc) {
+                        return Ok(exit);
                     }
+                    code = &self.chunk.code;
                 }
                 Instr::JumpIfArgs { count, target } => {
                     if self.frames.last().expect("a frame runs").args >= count {
@@ -893,12 +924,14 @@ impl<'a> Machine<'a> {
                         set => &self.program.type_sets[set as usize][..],
                     };
                     if shared::is_failure(&value, errors) {
-                        if self.frames.len() == 1 {
+                        if self.frames.len() == 1 && self.frames[0].function as usize == self.program.main {
                             let span = self.chunk.spans[at];
                             let message = shared::failure_message(&value);
                             return Err(Box::new(Trap::Failure { message, span }));
                         }
-                        pc = self.return_to_caller(value);
+                        if let Some(exit) = self.leave(value, &mut pc) {
+                            return Ok(exit);
+                        }
                         code = &self.chunk.code;
                     } else {
                         self.set(dst, value);
@@ -924,7 +957,22 @@ impl<'a> Machine<'a> {
                     let value = shared::text_to_float(self.text(a));
                     self.set(dst, value);
                 }
-                Instr::Halt => return Ok(()),
+                Instr::Parallel { index } => {
+                    let chunk = self.chunk;
+                    match self.parallel(&chunk.parallels[index as usize], at)? {
+                        Exit::EndTurn | Exit::BreakTurn => pc = chunk.parallels[index as usize].end as usize,
+                        Exit::TurnReturn(value) => {
+                            if let Some(exit) = self.leave(value, &mut pc) {
+                                return Ok(exit);
+                            }
+                            code = &self.chunk.code;
+                        }
+                        exit => return Ok(exit),
+                    }
+                }
+                Instr::EndTurn => return Ok(Exit::EndTurn),
+                Instr::BreakTurn => return Ok(Exit::BreakTurn),
+                Instr::Halt => return Ok(Exit::Halt),
             }
         }
     }
@@ -939,7 +987,7 @@ impl<'a> Machine<'a> {
         resume: usize,
         at: usize,
     ) -> Result<usize, Fault> {
-        if self.frames.len() >= MAX_CALL_DEPTH {
+        if self.frames.len() + self.depth_offset >= MAX_CALL_DEPTH {
             return Err(self.bug(BugKind::StackOverflow, at));
         }
         let program = self.program;
@@ -983,6 +1031,117 @@ impl<'a> Machine<'a> {
         Ok(std::mem::take(&mut self.stack[self.base + offset as usize]))
     }
 
+    /// Gives the globals of the file `module` their values, unless it is done (D81): as
+    /// `InitModule`, with a call that has no place in the source.
+    fn init_module(&mut self, module: usize) -> Result<(), Fault> {
+        if std::mem::replace(&mut self.initialized[module], true) {
+            return Ok(());
+        }
+        let Some(init) = self.program.module_inits[module] else { return Ok(()) };
+        let offset = self.chunk.registers;
+        self.call(init as usize, offset, offset, 0, 0, NO_PLACE)?;
+        let outer = std::mem::replace(&mut self.stop_depth, self.frames.len());
+        let result = self.run_at(0);
+        self.stop_depth = outer;
+        result.map(|_| ())
+    }
+
+    /// Runs a parallel loop (§19.2): its modules get their values, then its turns run on
+    /// several threads, or one after the other in a machine that runs turns for another.
+    fn parallel(&mut self, info: &'a ParallelInfo, at: usize) -> Result<Exit, Fault> {
+        let sequence = self.stack[self.base + info.sequence as usize].clone();
+        let turns = crate::parallel::turn_count(&sequence);
+        for &module in &info.modules {
+            self.init_module(module as usize)?;
+        }
+        let threads = crate::parallel::threads();
+        if self.worker || threads < 2 || turns < 2 {
+            return self.turns(info, &sequence, 0..turns);
+        }
+        let function = self.frames.last().expect("a frame runs").function;
+        // A thread has a machine of its own, on a copy of the frames of this one.
+        let snapshot = &self.stack[..self.base + self.chunk.registers as usize];
+        let gather = info.gather.map(|gather| match &self.stack[self.base + gather as usize] {
+            Value::Set(_) => Value::Set(Arc::new(SetValue::default())),
+            _ => Value::List(Arc::new(Vec::new())),
+        });
+        let job = Job {
+            program: self.program,
+            function,
+            base: self.base,
+            snapshot,
+            depth_offset: self.frames.len() - 1 + self.depth_offset,
+            initialized: &self.initialized,
+            info,
+            sequence: &sequence,
+            gather: gather.as_ref(),
+        };
+        let work = |range: std::ops::Range<usize>| job.run(range);
+        let stops = |result: &ChunkResult| !matches!(result.exit, Ok(Exit::EndTurn));
+        let results = crate::parallel::run_chunks(turns, threads, WORKER_STACKS, &work, &stops);
+        // What the turns did, in their order.
+        for result in results {
+            for event in result.events {
+                match event {
+                    Event::Output(bytes) => {
+                        self.out.write_all(&bytes).map_err(|error| Box::new(Trap::Io(error)))?
+                    }
+                    Event::Alert(mut alert) => {
+                        if self.alerted.insert(alert.place) {
+                            let _ = self.out.flush();
+                            alert.calls.extend(self.calls());
+                            (self.on_alert)(alert);
+                        }
+                    }
+                }
+            }
+            if let Some(gather) = info.gather
+                && !result.gathered.is_empty()
+            {
+                let values = result.gathered;
+                self.change(Target::Register(gather), at, |c, root| {
+                    values.into_iter().try_for_each(|value| shared::add_element(c, root, &[], value))
+                })?;
+            }
+            match result.exit {
+                Ok(Exit::EndTurn) => {}
+                Ok(exit) => return Ok(exit),
+                Err(mut fault) => {
+                    // The calls in progress go on in this machine.
+                    if let Trap::Bug { calls, .. } = &mut *fault {
+                        calls.extend(self.calls());
+                    }
+                    return Err(fault);
+                }
+            }
+        }
+        Ok(Exit::EndTurn)
+    }
+
+    /// Runs the turns `range` of a parallel loop, one after the other, in the frame of
+    /// its function.
+    fn turns(
+        &mut self,
+        info: &ParallelInfo,
+        sequence: &Value,
+        range: std::ops::Range<usize>,
+    ) -> Result<Exit, Fault> {
+        let outer = std::mem::replace(&mut self.turn_depth, self.frames.len());
+        let mut exit = Ok(Exit::EndTurn);
+        for turn in range {
+            self.stack[self.base + info.var as usize] = crate::parallel::turn_value(sequence, turn);
+            match self.run_at(info.body as usize) {
+                Ok(Exit::EndTurn) => {}
+                other => {
+                    exit = other;
+                    break;
+                }
+            }
+        }
+        self.turn_depth = outer;
+        exit
+    }
+
     /// The comparisons of values for the instruction at `at`: the machine calls the
     /// `equals` of the structures itself (§12.5).
     fn comparer(&mut self, at: usize) -> Calls<'_, 'a> {
@@ -1015,6 +1174,17 @@ impl<'a> Machine<'a> {
             Value::Set(set) => Arc::clone(set),
             other => self.mismatch("Set", other),
         }
+    }
+
+    /// Leaves the current function with `value`: into its caller, where `pc` goes on, or
+    /// out of the run when the function is that of the turn that runs, or one that the
+    /// machine called itself.
+    fn leave(&mut self, value: Value, pc: &mut usize) -> Option<Exit> {
+        if self.frames.len() == self.turn_depth {
+            return Some(Exit::TurnReturn(value));
+        }
+        *pc = self.return_to_caller(value);
+        (self.frames.len() < self.stop_depth).then_some(Exit::Returned)
     }
 
     /// Leaves the current function with its result; returns where the caller resumes.
@@ -1186,7 +1356,8 @@ impl<'a> Machine<'a> {
     }
 
     fn bug(&self, kind: BugKind, at: usize) -> Fault {
-        Box::new(Trap::Bug { kind, span: self.chunk.spans[at], calls: self.calls() })
+        let span = self.chunk.spans.get(at).copied().flatten();
+        Box::new(Trap::Bug { kind, span, calls: self.calls() })
     }
 
     fn stop(&self, stop: Stop, at: usize) -> Fault {
@@ -1202,7 +1373,13 @@ impl<'a> Machine<'a> {
         self.frames
             .windows(2)
             .rev()
-            .filter_map(|pair| self.program.functions[pair[0].function as usize].spans[pair[1].call as usize])
+            .filter_map(|pair| {
+                self.program.functions[pair[0].function as usize]
+                    .spans
+                    .get(pair[1].call as usize)
+                    .copied()
+                    .flatten()
+            })
             .collect()
     }
 
@@ -1212,7 +1389,8 @@ impl<'a> Machine<'a> {
             // What the program wrote so far comes before the alert.
             let _ = self.out.flush();
             let calls = self.calls();
-            (self.on_alert)(Alert { kind, span: self.chunk.spans[at], calls });
+            let place = (function as usize, at);
+            (self.on_alert)(Alert { kind, span: self.chunk.spans[at], calls, place });
         }
     }
 }
@@ -1230,5 +1408,95 @@ impl Comparer for Calls<'_, '_> {
 
     fn call_equals(&mut self, function: u32, a: Value, b: Value) -> Result<Value, Box<Trap>> {
         self.machine.invoke(function, vec![a, b], self.at)
+    }
+}
+
+/// The stack sizes tried for the threads of a parallel loop.
+const WORKER_STACKS: &[usize] = &[64 << 20, 8 << 20];
+
+/// What a thread needs to run turns of a parallel loop: a copy of the frames of the
+/// machine that runs the loop.
+struct Job<'j> {
+    program: &'j Program,
+    function: u32,
+    base: usize,
+    snapshot: &'j [Value],
+    depth_offset: usize,
+    initialized: &'j [bool],
+    info: &'j ParallelInfo,
+    sequence: &'j Value,
+    /// For a comprehension, the empty value in which the turns of a chunk gather theirs.
+    gather: Option<&'j Value>,
+}
+
+/// What the turns of a chunk did.
+struct ChunkResult {
+    /// What they wrote, and the alerts, in their order.
+    events: Vec<Event>,
+    /// The values that they added to the result of a comprehension.
+    gathered: Vec<Value>,
+    exit: Result<Exit, Fault>,
+}
+
+enum Event {
+    Output(Vec<u8>),
+    Alert(Alert),
+}
+
+/// The output of a thread, kept until it is written in the order of the turns.
+struct Recorder<'r>(&'r std::cell::RefCell<Vec<Event>>);
+
+impl Write for Recorder<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let mut events = self.0.borrow_mut();
+        match events.last_mut() {
+            Some(Event::Output(output)) => output.extend_from_slice(bytes),
+            _ => events.push(Event::Output(bytes.to_vec())),
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Job<'_> {
+    /// Runs the turns `range`, on a machine of this thread.
+    fn run(&self, range: std::ops::Range<usize>) -> ChunkResult {
+        let events = std::cell::RefCell::new(Vec::new());
+        let mut out = Recorder(&events);
+        let mut input = io::empty();
+        let mut on_alert = |alert: Alert| events.borrow_mut().push(Event::Alert(alert));
+        let mut machine = Machine::new(self.program, &mut out, &mut input, &mut on_alert);
+        machine.chunk = &self.program.functions[self.function as usize];
+        machine.base = self.base;
+        machine.stack = self.snapshot.to_vec();
+        machine.frames = vec![Frame {
+            function: self.function,
+            base: self.base as u32,
+            resume: 0,
+            dst: 0,
+            args: 0,
+            call: NO_PLACE as u32,
+        }];
+        machine.initialized = self.initialized.to_vec();
+        machine.worker = true;
+        machine.depth_offset = self.depth_offset;
+        if let (Some(gather), Some(empty)) = (self.info.gather, self.gather) {
+            machine.stack[self.base + gather as usize] = empty.clone();
+        }
+        let exit = machine.turns(self.info, self.sequence, range);
+        let gathered = match self
+            .info
+            .gather
+            .map(|gather| std::mem::take(&mut machine.stack[self.base + gather as usize]))
+        {
+            Some(Value::List(values)) => Arc::unwrap_or_clone(values),
+            Some(Value::Set(set)) => set.items().to_vec(),
+            _ => Vec::new(),
+        };
+        drop(machine);
+        ChunkResult { events: events.take(), gathered, exit }
     }
 }

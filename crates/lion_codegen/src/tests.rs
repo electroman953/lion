@@ -113,3 +113,24 @@ fn a_function_value_gets_a_wrapper_that_takes_values() {
     assert!(code.contains("Some(d0),"));
     assert!(code.contains("fn d0(rt: &mut Rt, args: Vec<Value>, captures: &[Value]) -> R<Value> {"));
 }
+
+#[test]
+fn the_turns_of_a_parallel_loop_run_in_a_closure() {
+    let code = rust("let squares = parallel [x * x, x in 1..10]\nshow(squares)");
+    assert!(code.contains("rt.parallel("), "{code}");
+    assert!(code.contains("TurnExit::End"));
+}
+
+#[test]
+fn turns_that_read_the_keyboard_run_in_their_order() {
+    let code = rust("parallel for i in 1..3:\n    show(ask(\"name?\"))\n;");
+    assert!(!code.contains("rt.parallel("), "{code}");
+}
+
+#[test]
+fn turns_that_use_a_synced_object_run_in_their_order() {
+    let code = rust(
+        "var total = shared synced 0\nfun add(n in Int) in Int modifies total:\n    total += n\n    return n\n;\nshow(parallel [add(n), n in 1..4])",
+    );
+    assert!(!code.contains("rt.parallel("), "{code}");
+}

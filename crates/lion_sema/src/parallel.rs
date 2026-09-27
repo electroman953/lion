@@ -3,9 +3,9 @@
 //!
 //! What runs in parallel must not change anything outside it, even through the
 //! functions it calls: a variable declared outside is not assigned, and a called
-//! function modifies no global, directly or through its own calls (§11.5). This version
-//! computes the parallel parts one after the other, which gives the same results
-//! (C60); the use of several cores comes with step 6 of the roadmap (§28).
+//! function modifies no global, directly or through its own calls (§11.5). The loop of
+//! a parallel part becomes `ir::Stmt::Parallel`, whose turns the backends run on several
+//! threads, with the result of the turns one after the other (C83).
 
 use std::collections::HashSet;
 
@@ -39,6 +39,24 @@ pub(crate) enum Variable {
     Local(ir::LocalId),
     /// A global seen from a function.
     Global(ir::LocalId),
+}
+
+/// A comprehension whose loop over its first generator runs in parallel (§19.2): its
+/// block assigns the empty result, then goes through the generator, adding to the result.
+/// A Domain, or a comprehension that starts with a condition, stays as it is: it gives
+/// the same result.
+fn parallel_comprehension(kind: ir::ExprKind) -> ir::ExprKind {
+    let ir::ExprKind::Block { mut stmts, value } = kind else { return kind };
+    let result = match (&value.kind, stmts.as_slice()) {
+        (
+            ir::ExprKind::Local(result),
+            [ir::Stmt::Assign { place: ir::Place::Local(first), .. }, ir::Stmt::For { .. }],
+        ) if result == first => *result,
+        _ => return ir::ExprKind::Block { stmts, value },
+    };
+    let Some(ir::Stmt::For { var, iterable, body }) = stmts.pop() else { unreachable!("matched above") };
+    stmts.push(ir::Stmt::Parallel(Box::new(ir::ParallelLoop { var, iterable, body, gather: Some(result) })));
+    ir::ExprKind::Block { stmts, value }
 }
 
 /// A checked parallel part: the functions it calls, checked once all are known.
@@ -84,7 +102,7 @@ impl Checker<'_> {
             return None;
         }
         let value = self.in_parallel(span, |checker| checker.expr(inner))?;
-        Some(ir::Expr { span, ..value })
+        Some(ir::Expr { span, kind: parallel_comprehension(value.kind), ..value })
     }
 
     /// Whether assigning `local` from here changes a variable outside the parallel part;

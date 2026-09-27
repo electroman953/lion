@@ -406,6 +406,63 @@ use lion_native::*;
 
 ";
 
+/// The label that leaves the turn of a parallel loop, as `break` does.
+const TURN: &str = "'turn";
+
+/// The locals that the statements write: assign, change in place, go through with
+/// `for`, or give to a `var` parameter.
+fn written_locals(stmts: &[Stmt], written: &mut BTreeSet<u32>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Assign { place: Place::Local(local), .. }
+            | Stmt::AssignElement { root: Place::Local(local), .. }
+            | Stmt::Add { root: Place::Local(local), .. }
+            | Stmt::Remove { root: Place::Local(local), .. }
+            | Stmt::Declare { local } => {
+                written.insert(local.0);
+            }
+            Stmt::For { var, body, .. } => {
+                written.insert(var.0);
+                written_locals(body, written);
+            }
+            Stmt::Parallel(parallel) => {
+                written.insert(parallel.var.0);
+                written.extend(parallel.gather.map(|gather| gather.0));
+                written_locals(&parallel.body, written);
+            }
+            Stmt::If { then, otherwise, .. } => {
+                written_locals(then, written);
+                written_locals(otherwise, written);
+            }
+            Stmt::While { body, .. } | Stmt::Seq(body) => written_locals(body, written),
+            _ => {}
+        }
+    }
+    ir::visit::exprs_in_stmts(stmts, &mut |expr| match &expr.kind {
+        ExprKind::Let { local, .. } => {
+            written.insert(local.0);
+        }
+        ExprKind::Call { args, .. } => {
+            for arg in args {
+                if let Arg::Reference(Place::Local(local)) = arg {
+                    written.insert(local.0);
+                }
+            }
+        }
+        ExprKind::Block { stmts, .. } => written_locals(stmts, written),
+        _ => {}
+    });
+}
+
+/// The locals that the expressions of the statements read.
+fn read_locals(stmts: &[Stmt], read: &mut BTreeSet<u32>) {
+    ir::visit::exprs_in_stmts(stmts, &mut |expr| {
+        if let ExprKind::Local(local) | ExprKind::Cell(local) = expr.kind {
+            read.insert(local.0);
+        }
+    });
+}
+
 /// The globals that the statements assign, or change in place.
 fn globals_assigned(stmts: &[Stmt], statics: &mut HashSet<u32>) {
     for stmt in stmts {
@@ -423,6 +480,7 @@ fn globals_assigned(stmts: &[Stmt], statics: &mut HashSet<u32>) {
             Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::Seq(body) => {
                 globals_assigned(body, statics);
             }
+            Stmt::Parallel(parallel) => globals_assigned(&parallel.body, statics),
             _ => {}
         }
     }
@@ -481,8 +539,10 @@ struct FunctionGen<'g, 'p> {
     indent: usize,
     next: usize,
     /// The loops being translated, innermost last: the labels to leave the loop and to
-    /// leave the turn.
+    /// leave the turn. The turns of a parallel loop are left with `TURN`.
     loops: Vec<(String, String)>,
+    /// How many turns of parallel loops the code being translated is in.
+    turns: usize,
 }
 
 impl<'g, 'p> FunctionGen<'g, 'p> {
@@ -497,6 +557,7 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
             indent: 2,
             next: 0,
             loops: Vec::new(),
+            turns: 0,
         }
     }
 
@@ -746,17 +807,9 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
                 self.indent -= 1;
                 self.line("}");
             }
+            Stmt::Parallel(parallel) => self.parallel(parallel),
             Stmt::Seq(stmts) => self.stmts(stmts),
-            Stmt::InitModule { module } => {
-                self.line(format!("if rt.begin_module({module}) {{"));
-                if let Some(init) = self.g.program.module_inits[*module as usize] {
-                    self.line("    rt.enter(None)?;");
-                    let result = self.fresh("t");
-                    self.line(format!("    let {result} = f{}(rt);", init.0));
-                    self.line(format!("    rt.leave({result}, None)?;"));
-                }
-                self.line("}");
-            }
+            Stmt::InitModule { module } => self.init_module(*module),
             Stmt::AssignElement { root, path, value } => {
                 self.change(*root, path, value, |steps, value, root| {
                     format!("shared::store_element(&mut rt.at(SPAN), {root}, &{steps}, {})", value.take())
@@ -774,7 +827,11 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
             }
             Stmt::Break => {
                 let (exit, _) = self.loops.last().expect("`break` is inside a loop").clone();
-                self.line(format!("break {exit};"));
+                if exit == TURN {
+                    self.line("return Ok(TurnExit::Break);");
+                } else {
+                    self.line(format!("break {exit};"));
+                }
             }
             Stmt::Continue => {
                 let (_, turn) = self.loops.last().expect("`continue` is inside a loop").clone();
@@ -803,12 +860,146 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
         match value {
             Some(value) => {
                 let op = self.expr(value);
-                let repr = Repr::of(self.function.ret);
-                let op = self.coerce(op, repr);
-                self.line(format!("return Ok({});", op.take()));
+                self.leave_function(op);
             }
-            None => self.line("return Ok(Value::None);"),
+            // `return` in the script ends it (§20.1).
+            None if self.is_script && self.turns > 0 => self.line("return Ok(TurnExit::Halt);"),
+            None => self.leave_function(Op::none()),
         }
+    }
+
+    /// Leaves the function with the value; from a turn of a parallel loop, the turn
+    /// gives the value to the loop, which leaves the function (§19.2).
+    fn leave_function(&mut self, op: Op) {
+        if self.turns > 0 {
+            let op = self.coerce(op, Repr::Value);
+            self.line(format!("return Ok(TurnExit::Return({}));", op.take()));
+        } else {
+            let op = self.coerce(op, Repr::of(self.function.ret));
+            self.line(format!("return Ok({});", op.take()));
+        }
+    }
+
+    fn init_module(&mut self, module: u32) {
+        self.line(format!("if rt.begin_module({module}) {{"));
+        if let Some(init) = self.g.program.module_inits[module as usize] {
+            self.line("    rt.enter(None)?;");
+            let result = self.fresh("t");
+            self.line(format!("    let {result} = f{}(rt);", init.0));
+            self.line(format!("    rt.leave({result}, None)?;"));
+        }
+        self.line("}");
+    }
+
+    /// A parallel loop (§19.2): `rt.parallel` runs its turns, in chunks, with a closure
+    /// that runs the turns of a chunk. A closure only reads the variables around it: those
+    /// that the turns write are its own, and the pointers of `var` parameters are wrapped
+    /// to be read by several threads. Turns that must run in their order are an ordinary
+    /// loop (C84).
+    fn parallel(&mut self, parallel: &ir::ParallelLoop) {
+        let program = self.g.program;
+        let reach = ir::parallel::reach(program, self.function, parallel);
+        if reach.in_order {
+            let as_loop = Stmt::For {
+                var: parallel.var,
+                iterable: parallel.iterable.clone(),
+                body: parallel.body.clone(),
+            };
+            self.stmt(&as_loop);
+            return;
+        }
+        let span = self.span(parallel.iterable.span);
+        let sequence = self.expr(&parallel.iterable);
+        let sequence = self.coerce(sequence, Repr::Value);
+        let sequence = if sequence.place { self.temp(Repr::Value, sequence.take()) } else { sequence };
+        for module in &reach.modules {
+            self.init_module(*module);
+        }
+        let turns = self.fresh("t");
+        self.line(format!("let {turns}: usize = turn_count(&{});", sequence.code));
+        let mut written = BTreeSet::new();
+        written.insert(parallel.var.0);
+        written.extend(parallel.gather.map(|gather| gather.0));
+        written_locals(&parallel.body, &mut written);
+        let mut pointers = BTreeSet::new();
+        read_locals(&parallel.body, &mut pointers);
+        pointers.retain(|local| {
+            !written.contains(local)
+                && matches!(Storage::of(self.function.local(ir::LocalId(*local))), Storage::Pointer(_))
+        });
+        for local in &pointers {
+            self.line(format!("let w{local} = Shared(l{local});"));
+        }
+        let gather = match parallel.gather {
+            Some(gather) => format!("Some(&mut {})", self.local_var(gather)),
+            None => "None".to_string(),
+        };
+        let exit = self.fresh("t");
+        self.line(format!(
+            "let {exit} = rt.parallel({turns}, {gather}, {span}, &|rt: &mut Rt, first: usize, last: usize, gathered: &mut Value| -> R<TurnExit> {{"
+        ));
+        self.indent += 1;
+        self.line("unsafe {");
+        self.indent += 1;
+        for local in &pointers {
+            self.line(format!("let l{local} = w{local}.0;"));
+        }
+        for local in &written {
+            if self.is_script && self.g.statics.contains(local) {
+                continue;
+            }
+            let storage = Storage::of(self.function.local(ir::LocalId(*local)));
+            let zero = match storage {
+                Storage::Plain(repr) => repr.zero(),
+                _ => "Value::None",
+            };
+            self.line(format!("let mut l{local}: {} = {zero};", storage.rust()));
+        }
+        if let Some(gather) = parallel.gather {
+            let var = self.local_var(gather);
+            self.line(format!("{var} = std::mem::take(gathered);"));
+        }
+        let counter = self.fresh("t");
+        self.line(format!("let mut {counter}: usize = first;"));
+        let (exit_label, turn) = (self.fresh("'b"), self.fresh("'c"));
+        self.line(format!("{exit_label}: while {counter} < last {{"));
+        self.indent += 1;
+        let value = self.temp(Repr::Value, format!("turn_value(&{}, {counter})", sequence.code));
+        self.store_local(parallel.var, value);
+        self.turns += 1;
+        self.turn(TURN, &turn, &parallel.body);
+        self.turns -= 1;
+        self.line(format!("{counter} += 1;"));
+        self.indent -= 1;
+        self.line("}");
+        if let Some(gather) = parallel.gather {
+            let var = self.local_var(gather);
+            self.line(format!("*gathered = std::mem::take(&mut {var});"));
+        }
+        self.line("Ok(TurnExit::End)");
+        self.indent -= 1;
+        self.line("}");
+        self.indent -= 1;
+        self.line("})?;");
+        // The first turn that left the loop decides how it ends.
+        let value = self.fresh("t");
+        self.line(format!("match {exit} {{"));
+        self.indent += 1;
+        self.line("TurnExit::End | TurnExit::Break => {}");
+        self.line(format!("TurnExit::Return({value}) => {{"));
+        self.indent += 1;
+        self.leave_function(Op::owned(value, Repr::Value));
+        self.indent -= 1;
+        self.line("}");
+        if self.turns > 0 {
+            self.line("TurnExit::Halt => return Ok(TurnExit::Halt),");
+        } else if self.is_script {
+            self.line("TurnExit::Halt => return Ok(Value::None),");
+        } else {
+            self.line("TurnExit::Halt => unreachable!(\"only the script ends the program with `return`\"),");
+        }
+        self.indent -= 1;
+        self.line("}");
     }
 
     /// A change in place of a part of the variable `root` (§6.3): the steps, then the
@@ -1090,6 +1281,8 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
                 let span = self.span(expr.span);
                 let leave = if self.is_script {
                     format!("return Err(failure(&{}, {span}));", op.code)
+                } else if self.turns > 0 {
+                    format!("return Ok(TurnExit::Return({}));", op.code)
                 } else {
                     format!("return Ok({});", op.code)
                 };

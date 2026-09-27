@@ -1,9 +1,9 @@
 # État de l'implémentation de Lion
 
-Mis à jour le 2026-09-27, avec le compilateur natif (étape 5). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
+Mis à jour le 2026-09-27, avec le compilateur natif (étape 5) et les parties parallèles sur plusieurs cœurs (étape 6). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C82) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C84) ;
 - [`README.md`](README.md) : la présentation et l'usage.
 
 ## 1. Vérification faite pour ce bilan
@@ -13,8 +13,8 @@ Mis à jour le 2026-09-27, avec le compilateur natif (étape 5). Ce fichier suff
 | `cargo build` | OK |
 | `cargo clippy --all-targets` | 0 avertissement |
 | `cargo fmt --check` | OK |
-| `cargo test` (tout le workspace) | OK : 134 tests unitaires, 172 programmes golden, et les 78 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
-| Programmes du §27 de la spec | 27.1 (CSV, structures) et 27.2 (hasard, parallèle, ensembles) tournent sans modification, dans les deux modes ; 27.2 prend environ 3 s interprété (`--release`) et 0,6 s compilé. 27.3 dépend du module `ui`, imaginaire |
+| `cargo test` (tout le workspace) | OK : 141 tests unitaires, 174 programmes golden, et les 80 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
+| Programmes du §27 de la spec | 27.1 (CSV, structures) et 27.2 (hasard, parallèle, ensembles) tournent sans modification, dans les deux modes ; Sur 12 cœurs, 27.2 prend 0,67 s interprété (`--release`) et 0,19 s compilé ; avec `LION_THREADS=1`, 3,2 s et 0,65 s. 27.3 dépend du module `ui`, imaginaire |
 
 L'arbre de travail est propre, sans fichier non commité.
 
@@ -26,7 +26,7 @@ L'arbre de travail est propre, sans fichier non commité.
 | 3. Bibliothèque standard | **Atteinte** pour `files`, `text`, `math`, `random`, `csv` et le noyau. Manquent `sets`, `json`, `dates`, `time`, `net` |
 | 4. Outillage | **Atteinte** : `lion test`, `lion fmt`, mode interactif |
 | 5. Compilateur natif `lion build` | **Atteinte** : les deux modes donnent les mêmes résultats sur tous les programmes de test (C81, C82) |
-| 6. Parallélisme réel sur plusieurs cœurs | **Pas commencée** : les parties parallèles et les tâches s'exécutent l'une après l'autre, avec les mêmes résultats (C60, C71) |
+| 6. Parallélisme et tâches | **Atteinte** pour le critère du §28 : les parties parallèles utilisent tous les cœurs, dans les deux modes, avec le résultat du calcul séquentiel (C83, C84). Les tâches sont encore calculées à leur création (C71) : voir §9 |
 | 7. Bibliothèque `ui` | Pas commencée |
 
 ## 3. Architecture
@@ -37,7 +37,8 @@ Workspace Cargo en Rust (édition 2024, Rust ≥ 1.88), **sans aucune dépendanc
 source .lion
   → lion_syntax   lexer → tokens → parser → AST ; formateur (lion fmt)
   → lion_sema     noms, types, flux, règles de sûreté → IR typé
-  → lion_ir       IR typé : le contrat commun aux backends (+ visiteur d'expressions)
+  → lion_ir       IR typé : le contrat commun aux backends (+ visiteur, analyse des
+                  boucles parallèles)
       ├→ lion_vm       bytecode à registres + machine virtuelle ; évalue aussi `compile`
       └→ lion_codegen  IR → code Rust, compilé par cargo/rustc (LLVM) : le mode compilé
   lion_native        runtime des programmes compilés (réutilise les valeurs de lion_vm)
@@ -105,14 +106,16 @@ Principes :
 - `lib.rs` : `Program`, `Function`, `Stmt`, `ExprKind`, `Builtin`, `Native`, `ForeignFunction`.
 - `types.rs` : `Type`, qui est `Copy`, et l'interner global.
 - `visit.rs` : parcours de toutes les expressions.
+- `parallel.rs` : `reach`, ce que les tours d'une boucle parallèle peuvent atteindre, soit les modules à initialiser et s'ils doivent rester dans l'ordre (C84).
 - `print.rs` : la sortie de `lion debug ir`.
 
 **`lion_vm`**
 - `compile.rs` : IR vers bytecode.
 - `bytecode.rs` : les instructions typées.
-- `machine.rs` : l'exécution, les pièges (`Trap`), `run`, `run_test`, `run_from` (le mode interactif) et `invoke`.
+- `machine.rs` : l'exécution, les pièges (`Trap`), `run`, `run_test`, `run_from` (le mode interactif) et `invoke`. On y trouve aussi les boucles parallèles : `parallel`, `turns`, les machines des fils (`Job`), et la sortie enregistrée puis rejouée dans l'ordre (`Recorder`).
+- `parallel.rs` : l'ordonnanceur commun aux deux modes (`threads`, `run_chunks`, `turn_count`, `turn_value`).
 - Valeurs :
-  - `value.rs` : `Value`, qui est `Rc` et copie à l'écriture ;
+  - `value.rs` : `Value`, qui est `Arc` et copie à l'écriture (`make_mut`) ;
   - `set.rs`, `map.rs` : index par hachage ;
   - `natives.rs` : fonctions de la bibliothèque standard fournies par l'implémentation.
 - Appels C et `compile` :
@@ -126,6 +129,7 @@ Principes :
   - une variable partagée avec une closure tient une cellule, et un paramètre `var` est un pointeur (`*mut T`) ;
   - les globales atteintes par des fonctions deviennent des `static mut`.
 - Une opération devient une instruction `let` (forme « ANF »).
+- Une boucle parallèle devient `rt.parallel(tours, …, &|rt, first, last, gathered| …)`. La closure redéclare les variables que les tours écrivent, et reçoit les pointeurs `var` enveloppés dans `Shared`.
 - Chaque fonction devient `fN(rt, paramètres…, captures…) -> R<T>`. Un paramètre avec valeur par défaut est un `Option` ; `dN` est l'enveloppe pour les appels par valeur et `equals`.
 - Tests unitaires dans `tests.rs` (programme Lion en entrée, forme du Rust en sortie).
 
@@ -133,6 +137,7 @@ Principes :
 - `Program` : la description produite par le code, avec les sources, les structures, les textes et les fonctions dynamiques.
 - `Rt` : sortie tamponnée, entrée, nombre d'appels en cours, modules initialisés, layouts, cache des fonctions C.
 - `start` : lance le programme sur un fil à grosse pile (4 Gio, sinon 1 Gio, sinon 256 Mio), rend un bug comme `lion run` et sort avec les mêmes codes.
+- `Rt::parallel` : exécute les tranches de tours sur des `Rt` de travail, puis écrit leurs sorties et joint leurs valeurs dans l'ordre (`TurnExit`).
 - Aides : `enter` et `leave` autour de chaque appel, `called_from` pour la trace, et des conversions (`int`, `text`, `field`…).
 
 **`lion_runtime`** : `ops.rs` (arithmétique vérifiée, rationnels, conversions), `bug.rs` (les `BugKind` et leurs messages), `format.rs` (affichage des Float et des rationnels), `stdlib.rs`.
@@ -189,7 +194,8 @@ Toutes sont testées par des programmes golden.
   - `parallel [...]`, `parallel {...}`, `parallel for` ;
   - `shared`, `shared synced`, `same` (C73) ;
   - règles de sûreté du §19.3 et D48.
-  L'exécution reste séquentielle.
+
+  Les tours des parties parallèles s'exécutent sur plusieurs fils (C83). Ceux qui touchent un `synced` ou lisent le clavier restent dans l'ordre (C84). Les tâches sont calculées à leur création (C71).
 - **Divers** :
   - `compile expr` (C77) ;
   - appels C : `foreign "libm" pure fun ...` dans des blocs `unsafe` (C80 ; Unix x86-64 et AArch64) ;
@@ -203,7 +209,7 @@ Chacun de ces cas donne une erreur « not implemented yet » ou un refus explici
 
 | Fonctionnalité | Réf. spec |
 | --- | --- |
-| Parallélisme réel sur plusieurs cœurs | §19, étape 6 |
+| Tâches concurrentes : `task` calcule sa valeur à sa création (C71) | §19.1, étape 6 |
 | Traits génériques (`trait Container of T`) | §15.1 |
 | Méthodes d'une structure générique ou de List/Set/Map (`fun Pair.swap()`) | §12.4, §15 |
 | Une structure générique écrite avec une variable de type (`p in Pair of (T, T)`) | §15.1 |
@@ -230,7 +236,7 @@ Chaque test golden est un fichier `tests/<suite>/*.lion` accompagné de son `.ex
 | `tests/parser` | 23 | `lion debug ast` |
 | `tests/typechecker` | 15 | `lion debug ir` |
 | `tests/errors` | 48 | `lion check` (erreurs de compilation) |
-| `tests/runtime` | 63 | `lion run` (sémantique, bugs, alertes) |
+| `tests/runtime` | 65 | `lion run` (sémantique, bugs, alertes) |
 | `tests/integration` | 13 | `lion run` (programmes complets) |
 | `tests/programs` | 2 | `lion run` depuis leur dossier (programmes 27.1 et 27.2 de la spec) |
 | `tests/testing` | 3 | `lion test` |
@@ -242,7 +248,9 @@ Le mode compilé a ses propres tests (`cargo test --test native`, `crates/lion_c
 
 Ces tests demandent cargo, qu'ils trouvent dans la variable `CARGO` posée par `cargo test`. Un programme ajouté à `tests/runtime` est donc testé dans les deux modes.
 
-Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (18), `lion_vm` (7), `lion_codegen` (7), `lion_native` (5), `lion_diagnostics` (4) et `lion_ir` (2).
+Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (18), `lion_vm` (11), `lion_codegen` (10), `lion_native` (5), `lion_diagnostics` (4) et `lion_ir` (2).
+
+Les tests golden tournent avec autant de fils que de cœurs ; `LION_THREADS=1` les fait tourner sur un seul, avec la même sortie.
 
 ## 7. Commandes
 
@@ -261,7 +269,11 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
 
 ## 8. Problèmes connus et limites
 
-- Parallélisme et tâches séquentiels (C60, C71) : mêmes résultats, mais pas de gain de vitesse ; seul l'ordre des `show` pourrait différer d'une exécution concurrente.
+- Parallélisme :
+  - les tâches sont calculées à leur création (C71) ;
+  - les tours qui touchent un `shared synced` ou lisent le clavier s'exécutent dans l'ordre, sans gain de vitesse (C84) ;
+  - les fils sont créés pour chaque boucle parallèle, sans réserve de fils : une boucle parallèle dans une boucle très répétée paie ce coût à chaque tour ;
+  - une tranche commencée va jusqu'au bout, même si un tour d'une tranche précédente a quitté la boucle (C83).
 - FFI :
   - seulement sur Unix x86-64 et AArch64, sans fonction variadique ;
   - Int vaut `int64_t` et Bool vaut `int` ;
@@ -279,29 +291,34 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
   - deux `lion build` simultanés vers le même exécutable se gênent ;
   - `lion test` et le mode interactif restent interprétés.
 
-## 9. Prochaine étape recommandée : le parallélisme réel (étape 6)
+## 9. Prochaine étape recommandée : les tâches concurrentes (fin de l'étape 6)
 
-L'étape 6 est « terminée quand le programme 27.2 utilise tous les cœurs » (§28). Rien n'est commencé. Aujourd'hui, les parties parallèles et les tâches s'exécutent l'une après l'autre (C60, C71), et le checker vérifie déjà les règles de sûreté du §19.3 (C60, C73, D48). Plan recommandé, à confirmer au début de l'étape :
+Le critère de l'étape 6 est atteint : 27.2 utilise tous les cœurs. Il reste `task`, qui calcule encore sa valeur dès sa création (C71). Plan retenu, à décider en C85 :
 
-1. **L'IR doit marquer ce qui est parallèle.** Aujourd'hui `parallel [...]` donne le même bloc qu'une compréhension ordinaire (`lion_sema/src/parallel.rs` vérifie, puis oublie le mot). Il faut un nœud, par exemple `ExprKind::Parallel { source, body: FunctionId, … }`. Son corps devient une fonction qui reçoit un élément et donne sa contribution (valeur ou rien), et `parallel for` suit la même forme. `task e` devient aussi une fonction sans argument.
-2. **Des valeurs partageables entre fils.** `Value` repose sur `Rc` : il faut passer à `Arc`, ainsi que les Sets, les Maps, `Layout` et `Closure`, et les cellules à `Arc<Mutex<…>>`, ce qui donne aussi à `shared synced` son verrou. Il faut d'abord mesurer ce que coûte le comptage atomique sur les bancs d'essai des notes (§6). Si le coût est trop fort, l'alternative est de copier les valeurs aux frontières des parties parallèles. Elle se complique en mode compilé, où les globales `static` sont lues directement.
-3. **Un ordonnanceur commun aux deux modes**, dans `lion_vm` et avec `std::thread::scope`. Il découpe les éléments en tranches, un fil par cœur (`available_parallelism`), et chaque fil a sa propre machine ou son propre `Rt`.
-   - Les résultats sont rangés dans l'ordre des éléments. L'ordre d'un Set (C57) reste donc celui du calcul séquentiel.
-   - La sortie de chaque élément est tamponnée, puis écrite dans l'ordre. Le §19.3 ne garantit pas l'ordre des lignes (D47) ; ce choix donne en plus une sortie déterministe, identique dans les deux modes et stable pour les tests golden.
-   - Si plusieurs éléments rencontrent un bug, seul celui du premier élément compte : c'est le bug du calcul séquentiel, précédé des sorties des éléments d'avant.
-   - Les modules que la partie peut utiliser sont initialisés avant de lancer les fils (D81), sur le fil principal.
-   - Une partie qui appelle `ask`, même indirectement, reste séquentielle.
-4. **Tâches** (§19.1) : `task` lance le calcul sur un fil, et `wait` attend son résultat. Il faut choisir quand écrire la sortie d'une tâche : au plus tôt, ou tamponnée jusqu'au `wait` pour rester déterministe.
-5. **Tests.**
-   - Les golden actuels doivent rester identiques dans les deux modes.
-   - Un test de performance doit vérifier que 27.2 va plus vite avec plusieurs cœurs, par exemple en comparant avec `LION_THREADS=1`, une variable d'environnement à créer.
-   - Il faut des tests de déterminisme (sorties et bugs dans des parties parallèles), à lancer plusieurs fois.
+1. **Quand une tâche peut tourner à part.** Une tâche ne s'exécute sur son propre fil que si elle ne dépend de rien que le reste du programme peut changer pendant qu'elle tourne. Les variables locales qu'elle lit sont copiées à sa création : elles ne gênent pas. Il faut aussi qu'elle ne puisse, même à travers les fonctions qu'elle appelle :
+   - ni lire une globale `var` ou une cellule partagée avec une closure ;
+   - ni utiliser un `synced`, lire le clavier ou noter un `expect` ;
+   - ni contenir un `try` qui quitterait la fonction qui la crée.
 
-Des sujets plus petits peuvent aussi être repris au besoin : traits génériques, méthodes de structures génériques, types et fonctions standard comme valeurs, modules `json` et `dates`, et un nettoyage du cache de `lion build`.
+   Sinon, elle reste calculée à sa création, comme aujourd'hui. Cette condition s'ajoute à l'analyse `lion_ir::parallel::reach`.
+2. **Sortie et bugs.** Ce qu'écrit une tâche qui tourne à part est gardé, puis écrit au premier `wait` qui l'attend. Un bug, un `exit` ou l'échec d'un `try` au niveau du script apparaît aussi à ce `wait`, avec la trace des appels en cours à la création. À la fin du script, les tâches jamais attendues sont attendues dans l'ordre de leur création. Après un `exit` ou un bug du programme, elles sont abandonnées.
+3. **Nombre de fils.** Au plus `threads()` tâches tournent à la fois. Au-delà, une nouvelle tâche est calculée à sa création, mais sa sortie est gardée de la même façon.
+4. **Représentation.**
+   - `Value::Task` devient un état partagé : le résultat, quand il est connu, et sinon le moyen de l'attendre.
+   - Machine virtuelle : il faut des fils qui vivent plus longtemps qu'une instruction, par exemple avec un `std::thread::scope` autour de toute l'exécution. Les poignées des tâches sont rangées dans la machine, et la `Value` n'en porte que le numéro.
+   - Code compilé : une closure `move` qui copie les variables lues, sur un `std::thread::spawn` avec un `Rt` de travail.
+5. **Tests.** Il faut des golden qui fixent la place de la sortie des tâches et de leurs bugs, identiques dans les deux modes et avec `LION_THREADS=1`.
+
+Ensuite viendra l'étape 7, la bibliothèque `ui`, dont la conception reste à faire (§B.2). Des sujets plus petits peuvent aussi être repris au besoin :
+- traits génériques, méthodes de structures génériques ;
+- types et fonctions standard comme valeurs ;
+- modules `json` et `dates` ;
+- une réserve de fils pour les boucles parallèles ;
+- un nettoyage du cache de `lion build`.
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C83**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26).
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C85**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26).
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README et des notes, puis un commit Conventional Commits. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

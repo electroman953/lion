@@ -12,6 +12,7 @@ mod ffi;
 mod machine;
 mod map;
 pub mod natives;
+pub mod parallel;
 mod set;
 pub mod shared;
 mod value;

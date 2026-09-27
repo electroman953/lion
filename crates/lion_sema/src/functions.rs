@@ -1774,6 +1774,7 @@ fn widen_returns(stmts: &mut [ir::Stmt]) {
             ir::Stmt::While { body, .. } | ir::Stmt::For { body, .. } | ir::Stmt::Seq(body) => {
                 widen_returns(body)
             }
+            ir::Stmt::Parallel(parallel) => widen_returns(&mut parallel.body),
             ir::Stmt::Assign { .. }
             | ir::Stmt::InitModule { .. }
             | ir::Stmt::Declare { .. }

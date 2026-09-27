@@ -230,6 +230,12 @@ pub enum Instr {
     StoreCell { cell: Reg, src: Reg },
     /// Moves the value out of the cell, to change it in place and store it back.
     TakeCell { dst: Reg, cell: Reg },
+    /// Runs the parallel loop `index` of the chunk (§19.2), then goes on after its turns.
+    Parallel { index: u32 },
+    /// The end of a turn of a parallel loop, where `continue` goes.
+    EndTurn,
+    /// `break` in a turn of a parallel loop.
+    BreakTurn,
     Halt,
 }
 
@@ -316,6 +322,23 @@ pub struct EnumLayout {
     pub values: Vec<String>,
 }
 
+/// A parallel loop of a chunk (§19.2): its turns are the code from `body` to its
+/// `EndTurn`, which runs on several threads.
+#[derive(Debug)]
+pub struct ParallelInfo {
+    /// The register of the variable of the loop.
+    pub var: Reg,
+    /// The register of what the loop goes through, evaluated once.
+    pub sequence: Reg,
+    /// For a comprehension, the register of its result, to which the turns add.
+    pub gather: Option<Reg>,
+    pub body: u32,
+    /// Where the code goes on after the loop.
+    pub end: u32,
+    /// The files whose globals the turns may use, initialized first (D81).
+    pub modules: Vec<u32>,
+}
+
 /// Compiled code for one function.
 pub struct Chunk {
     pub name: String,
@@ -331,6 +354,8 @@ pub struct Chunk {
     pub texts: Vec<Arc<String>>,
     /// The number of registers the frame needs.
     pub registers: u32,
+    /// The parallel loops, by the index of their `Parallel` instruction.
+    pub parallels: Vec<ParallelInfo>,
 }
 
 /// A readable listing, for `lion debug bytecode`.

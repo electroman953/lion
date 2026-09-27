@@ -32,6 +32,10 @@ pub fn exprs_in_stmts(stmts: &[Stmt], f: &mut dyn FnMut(&Expr)) {
                 exprs_in(iterable, f);
                 exprs_in_stmts(body, f);
             }
+            Stmt::Parallel(parallel) => {
+                exprs_in(&parallel.iterable, f);
+                exprs_in_stmts(&parallel.body, f);
+            }
             Stmt::Return(None)
             | Stmt::Break
             | Stmt::Continue
@@ -149,6 +153,10 @@ pub fn exprs_in_stmts_mut(stmts: &mut [Stmt], f: &mut dyn FnMut(&mut Expr)) {
             Stmt::For { iterable, body, .. } => {
                 exprs_in_mut(iterable, f);
                 exprs_in_stmts_mut(body, f);
+            }
+            Stmt::Parallel(parallel) => {
+                exprs_in_mut(&mut parallel.iterable, f);
+                exprs_in_stmts_mut(&mut parallel.body, f);
             }
             Stmt::Return(None)
             | Stmt::Break

@@ -1,0 +1,12 @@
+// A bug in a turn of a parallel loop: the first one in the order of the turns stops
+// the program, after what the turns before it wrote (§19.2, C84).
+fun check(n in Int) in Int:
+    return 100 div (n - 30)
+;
+fun all_checks(limit in Int) in List of Int:
+    return parallel [check(n), n in 1..limit]
+;
+parallel for i in 1..3:
+    show("warm up {i}")
+;
+show(all_checks(60))

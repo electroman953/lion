@@ -1,0 +1,50 @@
+// The turns of a parallel loop may run on several threads: the program still sees
+// what the turns one after the other would give (§19.2, C84).
+use math
+
+// Each turn writes its lines, and the lines come in the order of the turns.
+parallel for i in 1..12:
+    show("turn {i}")
+;
+
+// The results gather in the order of the turns; a Set keeps its first insertions.
+show(parallel [i * i, i in 1..30])
+show(parallel {i mod 7, i in 1..100})
+show(parallel [(a, b), a in 1..3, b in 1..2, a != b])
+show(parallel [floor(math.sqrt(i as Float)), i in [1, 4, 9, 16, 25]])
+
+// A turn over a list, a Set or the keys of a Map.
+struct Point:
+    x in Int
+    y in Int
+;
+let points = [Point(i, i * 2), i in 1..20]
+show(parallel [p.x + p.y, p in points, p.x mod 5 == 0])
+var ages = {} in Map of (Text, Int)
+ages["Léa"] = 12
+ages["Tom"] = 9
+show(parallel [name, name in ages, ages[name] > 10])
+
+// `try` leaves with the error of the first turn that meets one (§18.3).
+fun parse_all(texts in List of Text) in List of Int or Error:
+    return parallel [try t as Int, t in texts]
+;
+show(parse_all(["1", "2", "3"]))
+show(parse_all(["1", "x", "3", "y"]))
+
+// `break` and `return` in a turn: the first turn that leaves decides.
+parallel for i in 1..100:
+    if i == 5: break ;
+    show("before the break: {i}")
+;
+fun first_square_above(limit in Int) in Int:
+    parallel for i in 1..1000:
+        if i * i > limit: return i ;
+    ;
+    return 0
+;
+show(first_square_above(50))
+
+// A parallel loop in a function that a turn calls runs in that turn.
+fun divisors(n in Int) in List of Int = parallel [d, d in 1..n, n mod d == 0]
+show(parallel [divisors(n).size, n in 1..12])
