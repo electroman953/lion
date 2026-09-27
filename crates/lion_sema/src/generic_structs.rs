@@ -74,6 +74,7 @@ impl<'a> Checker<'a> {
             let name = self.qualified_in(self.generic_structs[template].module, &decl.name.name);
             return Some(Type::Applied(ir::AppliedRef::new(ir::AppliedData {
                 template: template as u32,
+                is_trait: false,
                 name,
                 args: types,
             })));
@@ -94,22 +95,7 @@ impl<'a> Checker<'a> {
         }
         let (decl, module) = (self.generic_structs[template].decl, self.generic_structs[template].module);
         let previous = self.enter_module(module);
-        let mut valid = true;
-        for ((param, set), &ty) in decl.type_params.iter().zip(&types) {
-            if is_all_types(set) {
-                continue;
-            }
-            let Some(constraint) = self.resolve_type(set) else {
-                valid = false;
-                continue;
-            };
-            let pending = PendingConstraint { ty, constraint, param: param.clone(), span };
-            if self.trait_members_known {
-                valid &= self.check_constraint(&pending);
-            } else {
-                self.pending_constraints.push(pending);
-            }
-        }
+        let valid = self.check_type_params(&decl.type_params, &types, span);
         if !valid {
             self.enter_module(previous);
             return None;
@@ -138,6 +124,10 @@ impl<'a> Checker<'a> {
     /// the variables of `Pair of (T, U)` are known, replaced by its structure (§15.3).
     pub(crate) fn make_applied(&mut self, ty: Type, span: Span) -> Option<Type> {
         ty.make_applied(&mut |applied| {
+            if applied.is_trait {
+                let index = self.instantiate_trait(applied.template as usize, applied.args, span)?;
+                return Some(Type::Trait(self.traits[index].id));
+            }
             let index = self.instantiate_structure(applied.template as usize, applied.args, span)?;
             Some(Type::Struct(self.structs[index].id))
         })
@@ -193,6 +183,13 @@ impl<'a> Checker<'a> {
                 let name = enumeration.name();
                 Type::Enum(self.enums.iter().copied().find(|found| found.name() == name)?)
             }
+            Type::Trait(set) if set.origin().is_some() => {
+                let (template, args) = set.origin().expect("checked");
+                let args = each(self, args)?;
+                let span = self.generic_traits[template as usize].decl.name.span;
+                let index = self.instantiate_trait(template as usize, args, span)?;
+                Type::Trait(self.traits[index].id)
+            }
             Type::Trait(set) => {
                 let name = set.name();
                 if name == self.comparable.name() {
@@ -205,6 +202,33 @@ impl<'a> Checker<'a> {
             }
             other => other,
         })
+    }
+
+    /// Whether each type given to a generic structure or trait belongs to the set of its
+    /// parameter (§15.1); checked later when the members of the traits are not known yet.
+    pub(crate) fn check_type_params(
+        &mut self,
+        params: &[(ast::Ident, ast::TypeExpr)],
+        types: &[Type],
+        span: Span,
+    ) -> bool {
+        let mut valid = true;
+        for ((param, set), &ty) in params.iter().zip(types) {
+            if is_all_types(set) {
+                continue;
+            }
+            let Some(constraint) = self.resolve_type(set) else {
+                valid = false;
+                continue;
+            };
+            let pending = PendingConstraint { ty, constraint, param: param.clone(), span };
+            if self.trait_members_known {
+                valid &= self.check_constraint(&pending);
+            } else {
+                self.pending_constraints.push(pending);
+            }
+        }
+        valid
     }
 
     /// The constraints met before the members of the traits were known.
@@ -227,7 +251,7 @@ impl<'a> Checker<'a> {
                     format!("`{}` must be {}", pending.param.name, pending.constraint),
                 )
                 .with_note(
-                    "each type parameter of a generic structure belongs to its set of types (§15.1, §15.2)",
+                    "each type parameter of a generic type belongs to its set of types (§15.1, §15.2)",
                 ),
         );
         false

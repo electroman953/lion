@@ -11,3 +11,14 @@ show(geo.swap(p))
 fun keys(l in List of geo.Pair of (K, V)) in List of K, K in Type, V in Type = [x.first, x in l]
 show(keys([geo.Pair("a", 1), geo.Pair("b", 2)]))
 show(geo.Box(3))
+
+// A generic trait of the module.
+struct Rope:
+    length in Float
+;
+fun Rope.measure() in Float = self.length
+fun sizes(l in List of geo.Measured of Float) in List of Float = [m.measure(), m in l]
+show(sizes([Rope(2.5), Rope(1.0)]))
+show(Rope(3.0) in geo.Measured of Float)
+fun measured(m in geo.Measured of U) in U, U in Type = m.measure()
+show(measured(Rope(4.5)))

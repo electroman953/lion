@@ -31,6 +31,8 @@ pub(crate) struct Tables<'a> {
     pub(crate) struct_names: HashMap<String, usize>,
     /// The structures with type parameters, by name (§15.1).
     pub(crate) generic_structs: HashMap<String, usize>,
+    /// The traits with type parameters, by name (§15.1).
+    pub(crate) generic_traits: HashMap<String, usize>,
     pub(crate) named_types: HashMap<String, NamedType<'a>>,
     /// Where each type of the file is declared.
     pub(crate) type_spans: HashMap<String, Span>,

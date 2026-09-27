@@ -1,9 +1,9 @@
 # État de l'implémentation de Lion
 
-Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélisme sur plusieurs cœurs (étape 6), les modules `sets`, `time` et `dates`, les méthodes et variables de type des structures génériques, et la proposition de la bibliothèque `ui` (étape 7). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
+Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélisme sur plusieurs cœurs (étape 6), les modules `sets`, `time` et `dates`, les structures et traits génériques complets (§15.1), et la proposition de la bibliothèque `ui` (étape 7). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C92) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C93) ;
 - [`docs/design/ui.md`](docs/design/ui.md) : la proposition de la bibliothèque `ui`, en attente des réponses de l'auteur ;
 - [`README.md`](README.md) : la présentation et l'usage.
 
@@ -14,7 +14,7 @@ Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélism
 | `cargo build` | OK |
 | `cargo clippy --all-targets` | 0 avertissement |
 | `cargo fmt --check` | OK |
-| `cargo test` (tout le workspace) | OK : 146 tests unitaires, 188 programmes golden, et les 89 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
+| `cargo test` (tout le workspace) | OK : 146 tests unitaires, 190 programmes golden, et les 90 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
 | Programmes du §27 de la spec | 27.1 (CSV, structures) et 27.2 (hasard, parallèle, ensembles) tournent sans modification, dans les deux modes ; Sur 12 cœurs, 27.2 prend 0,67 s interprété (`--release`) et 0,19 s compilé ; avec `LION_THREADS=1`, 3,2 s et 0,65 s. 27.3 dépend du module `ui`, imaginaire |
 
 L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié en privé sur GitHub : <https://github.com/electroman953/lion> (remote `origin`).
@@ -85,6 +85,7 @@ Principes :
   - `structs.rs` : structures, invariants, validateur et constructeur synthétisés ;
   - `enums.rs` : énumérations et unions nommées ;
   - `traits.rs` : traits, `Comparable`, et `Error` comme trait ;
+  - `generic_traits.rs` : traits génériques, et `T` trouvé dans les méthodes d'un type (C93) ;
   - `equality.rs` : `equals`.
 - Flux et `match` :
   - `flow.rs`, `narrowing.rs` : affectation définie et affinage ;
@@ -189,6 +190,7 @@ Toutes sont testées par des programmes golden.
   - énumérations ordonnées ou non ;
   - traits avec méthodes par défaut ;
   - variables de type (`T in Comparable`) ;
+  - traits génériques (`trait Container of T`, C93) ;
   - `equals` (C76).
 - **Erreurs** : `Error` est un trait. Aussi : `error(...)`, `try`, `e.message()`, les erreurs propres au programme, et des bugs avec trace d'appels.
 - **Modules** : `use`, `private`, globales initialisées au premier usage, cycles entre modules.
@@ -212,7 +214,6 @@ Chacun de ces cas donne une erreur « not implemented yet » ou un refus explici
 
 | Fonctionnalité | Réf. spec |
 | --- | --- |
-| Traits génériques (`trait Container of T`) | §15.1 |
 | Méthodes de List, Set et Map (`fun List.second()`) | §12.4, §15 |
 | Types comme valeurs (`let t = Int`) | §7.1 |
 | Fonctions standard comme valeurs (`let f = show`) | §11, §23 |
@@ -237,8 +238,8 @@ Chaque test golden est un fichier `tests/<suite>/*.lion` accompagné de son `.ex
 | `tests/lexer` | 4 | `lion debug tokens` |
 | `tests/parser` | 23 | `lion debug ast` |
 | `tests/typechecker` | 15 | `lion debug ir` |
-| `tests/errors` | 53 | `lion check` (erreurs de compilation) |
-| `tests/runtime` | 74 | `lion run` (sémantique, bugs, alertes) |
+| `tests/errors` | 54 | `lion check` (erreurs de compilation) |
+| `tests/runtime` | 75 | `lion run` (sémantique, bugs, alertes) |
 | `tests/integration` | 13 | `lion run` (programmes complets) |
 | `tests/programs` | 2 | `lion run` depuis leur dossier (programmes 27.1 et 27.2 de la spec) |
 | `tests/testing` | 3 | `lion test` |
@@ -308,8 +309,7 @@ Questions posées à l'auteur le 2026-09-27, en attente :
 Ce qui peut se faire sans nouvelle règle de langage :
 1. **Bibliothèque standard (§23, étape 3)** : `json` attend la réponse de l'auteur ; `net` vient après l'étape 3. `dates` pourra recevoir les heures et les fuseaux horaires (C89).
 2. **Génériques (§15.1)** :
-   - traits génériques (`trait Container of T`) ;
-   - méthodes de List, Set et Map (§12.4).
+   - méthodes de List, Set et Map (§12.4) : la spec ne dit pas comment une méthode nomme le type des éléments, question à poser à l'auteur.
 3. **Valeurs** : types comme valeurs (`let t = Int`, §7.1), fonctions standard comme valeurs (`let f = show`).
 4. **Parallélisme** :
    - une réserve de fils, plutôt qu'une création de fils par boucle parallèle ;
@@ -325,7 +325,7 @@ Ce qui peut se faire sans nouvelle règle de langage :
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C93**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C94**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README et des notes, puis un commit Conventional Commits. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

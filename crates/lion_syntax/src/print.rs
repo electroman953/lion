@@ -68,6 +68,9 @@ pub fn print_stmt(stmt: &Stmt) -> String {
         StmtKind::Struct(decl) => print_struct(decl),
         StmtKind::Trait(decl) => {
             let mut out = format!("(trait {}", decl.name.name);
+            for (name, set) in &decl.type_params {
+                out.push_str(&format!(" ({} in {})", name.name, print_type(set)));
+            }
             for method in &decl.methods {
                 out.push(' ');
                 out.push_str(&print_fun(method));

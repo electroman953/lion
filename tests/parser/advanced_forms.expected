@@ -1,0 +1,13 @@
+exit: 0
+----- stdout
+(fun square ((x)) = (* x x))
+(for i (.. 1 3) [(call show i)])
+(unsafe [])
+(let twice (fun fun ((x)) = (* x 2)))
+(let l (list 1 2 3))
+(let fast (compile (call f 1)))
+(let t (tuple "Léa" 12))
+(let w (try (call f)))
+(let ok 1)
+(trait Container (T in Type) (fun size () in Int required))
+----- stderr

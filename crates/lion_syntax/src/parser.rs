@@ -461,9 +461,7 @@ impl<'t> Parser<'t> {
         };
         let name = Ident { name: name.clone(), span };
         self.bump();
-        if self.at_keyword(Keyword::Of) {
-            return Err(self.not_implemented(self.span(), "generic traits", "§15.1"));
-        }
+        let type_params = if self.at_keyword(Keyword::Of) { self.struct_type_params()? } else { Vec::new() };
         if !self.eat(&TokenKind::Colon) {
             return Err(self.expected("`:` and the methods of the trait"));
         }
@@ -504,7 +502,10 @@ impl<'t> Parser<'t> {
             }
         }
         let end = self.close_block(opener)?;
-        Ok(Stmt { kind: StmtKind::Trait(TraitDecl { name, methods, fields }), span: start.to(end) })
+        Ok(Stmt {
+            kind: StmtKind::Trait(TraitDecl { name, type_params, methods, fields }),
+            span: start.to(end),
+        })
     }
 
     /// `fun name(params) signature`, then a default body or nothing (§26: `trait_line`).
@@ -1873,10 +1874,6 @@ impl<'t> Parser<'t> {
         let error = Diagnostic::error(format!("expected {what}, found {}", token.kind.describe()))
             .with_primary(token.span, "");
         self.error(error)
-    }
-
-    fn not_implemented(&mut self, span: Span, what: &str, section: &str) -> Reported {
-        self.error(Diagnostic::not_implemented(span, what, section))
     }
 
     fn error(&mut self, diagnostic: Diagnostic) -> Reported {

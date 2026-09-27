@@ -1,0 +1,43 @@
+// Generic traits (§15.1, D78, C93): each list of types makes a trait, and a type
+// satisfies the instance that its methods give.
+trait Container of T, T in Type:
+    fun get(i in Int) in T
+    fun size() in Int
+    fun first() in T:
+        return self.get(1)
+    ;
+;
+
+struct Numbers:
+    items in List of Int
+;
+fun Numbers.get(i in Int) in Int = self.items[i]
+fun Numbers.size() in Int = self.items.size
+
+struct Words:
+    items in List of Text
+;
+fun Words.get(i in Int) in Text = self.items[i]
+fun Words.size() in Int = self.items.size
+
+struct Evens:
+    count in Int
+;
+fun Evens.get(i in Int) in Int = 2 * i
+fun Evens.size() in Int = self.count
+
+fun total(c in Container of Int) in Int = sum([c.get(i), i in 1..c.size()])
+show(total(Numbers([1, 2, 3])))
+show(total(Evens(4)))
+let all = [Numbers([5]), Evens(2)] in List of Container of Int
+show([total(c), c in all])
+show(Numbers([7, 8]).first())
+show(Words(["a"]).first())
+show(Words(["a"]) in Container of Text)
+
+fun last(c in Container of T) in T, T in Type = c.get(c.size())
+show(last(Numbers([1, 2, 9])))
+show(last(Words(["x", "y"])))
+fun all_items(c in Container of T) in List of T, T in Type = [c.get(i), i in 1..c.size()]
+show(all_items(Evens(3)))
+show(all_items(all[1]))

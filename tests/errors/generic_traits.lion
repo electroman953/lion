@@ -1,0 +1,17 @@
+// The types of a generic trait (§15.1, C93).
+trait Container of T, T in Type:
+    fun get(i in Int) in T
+    fun size() in Int
+;
+trait Sorted of T, T in Comparable:
+    fun smallest() in T
+;
+struct Half:
+    n in Int
+;
+fun Half.get(i in Int) in Int = i
+let a = [1] in List of Container
+let b = [1] in List of Container of (Int, Text)
+let c = [1] in List of Sorted of Text
+fun last(c in Container of T) in T, T in Type = c.get(c.size())
+show(last(Half(3)))

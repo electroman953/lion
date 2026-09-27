@@ -1,0 +1,53 @@
+exit: 1
+----- stdout
+----- stderr
+error: `Container` takes 1 type parameter: `Container of T`
+   --> tests/errors/generic_traits.lion:13:24
+    |
+  2 | trait Container of T, T in Type:
+    |       --------- declared here
+   ...
+ 13 | let a = [1] in List of Container
+    |                        ^^^^^^^^^
+    |
+    = the types of a generic trait are given with `of` (§15.1)
+
+error: `Container` takes 1 type parameter: `Container of T`
+   --> tests/errors/generic_traits.lion:14:24
+    |
+  2 | trait Container of T, T in Type:
+    |       --------- declared here
+   ...
+ 14 | let b = [1] in List of Container of (Int, Text)
+    |                        ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = the types of a generic trait are given with `of` (§15.1)
+
+error: A Text is not Comparable
+   --> tests/errors/generic_traits.lion:15:24
+    |
+  6 | trait Sorted of T, T in Comparable:
+    |                 - `T` must be Comparable
+   ...
+ 15 | let c = [1] in List of Sorted of Text
+    |                        ^^^^^^^^^^^^^^
+    |
+    = each type parameter of a generic type belongs to its set of types (§15.1, §15.2)
+
+warning: `last` is never called, so it is not checked
+   --> tests/errors/generic_traits.lion:16:5
+    |
+ 16 | fun last(c in Container of T) in T, T in Type = c.get(c.size())
+    |     ^^^^
+    |
+    = a function with type variables is checked for the types of each call (§15.3)
+
+error: the parameter `c` is Container of T, which does not fit a Half
+   --> tests/errors/generic_traits.lion:17:6
+    |
+ 16 | fun last(c in Container of T) in T, T in Type = c.get(c.size())
+    |          - parameter declared here
+ 17 | show(last(Half(3)))
+    |      ^^^^
+
+4 errors found

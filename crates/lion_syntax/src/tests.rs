@@ -160,23 +160,24 @@ fn errors_recover_at_the_next_line() {
 
 #[test]
 fn recovery_skips_the_blocks_of_a_failed_statement() {
-    let text = "trait Box of T, T in Type:\n    fun size() in Int\n    fun f():\n        if a: x = 1 ;\n    ;\n;\nlet after = 2\n";
+    let text =
+        "trait box:\n    fun size() in Int\n    fun f():\n        if a: x = 1 ;\n    ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
-    assert_eq!(errors, ["not implemented yet: generic traits"]);
+    assert_eq!(errors.len(), 1, "{errors:?}");
     assert_eq!(tree, "(let after 2)\n");
-    let text = "trait Box of T, T in Type:\n    fun f():\n        if a:\n            b = 1\n        elif c:\n            d = 2\n        else:\n            e = 3\n        ;\n    ;\n;\nlet after = 2\n";
+    let text = "trait box:\n    fun f():\n        if a:\n            b = 1\n        elif c:\n            d = 2\n        else:\n            e = 3\n        ;\n    ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
-    assert_eq!(errors, ["not implemented yet: generic traits"]);
+    assert_eq!(errors.len(), 1, "{errors:?}");
     assert_eq!(tree, "(let after 2)\n");
 }
 
 #[test]
-fn unsupported_constructions_are_reported() {
-    let cases =
-        [("trait Box of T, T in Type:\n    fun size() in Int\n;", "not implemented yet: generic traits")];
-    for (text, message) in cases {
-        assert_eq!(first_error(text), message, "for {text:?}");
-    }
+fn generic_traits() {
+    // §15.1, D78: a trait takes type parameters as a structure does.
+    assert_eq!(
+        ast("trait Box of T, T in Type:\n    fun size() in Int\n;"),
+        "(trait Box (T in Type) (fun size () in Int required))"
+    );
 }
 
 #[test]

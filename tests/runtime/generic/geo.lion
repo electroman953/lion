@@ -8,3 +8,6 @@ struct Box of T, T in Comparable:
     item in T
 ;
 fun swap(p in Pair of (T, U)) in Pair of (U, T), T in Type, U in Type = Pair(p.second, p.first)
+trait Measured of U, U in Type:
+    fun measure() in U
+;

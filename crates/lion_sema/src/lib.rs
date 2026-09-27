@@ -21,6 +21,7 @@ mod ffi;
 mod flow;
 mod functions;
 mod generic_structs;
+mod generic_traits;
 mod matching;
 mod methods;
 mod modules;
@@ -265,6 +266,7 @@ struct Checker<'a> {
     structs: Vec<StructInfo<'a>>,
     /// The structures with type parameters, whose instances are in `structs` (§15.1).
     generic_structs: Vec<crate::generic_structs::GenericStruct<'a>>,
+    generic_traits: Vec<crate::generic_traits::GenericTrait<'a>>,
     /// The types given to generic structures before the members of the traits were
     /// known, checked afterwards.
     pending_constraints: Vec<crate::generic_structs::PendingConstraint>,
@@ -342,6 +344,7 @@ impl<'a> Checker<'a> {
             methods: HashMap::new(),
             structs: Vec::new(),
             generic_structs: Vec::new(),
+            generic_traits: Vec::new(),
             pending_constraints: Vec::new(),
             trait_members_known: false,
             signatures_started: false,

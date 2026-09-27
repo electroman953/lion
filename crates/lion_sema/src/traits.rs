@@ -18,19 +18,22 @@ pub(crate) struct TraitInfo<'a> {
     pub(crate) decl: &'a ast::TraitDecl,
     pub(crate) module: usize,
     pub(crate) id: TraitRef,
-    requirements: Vec<Requirement>,
+    /// For an instance of a generic trait: its type parameters and their types (C93).
+    pub(crate) type_args: Vec<(String, Type)>,
+    pub(crate) requirements: Vec<Requirement>,
     fields: Vec<(String, Type)>,
-    valid: bool,
+    pub(crate) valid: bool,
+    resolved: bool,
 }
 
-struct Requirement {
-    name: String,
+pub(crate) struct Requirement {
+    pub(crate) name: String,
     /// The types of the parameters after `self`.
-    params: Vec<Type>,
-    ret: Type,
-    var_self: bool,
+    pub(crate) params: Vec<Type>,
+    pub(crate) ret: Type,
+    pub(crate) var_self: bool,
     /// The body of a default method (§14.2).
-    default: Option<Rc<ast::FunDecl>>,
+    pub(crate) default: Option<Rc<ast::FunDecl>>,
     span: Span,
 }
 
@@ -40,22 +43,51 @@ impl<'a> Checker<'a> {
             return;
         }
         let name = &decl.name.name;
-        let id = TraitRef::new(&self.qualified(name));
         self.tables.type_spans.insert(name.clone(), decl.name.span);
+        if !decl.type_params.is_empty() {
+            self.register_generic_trait(decl);
+            return;
+        }
+        let id = TraitRef::new(&self.qualified(name));
         self.tables.named_types.insert(name.clone(), crate::enums::NamedType::Trait(self.traits.len()));
+        self.push_trait(decl, id, Vec::new());
+    }
+
+    /// A trait, or an instance of a generic one; returns its index.
+    pub(crate) fn push_trait(
+        &mut self,
+        decl: &'a ast::TraitDecl,
+        id: TraitRef,
+        type_args: Vec<(String, Type)>,
+    ) -> usize {
         self.traits.push(TraitInfo {
             decl,
             module: self.module,
             id,
+            type_args,
             requirements: Vec::new(),
             fields: Vec::new(),
             valid: true,
+            resolved: false,
         });
+        self.traits.len() - 1
     }
 
     /// The types of the methods and of the fields that each trait requires.
     pub(crate) fn resolve_traits(&mut self) {
         for index in 0..self.traits.len() {
+            if !self.traits[index].resolved {
+                self.resolve_trait(index);
+            }
+        }
+    }
+
+    /// The types of the methods and of the fields that the trait `index` requires; in an
+    /// instance of a generic trait, its type parameters are its types (C93).
+    pub(crate) fn resolve_trait(&mut self, index: usize) {
+        self.traits[index].resolved = true;
+        let saved_vars = std::mem::replace(&mut self.type_vars, self.traits[index].type_args.clone());
+        {
             let previous = self.enter_module(self.traits[index].module);
             let decl = self.traits[index].decl;
             let mut requirements = Vec::new();
@@ -120,6 +152,7 @@ impl<'a> Checker<'a> {
             info.valid = valid;
             self.enter_module(previous);
         }
+        self.type_vars = saved_vars;
     }
 
     /// Which types satisfy each trait, and the default methods they receive (§14.1, §14.2).
@@ -129,6 +162,10 @@ impl<'a> Checker<'a> {
             vec![Type::Int, Type::Float, Type::Rational, Type::Bool, Type::Text, Type::None, Type::Error];
         candidates.extend(self.structs.iter().map(|info| Type::Struct(info.id)));
         candidates.extend(self.enums.iter().map(|&enumeration| Type::Enum(enumeration)));
+        // A type satisfies a generic trait for the types its methods give (C93).
+        for &candidate in &candidates {
+            self.instantiate_traits_for(candidate);
+        }
         // `Comparable`: the numbers, the ordered enumerations and the types with `less` (C67).
         let comparable: Vec<Type> = candidates.iter().copied().filter(|&ty| self.is_comparable(ty)).collect();
         self.comparable.set_members(comparable);
@@ -156,10 +193,15 @@ impl<'a> Checker<'a> {
     /// A structure made once the traits are known, as an instance of a generic structure
     /// first met in a body: it joins the traits that it satisfies (C67, C90).
     pub(crate) fn conform_late(&mut self, ty: Type) {
+        // The instances of generic traits made now find their members themselves.
+        let known = self.traits.len();
+        self.instantiate_traits_for(ty);
         let join = |set: TraitRef| {
             let mut members = set.members();
-            members.push(ty);
-            set.set_members(members);
+            if !members.contains(&ty) {
+                members.push(ty);
+                set.set_members(members);
+            }
         };
         if self.is_comparable(ty) {
             join(self.comparable);
@@ -170,7 +212,7 @@ impl<'a> Checker<'a> {
         let mut joined = self.is_comparable(ty) || self.is_error(ty);
         let mut given = HashMap::new();
         let mut reported = std::collections::HashSet::new();
-        for index in 0..self.traits.len() {
+        for index in 0..known {
             if self.traits[index].valid && self.satisfies(index, ty) {
                 join(self.traits[index].id);
                 self.give_defaults(index, ty, &mut given, &mut reported);
@@ -179,6 +221,25 @@ impl<'a> Checker<'a> {
         }
         if joined {
             self.late_instances.push(ty);
+        }
+    }
+
+    /// An instance of a generic trait made once the traits are known: its members are
+    /// the types that satisfy it now (C93).
+    pub(crate) fn conform_trait_late(&mut self, index: usize) {
+        if !self.traits[index].valid {
+            return;
+        }
+        let mut candidates =
+            vec![Type::Int, Type::Float, Type::Rational, Type::Bool, Type::Text, Type::None, Type::Error];
+        candidates.extend(self.structs.iter().map(|info| Type::Struct(info.id)));
+        candidates.extend(self.enums.iter().map(|&enumeration| Type::Enum(enumeration)));
+        let members: Vec<Type> = candidates.into_iter().filter(|&ty| self.satisfies(index, ty)).collect();
+        self.traits[index].id.set_members(members.clone());
+        let mut given = HashMap::new();
+        let mut reported = std::collections::HashSet::new();
+        for member in members {
+            self.give_defaults(index, member, &mut given, &mut reported);
         }
     }
 
@@ -205,7 +266,7 @@ impl<'a> Checker<'a> {
 
     /// Gives `member` the default methods of the trait `index` that it does not have
     /// (§14.2); two traits that give it the same one are an error.
-    fn give_defaults(
+    pub(crate) fn give_defaults(
         &mut self,
         index: usize,
         member: Type,
@@ -241,13 +302,14 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             }
-            let function = self.register_default_method(decl, member, self.traits[index].module);
+            let (module, type_args) = (self.traits[index].module, self.traits[index].type_args.clone());
+            let function = self.register_default_method(decl, member, module, type_args);
             given.insert((member, name), function);
         }
     }
 
     /// Whether `ty` has every method and field that the trait requires (§14.1).
-    fn satisfies(&self, index: usize, ty: Type) -> bool {
+    pub(crate) fn satisfies(&self, index: usize, ty: Type) -> bool {
         let info = &self.traits[index];
         let fields_ok = info.fields.iter().all(|(name, field_ty)| match ty {
             Type::Struct(structure) => self.structs[self.struct_index(structure)]

@@ -368,6 +368,7 @@ impl<'a> Checker<'a> {
         decl: Rc<ast::FunDecl>,
         receiver: Type,
         module: usize,
+        type_args: Vec<(String, Type)>,
     ) -> usize {
         let index = self.functions.len();
         let name = decl.name.name.clone();
@@ -378,7 +379,7 @@ impl<'a> Checker<'a> {
             prefix: String::new(),
             receiver: Some(receiver),
             own_method: false,
-            struct_args: Vec::new(),
+            struct_args: type_args,
             implicit_self: false,
             var_self: false,
             native: None,
@@ -1356,7 +1357,7 @@ impl<'a> Checker<'a> {
         let params = self.functions[function].signature.clone().unwrap_or_default();
         for (param, &actual) in params.iter().zip(arg_types) {
             let Some(pattern) = param.ty.filter(|ty| ty.has_vars()) else { continue };
-            if !pattern.unify(actual, &mut bindings) {
+            if !self.unify_param(pattern, actual, &mut bindings, call) {
                 let mut error = Diagnostic::error(format!(
                     "the parameter `{}` is {}, which does not fit {}",
                     param.name,

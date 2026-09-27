@@ -84,6 +84,9 @@ pub enum StmtKind {
 #[derive(Clone, Debug)]
 pub struct TraitDecl {
     pub name: Ident,
+    /// `trait Container of T, T in Type`: the type parameters, each with the set of
+    /// types it takes (§15.1, D78).
+    pub type_params: Vec<(Ident, TypeExpr)>,
     /// Without a body, a method is required; with one, it is a default (§14.2).
     pub methods: Vec<FunDecl>,
     /// Required fields, such as `name in Text` (§14.1).

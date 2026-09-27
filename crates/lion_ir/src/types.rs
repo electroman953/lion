@@ -295,11 +295,13 @@ impl StructRef {
     }
 }
 
-/// A generic structure written with type variables (§15.1): the generic structure, as
-/// numbered by the checker, its name, and the types given to it.
+/// A generic structure or trait written with type variables (§15.1): the generic
+/// structure or trait, as numbered by the checker, its name, and the types given to it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AppliedData {
     pub template: u32,
+    /// A generic trait, as `Container of T`, rather than a generic structure.
+    pub is_trait: bool,
     pub name: String,
     pub args: Vec<Type>,
 }
@@ -433,6 +435,29 @@ impl Type {
         }
     }
 
+    /// Whether the type mentions a generic trait written with type variables, as
+    /// `Container of T` (§15.1).
+    pub fn has_trait_pattern(self) -> bool {
+        match self {
+            Type::List(inner) | Type::Set(inner) | Type::Task(inner) | Type::Domain(inner) => {
+                inner.get().has_trait_pattern()
+            }
+            Type::Tuple(tuple) | Type::Map(tuple) => {
+                tuple.elements().into_iter().any(Type::has_trait_pattern)
+            }
+            Type::Union(union) => union.members().into_iter().any(Type::has_trait_pattern),
+            Type::Fun(function) => {
+                let data = function.get();
+                data.ret.has_trait_pattern() || data.params.into_iter().any(Type::has_trait_pattern)
+            }
+            Type::Applied(applied) => {
+                let data = applied.get();
+                data.is_trait || data.args.into_iter().any(Type::has_trait_pattern)
+            }
+            _ => false,
+        }
+    }
+
     /// The type with its variables replaced.
     pub fn substitute(self, bindings: &HashMap<VarRef, Type>) -> Type {
         match self {
@@ -525,7 +550,7 @@ impl Type {
                     && pattern.ret.unify(actual.ret, bindings)
             }
             // `Pair of (T, U)` and the instance `Pair of (Int, Text)` (§15.1).
-            (Type::Applied(pattern), Type::Struct(actual)) => {
+            (Type::Applied(pattern), Type::Struct(actual)) if !pattern.get().is_trait => {
                 let pattern = pattern.get();
                 match actual.origin() {
                     Some((template, args))
@@ -570,6 +595,21 @@ impl TraitRef {
     /// Once every method is known: the types that satisfy the trait.
     pub fn set_members(self, members: Vec<Type>) {
         interner().lock().expect("the type interner is never poisoned").traits[self.0 as usize].1 = members;
+    }
+
+    /// Records that the trait is the instance of the generic trait `template` for the
+    /// types `args` (§15.1).
+    pub fn set_origin(self, template: u32, args: Vec<Type>) {
+        interner()
+            .lock()
+            .expect("the type interner is never poisoned")
+            .trait_origins
+            .insert(self.0, (template, args));
+    }
+
+    /// For an instance of a generic trait: the generic trait and its types.
+    pub fn origin(self) -> Option<(u32, Vec<Type>)> {
+        interner().lock().expect("the type interner is never poisoned").trait_origins.get(&self.0).cloned()
     }
 }
 
@@ -692,6 +732,8 @@ struct Interner {
     vars: Vec<String>,
     /// The instances of generic structures: their generic structure and types (§15.3).
     struct_origins: HashMap<u32, (u32, Vec<Type>)>,
+    /// The instances of generic traits: their generic trait and types (§15.1).
+    trait_origins: HashMap<u32, (u32, Vec<Type>)>,
     applied: Vec<AppliedData>,
     applied_ids: HashMap<AppliedData, u32>,
 }
@@ -744,6 +786,7 @@ mod tests {
         let (t, u) = (VarRef::new("T"), VarRef::new("U"));
         let pattern = Type::Applied(AppliedRef::new(AppliedData {
             template: 7,
+            is_trait: false,
             name: "Pair".to_string(),
             args: vec![Type::Var(t), Type::Var(u)],
         }));

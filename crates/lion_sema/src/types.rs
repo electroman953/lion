@@ -63,6 +63,9 @@ impl Checker<'_> {
                 if let Some(&template) = self.table_of(found).generic_structs.get(&name.name) {
                     return self.generic_struct_type(template, args, ty.span);
                 }
+                if let Some(&template) = self.table_of(found).generic_traits.get(&name.name) {
+                    return self.generic_trait_type(template, args, ty.span);
+                }
                 if !args.is_empty() {
                     self.diagnostics.push(
                         Diagnostic::error(format!("`{}` does not take type parameters", name.name))
@@ -145,6 +148,9 @@ impl Checker<'_> {
         }
         if let Some(&template) = self.tables.generic_structs.get(&name.name) {
             return self.generic_struct_type(template, args, ty.span);
+        }
+        if let Some(&template) = self.tables.generic_traits.get(&name.name) {
+            return self.generic_trait_type(template, args, ty.span);
         }
         if let Some(&index) = self.tables.struct_names.get(&name.name) {
             if !args.is_empty() {
