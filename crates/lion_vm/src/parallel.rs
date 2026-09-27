@@ -116,19 +116,23 @@ pub fn run_chunks<R: Send>(
             *results[chunk].lock().unwrap_or_else(PoisonError::into_inner) = Some(result);
         }
     };
-    std::thread::scope(|scope| {
-        let mut started = 0;
-        for _ in 0..threads.min(count) {
-            let spawned = stack_sizes.iter().any(|&size| {
-                std::thread::Builder::new().stack_size(size).spawn_scoped(scope, worker).is_ok()
-            });
-            started += usize::from(spawned);
-        }
-        // Without a thread, the turns still run, on this one.
-        if started == 0 {
-            worker();
-        }
-    });
+    // The threads of the pool, and this one, run the chunks; when another loop uses the
+    // pool, as one in a task that runs apart, the chunks get threads of their own.
+    if !pool::run(threads.min(count), stack_sizes, worker) {
+        std::thread::scope(|scope| {
+            let mut started = 0;
+            for _ in 0..threads.min(count) {
+                let spawned = stack_sizes.iter().any(|&size| {
+                    std::thread::Builder::new().stack_size(size).spawn_scoped(scope, worker).is_ok()
+                });
+                started += usize::from(spawned);
+            }
+            // Without a thread, the turns still run, on this one.
+            if started == 0 {
+                worker();
+            }
+        });
+    }
     let mut ordered = Vec::new();
     for slot in results {
         let Some(result) = slot.into_inner().unwrap_or_else(PoisonError::into_inner) else { break };
@@ -139,6 +143,128 @@ pub fn run_chunks<R: Send>(
         }
     }
     ordered
+}
+
+/// The threads that run the chunks of parallel loops, made once for the program: making
+/// threads for each loop costs much more than the turns of a small loop.
+mod pool {
+    use std::any::Any;
+    use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+    use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
+
+    /// A job, as its workers see it. The loop that gives it waits until every worker is
+    /// done with it, so that it may borrow the data of the loop (see `run`).
+    #[derive(Clone, Copy)]
+    struct Job(*const (dyn Fn() + Sync + 'static));
+
+    // SAFETY: the function is `Sync`, and it is called only while the loop that gave it
+    // waits for the workers (see `run`).
+    unsafe impl Send for Job {}
+
+    #[derive(Default)]
+    struct State {
+        job: Option<Job>,
+        /// Counts the jobs, so that a worker takes each job once.
+        generation: u64,
+        /// The workers that have not finished the current job yet.
+        pending: usize,
+        workers: usize,
+        panic: Option<Box<dyn Any + Send>>,
+    }
+
+    struct Pool {
+        state: Mutex<State>,
+        /// A job is given.
+        start: Condvar,
+        /// Every worker finished the job.
+        end: Condvar,
+        /// One loop at a time gives jobs.
+        busy: Mutex<()>,
+    }
+
+    fn pool() -> &'static Pool {
+        static POOL: OnceLock<Pool> = OnceLock::new();
+        POOL.get_or_init(|| Pool {
+            state: Mutex::new(State::default()),
+            start: Condvar::new(),
+            end: Condvar::new(),
+            busy: Mutex::new(()),
+        })
+    }
+
+    fn lock(pool: &Pool) -> MutexGuard<'_, State> {
+        pool.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn work(pool: &'static Pool) {
+        let mut seen = 0;
+        loop {
+            let job = {
+                let mut state = lock(pool);
+                while state.generation == seen || state.job.is_none() {
+                    state = pool.start.wait(state).unwrap_or_else(PoisonError::into_inner);
+                }
+                seen = state.generation;
+                state.job.expect("checked above")
+            };
+            // SAFETY: the loop that gave the job waits until `pending` is 0 before it
+            // returns, so the function is alive.
+            let result = catch_unwind(AssertUnwindSafe(|| unsafe { (*job.0)() }));
+            let mut state = lock(pool);
+            if let Err(payload) = result {
+                state.panic.get_or_insert(payload);
+            }
+            state.pending -= 1;
+            if state.pending == 0 {
+                pool.end.notify_all();
+            }
+        }
+    }
+
+    /// Runs `job` on `helpers - 1` threads of the pool and on this one, and returns once
+    /// all are done; false, without running it, when another loop uses the pool.
+    pub fn run(helpers: usize, stack_sizes: &[usize], job: &(dyn Fn() + Sync)) -> bool {
+        let pool = pool();
+        let Ok(_busy) = pool.busy.try_lock() else { return false };
+        let wanted = helpers.saturating_sub(1);
+        let workers = {
+            let mut state = lock(pool);
+            while state.workers < wanted {
+                let started = stack_sizes.iter().any(|&size| {
+                    std::thread::Builder::new().stack_size(size).spawn(move || work(pool)).is_ok()
+                });
+                if !started {
+                    break;
+                }
+                state.workers += 1;
+            }
+            // SAFETY: only the lifetime is erased; the function outlives its use, since
+            // this function waits below until every worker is done with it.
+            let erased: *const (dyn Fn() + Sync + 'static) = unsafe { std::mem::transmute(job) };
+            state.job = Some(Job(erased));
+            state.generation += 1;
+            state.pending = state.workers;
+            state.workers
+        };
+        if workers > 0 {
+            pool.start.notify_all();
+        }
+        let own = catch_unwind(AssertUnwindSafe(job));
+        let mut state = lock(pool);
+        while state.pending > 0 {
+            state = pool.end.wait(state).unwrap_or_else(PoisonError::into_inner);
+        }
+        state.job = None;
+        let panic = state.panic.take();
+        drop(state);
+        if let Err(payload) = own {
+            resume_unwind(payload);
+        }
+        if let Some(payload) = panic {
+            resume_unwind(payload);
+        }
+        true
+    }
 }
 
 #[cfg(test)]
@@ -170,6 +296,28 @@ mod tests {
         let threads = run_chunks(8, 4, &[1 << 20], &work, &|_| false);
         let distinct: std::collections::HashSet<_> = threads.into_iter().collect();
         assert!(distinct.len() > 1, "the chunks ran on one thread");
+    }
+
+    #[test]
+    fn many_loops_reuse_the_threads() {
+        for round in 0..200 {
+            let chunks = run_chunks(64, 4, &[1 << 20], &|range| range.len(), &|_| false);
+            assert_eq!(chunks.iter().sum::<usize>(), 64, "round {round}");
+        }
+    }
+
+    #[test]
+    fn a_panic_in_a_chunk_reaches_the_loop() {
+        let work = |range: Range<usize>| {
+            if range.contains(&7) {
+                panic!("chunk of 7");
+            }
+            range.len()
+        };
+        let caught = std::panic::catch_unwind(|| run_chunks(32, 4, &[1 << 20], &work, &|_| false));
+        assert!(caught.is_err());
+        // The pool still works.
+        assert_eq!(run_chunks(8, 4, &[1 << 20], &|range| range.len(), &|_| false).iter().sum::<usize>(), 8);
     }
 
     #[test]

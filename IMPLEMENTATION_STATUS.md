@@ -14,7 +14,7 @@ Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélism
 | `cargo build` | OK |
 | `cargo clippy --all-targets` | 0 avertissement |
 | `cargo fmt --check` | OK |
-| `cargo test` (tout le workspace) | OK : 154 tests unitaires, 200 programmes golden, et les 97 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
+| `cargo test` (tout le workspace) | OK : 156 tests unitaires, 200 programmes golden, et les 97 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
 | Programmes du §27 de la spec | Les trois tournent sans modification, dans les deux modes : 27.1 (CSV, structures), 27.2 (hasard, parallèle, ensembles) et 27.3 (application graphique, `tests/programs/notes_app`, sans écran avec un fichier d'événements) ; Sur 12 cœurs, 27.2 prend 0,67 s interprété (`--release`) et 0,19 s compilé ; avec `LION_THREADS=1`, 3,2 s et 0,65 s. |
 
 L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié en privé sur GitHub : <https://github.com/electroman953/lion> (remote `origin`).
@@ -116,7 +116,7 @@ Principes :
 - `compile.rs` : IR vers bytecode.
 - `bytecode.rs` : les instructions typées.
 - `machine.rs` : l'exécution, les pièges (`Trap`), `run`, `run_test`, `run_from` (le mode interactif) et `invoke`. On y trouve aussi les boucles parallèles (`parallel`, `turns`, les machines des fils `Job`), les tâches (`task`, `wait`, `finish_tasks`, `TaskJob`), et la sortie enregistrée puis rejouée dans l'ordre (`Recorder`, `replay`).
-- `parallel.rs` : l'ordonnanceur commun aux deux modes (`threads`, `run_chunks`, `turn_count`, `turn_value`, `spawn_task`).
+- `parallel.rs` : l'ordonnanceur commun aux deux modes (`threads`, `run_chunks`, `turn_count`, `turn_value`, `spawn_task`), avec la réserve de fils des boucles parallèles (`pool`).
 - Valeurs :
   - `value.rs` : `Value`, qui est `Arc` et copie à l'écriture (`make_mut`) ; `TaskCell`, l'état d'une tâche ;
   - `set.rs`, `map.rs` : index par hachage ;
@@ -258,7 +258,7 @@ Le mode compilé a ses propres tests (`cargo test --test native`, `crates/lion_c
 
 Ces tests demandent cargo, qu'ils trouvent dans la variable `CARGO` posée par `cargo test`. Un programme ajouté à `tests/runtime` est donc testé dans les deux modes.
 
-Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (20), `lion_vm` (13), `lion_codegen` (12), `lion_native` (5), `lion_diagnostics` (4) et `lion_ir` (3), `lion_ui` (5) et `lion_cli` (1).
+Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (20), `lion_vm` (15), `lion_codegen` (12), `lion_native` (5), `lion_diagnostics` (4) et `lion_ir` (3), `lion_ui` (5) et `lion_cli` (1).
 
 Les tests golden tournent avec autant de fils que de cœurs ; `LION_THREADS=1` les fait tourner sur un seul, avec la même sortie.
 
@@ -283,7 +283,6 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
   - une tâche qui lit une globale `var`, une cellule ou un `synced`, ou qui est créée dans une partie parallèle ou une autre tâche, est calculée à sa création (C71, C85) ;
   - un bug dans une tâche à part n'arrête le programme qu'à son `wait`, ou à la fin du script (C85) ;
   - les tours qui touchent un `shared synced` ou lisent le clavier s'exécutent dans l'ordre, sans gain de vitesse (C84) ;
-  - les fils sont créés pour chaque boucle parallèle, sans réserve de fils : une boucle parallèle dans une boucle très répétée paie ce coût à chaque tour ;
   - une tranche commencée va jusqu'au bout, même si un tour d'une tranche précédente a quitté la boucle (C83).
 - FFI :
   - seulement sur Unix x86-64 et AArch64, sans fonction variadique ;
@@ -318,7 +317,6 @@ Ce qui peut se faire sans nouvelle règle de langage :
 1. **Bibliothèque standard (§23, étape 3)** : `net` vient après l'étape 3 ; l'écriture de `json` reste à faire (C100). `dates` pourra recevoir les heures et les fuseaux horaires (C89).
 2. **Génériques (§15.1)** : complets, avec les méthodes de List, Set et Map (C90–C93, C97).
 3. **Parallélisme** :
-   - une réserve de fils, plutôt qu'une création de fils par boucle parallèle ;
    - un verrou plus fin pour `shared synced` (C84).
 4. **Outils** : le débogueur pas à pas du §24.2 (D25).
 5. **VS Code et LSP**, à préparer dans l'architecture :
