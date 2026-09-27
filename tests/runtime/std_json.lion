@@ -1,0 +1,33 @@
+// The module `json` (§23, D37, C96): a list of objects is read as rows.
+use json
+
+match json.read("tests/runtime/data/students.json"):
+    in Error e: show("error: {e.message()}") ;
+    in List of json.Row rows:
+        for r in rows:
+            show("{r.get("name")} {r.get("grade")} {r.get("comment")}")
+        ;
+        show(rows[3].get("tags"))
+        show(rows[1].get("age"))
+    ;
+;
+fun first_value(content in Text, name in Text) in Text or Error:
+    let rows = try json.parse(content)
+    return try rows[1].get(name)
+;
+show(first_value("[\{\"ok\": true, \"n\": -1.5e2\}]", "n"))
+show(first_value("[\{\"ok\": true\}]", "ok"))
+show(json.parse("\{\"a\": 1\}"))
+show(json.parse("[1, 2]"))
+show(json.parse("[\{\"a\": 1\},]"))
+show(json.read("tests/runtime/data/missing.json"))
+
+fun average(path in Text) in Float or Error:
+    let rows = try json.read(path)
+    var total = 0.0
+    for r in rows:
+        total += try r.get("grade") as Float
+    ;
+    return total / rows.size
+;
+show(average("tests/runtime/data/students.json"))

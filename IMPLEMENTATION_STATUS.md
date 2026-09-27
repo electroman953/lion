@@ -3,7 +3,7 @@
 Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélisme sur plusieurs cœurs (étape 6), les modules `sets`, `time` et `dates`, les structures et traits génériques complets (§15.1), et la proposition de la bibliothèque `ui` (étape 7). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C95) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C96) ;
 - [`docs/design/ui.md`](docs/design/ui.md) : la proposition de la bibliothèque `ui`, en attente des réponses de l'auteur ;
 - [`README.md`](README.md) : la présentation et l'usage.
 
@@ -24,7 +24,7 @@ L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié
 | Étape | État |
 | --- | --- |
 | 1–2. Frontend complet et mode interprété | **Atteinte** |
-| 3. Bibliothèque standard | **Atteinte** pour `files`, `text`, `math`, `random`, `csv`, `sets`, `time`, `dates` et le noyau. Manquent `json` (question posée à l'auteur) et `net` |
+| 3. Bibliothèque standard | **Atteinte** pour `files`, `text`, `math`, `random`, `csv`, `json`, `sets`, `time`, `dates` et le noyau. Manque `net` |
 | 4. Outillage | **Atteinte** : `lion test`, `lion fmt`, mode interactif |
 | 5. Compilateur natif `lion build` | **Atteinte** : les deux modes donnent les mêmes résultats sur tous les programmes de test (C81, C82) |
 | 6. Parallélisme et tâches | **Atteinte** : les parties parallèles utilisent tous les cœurs, dans les deux modes, avec le résultat du calcul séquentiel (C83, C84) ; les tâches tournent sur leur propre fil quand rien de ce qu'elles lisent ne peut changer (C85) |
@@ -144,9 +144,9 @@ Principes :
 - `Rt::task`, `Rt::wait` : les tâches à part (C85).
 - Aides : `enter` et `leave` autour de chaque appel, `called_from` pour la trace, et des conversions (`int`, `text`, `field`…).
 
-**`lion_runtime`** : `ops.rs` (arithmétique vérifiée, rationnels, conversions), `bug.rs` (les `BugKind` et leurs messages), `format.rs` (affichage des Float et des rationnels), `stdlib.rs`.
+**`lion_runtime`** : `ops.rs` (arithmétique vérifiée, rationnels, conversions), `bug.rs` (les `BugKind` et leurs messages), `format.rs` (affichage des Float et des rationnels), `json.rs` (lecture stricte du JSON, réutilisable pour un LSP), `stdlib.rs`.
 
-**`lion_std/std/*.lion`** : `csv`, `dates`, `files`, `math`, `random`, `sets`, `text`, `time`.
+**`lion_std/std/*.lion`** : `csv`, `dates`, `files`, `json`, `math`, `random`, `sets`, `text`, `time`.
 
 **`lion_cli`** :
 - `main.rs` : les commandes ;
@@ -218,7 +218,7 @@ Chacun de ces cas donne une erreur « not implemented yet » ou un refus explici
 | Méthodes de List, Set et Map (`fun List.second()`) | §12.4, §15 |
 | Types comme valeurs (`let t = Int`) | §7.1 |
 | Lire un élément de n-uplet : la spec ne dit pas comment (C53) | §16 |
-| Modules `json`, `net`, `ui` de la bibliothèque standard | §23 |
+| Modules `net`, `ui` de la bibliothèque standard | §23 |
 | Heures d'une journée, fuseaux horaires, ajout de mois dans `dates` | C89 |
 | Écriture littérale d'une Map, que la spec laisse ouverte (§29) | C79 |
 
@@ -306,7 +306,7 @@ Questions posées à l'auteur le 2026-09-27, en attente :
 - une méthode `s.remove(x)` pour les Sets, sur le modèle de `m.remove(k)` (C79, C86).
 
 Ce qui peut se faire sans nouvelle règle de langage :
-1. **Bibliothèque standard (§23, étape 3)** : `json` attend la réponse de l'auteur ; `net` vient après l'étape 3. `dates` pourra recevoir les heures et les fuseaux horaires (C89).
+1. **Bibliothèque standard (§23, étape 3)** : `net` vient après l'étape 3 ; l'écriture de `csv` et `json` reste à faire. `dates` pourra recevoir les heures et les fuseaux horaires (C89).
 2. **Génériques (§15.1)** :
    - méthodes de List, Set et Map (§12.4) : la spec ne dit pas comment une méthode nomme le type des éléments, question à poser à l'auteur.
 3. **Valeurs** : types comme valeurs (`let t = Int`, §7.1) : la spec ne dit pas ce qu'on peut en faire, question à poser à l'auteur.
@@ -324,7 +324,7 @@ Ce qui peut se faire sans nouvelle règle de langage :
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C96**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C97**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README et des notes, puis un commit Conventional Commits. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

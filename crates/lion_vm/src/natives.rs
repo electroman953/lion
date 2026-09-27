@@ -106,6 +106,20 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             Ok(rows) => Value::List(Arc::new(rows.into_iter().map(texts).collect())),
             Err(message) => error(message),
         },
+        Native::JsonRows => match lion_runtime::json::rows(text(0)) {
+            Ok(rows) => Value::List(Arc::new(
+                rows.into_iter()
+                    .map(|row| {
+                        Value::List(Arc::new(vec![
+                            texts(row.columns),
+                            texts(row.values),
+                            texts(row.problems),
+                        ]))
+                    })
+                    .collect(),
+            )),
+            Err(message) => error(message),
+        },
         Native::TimeNow => Value::Float(unix_seconds()),
         Native::TimeClock => {
             static ORIGIN: OnceLock<Instant> = OnceLock::new();

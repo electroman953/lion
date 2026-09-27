@@ -1,0 +1,5 @@
+[
+    {"name": "Léa", "grade": 14, "comment": "très bien"},
+    {"name": "Tom", "grade": 8.5, "comment": null},
+    {"name": "Ana", "grade": 17, "tags": ["math"], "comment": "\"parfait\""}
+]

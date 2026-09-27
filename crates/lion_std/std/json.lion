@@ -1,0 +1,39 @@
+// JSON files (§23): a list of objects is read as rows, and `r.get("name")` gives the
+// value of a member as a Text, or an Error (D37). Numbers keep the text written, which
+// `as Int` or `as Float` converts.
+
+use files
+
+struct Row:
+    private columns in List of Text
+    private values in List of Text
+    // Empty when the value is a text, a number or a Bool; otherwise, why it is not read.
+    private problems in List of Text
+;
+
+// The rows of a JSON text that is a list of objects: the names, the values and the
+// problems of each one.
+private foreign "lion" fun rows(content in Text) in List of List of List of Text or Error
+
+// The objects of the JSON text, which must be a list of objects.
+fun parse(content in Text) in List of Row or Error:
+    let table = try rows(content)
+    return [Row(row[1], row[2], row[3]), row in table]
+;
+
+// The objects of the JSON file, which must hold a list of objects.
+fun read(path in Text) in List of Row or Error:
+    let content = try files.read(path)
+    return parse(content)
+;
+
+// The value of the member `name` of the object.
+fun Row.get(name in Text) in Text or Error:
+    for i in 1..self.columns.size:
+        if self.columns[i] == name:
+            if self.problems[i] != "": return error(self.problems[i]) ;
+            return self.values[i]
+        ;
+    ;
+    return error("there is no member `{name}`")
+;

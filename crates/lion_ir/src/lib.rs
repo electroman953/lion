@@ -583,6 +583,7 @@ pub enum Native {
     TimeSleep,
     DatesLocalDay,
     DatesBeyond,
+    JsonRows,
 }
 
 impl Builtin {
@@ -649,6 +650,7 @@ impl Native {
         ("time", "sleep", Native::TimeSleep),
         ("dates", "local_day", Native::DatesLocalDay),
         ("dates", "beyond", Native::DatesBeyond),
+        ("json", "rows", Native::JsonRows),
     ];
 
     /// The function `name` of the standard module `module`.

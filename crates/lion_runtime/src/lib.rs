@@ -6,6 +6,7 @@
 
 pub mod bug;
 pub mod format;
+pub mod json;
 pub mod ops;
 pub mod stdlib;
 

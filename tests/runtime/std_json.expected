@@ -1,0 +1,15 @@
+exit: 0
+----- stdout
+Léa 14 très bien
+Tom 8.5 error("the value of `comment` is null, not a text")
+Ana 17 "parfait"
+error("the value of `tags` is a list, not a text")
+error("there is no member `age`")
+-1.5e2
+true
+error("the JSON text is not a list of objects")
+error("the element 1 of the JSON list is a number, not an object")
+error("invalid JSON at line 1, column 11: expected a value")
+error("cannot read `tests/runtime/data/missing.json`: the file does not exist")
+13.166666666666666
+----- stderr
