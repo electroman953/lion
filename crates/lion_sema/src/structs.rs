@@ -834,6 +834,19 @@ impl<'a> Checker<'a> {
                 let elements = elements.iter().map(|value| self.const_expr(value, element, span)).collect();
                 (ir::ExprKind::Set(elements), set)
             }
+            Const::Map(entries) => {
+                let map = ty
+                    .members()
+                    .into_iter()
+                    .find(|member| matches!(member, Type::Map(_)))
+                    .expect("a map goes where a map is expected");
+                let (key, value) = map.map_parts().expect("a map has keys and values");
+                let entries = entries
+                    .iter()
+                    .map(|(k, v)| (self.const_expr(k, key, span), self.const_expr(v, value, span)))
+                    .collect();
+                (ir::ExprKind::Map(entries), map)
+            }
             Const::Tuple(elements) => {
                 let tuple = ty
                     .members()

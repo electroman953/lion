@@ -19,7 +19,7 @@ const SUPPORTED: &[(&str, Type)] = &[
 ];
 
 /// Types of the spec that this version does not support yet, with their section.
-const PLANNED: &[(&str, &str, &str)] = &[("Map", "collections", "§16"), ("Type", "the type `Type`", "§15")];
+const PLANNED: &[(&str, &str, &str)] = &[("Type", "the type `Type`", "§15")];
 
 /// Whether `name` is a type of Lion, which a structure cannot be named after.
 pub(crate) fn is_standard_type(name: &str) -> bool {
@@ -27,6 +27,7 @@ pub(crate) fn is_standard_type(name: &str) -> bool {
     name == "List"
         || name == "Set"
         || name == "Domain"
+        || name == "Map"
         || name == "Task"
         || name == "Comparable"
         || name == "Type"
@@ -100,6 +101,21 @@ impl Checker<'_> {
         if name.name == "Error" && args.is_empty() {
             return Some(Type::Trait(self.error_trait));
         }
+        // `Map of (Text, Int)`: the type of the keys, then the type of the values (C79).
+        if name.name == "Map" {
+            let [key, value] = args else {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "`Map` takes the types of its keys and of its values: `Map of (Text, Int)`",
+                    )
+                    .with_primary(ty.span, "")
+                    .with_note("`of` gives the type parameters of a generic type (§15.1)"),
+                );
+                return None;
+            };
+            let (key, value) = (self.resolve_type(key), self.resolve_type(value));
+            return Some(Type::map(key?, value?));
+        }
         if matches!(name.name.as_str(), "List" | "Set" | "Domain" | "Task") {
             let [element] = args else {
                 self.diagnostics.push(
@@ -152,7 +168,7 @@ impl Checker<'_> {
                 .iter()
                 .map(|(known, _)| *known)
                 .chain(PLANNED.iter().map(|(p, ..)| *p))
-                .chain(["List", "Set", "Domain"])
+                .chain(["List", "Set", "Domain", "Map"])
                 .chain(self.tables.type_spans.keys().map(String::as_str));
             let mut error = Diagnostic::error(format!("cannot find the type `{}`", name.name))
                 .with_primary(name.span, "unknown type");

@@ -198,6 +198,7 @@ impl Checker<'_> {
             | Type::Range
             | Type::Enum(_) => true,
             Type::List(element) | Type::Set(element) => self.embeddable(element.get(), seen),
+            Type::Map(parts) => parts.elements().into_iter().all(|part| self.embeddable(part, seen)),
             Type::Tuple(elements) => {
                 elements.elements().into_iter().all(|element| self.embeddable(element, seen))
             }

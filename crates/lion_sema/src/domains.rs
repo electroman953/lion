@@ -472,7 +472,7 @@ pub(crate) fn holds_domain(ty: Type) -> bool {
     ty.members().into_iter().any(|member| match member {
         Type::Domain(_) => true,
         Type::List(element) | Type::Set(element) | Type::Task(element) => holds_domain(element.get()),
-        Type::Tuple(elements) => elements.elements().into_iter().any(holds_domain),
+        Type::Tuple(elements) | Type::Map(elements) => elements.elements().into_iter().any(holds_domain),
         _ => false,
     })
 }

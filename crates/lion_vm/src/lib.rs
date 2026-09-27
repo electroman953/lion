@@ -9,6 +9,7 @@ mod bytecode;
 mod compile;
 mod constants;
 mod machine;
+mod map;
 mod natives;
 mod set;
 mod value;

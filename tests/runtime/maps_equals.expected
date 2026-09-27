@@ -1,0 +1,8 @@
+exit: 0
+----- stdout
+2
+15
+true
+{Name(value: "Léa"): 15}
+{Name(value: "a"): [1, 2]}
+----- stderr

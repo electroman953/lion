@@ -1,0 +1,39 @@
+// Maps (C79): {} where a Map is expected, m[k], m[k] = v, k in m, m.get(k), m.remove(k).
+use text
+let words = text.split("le chat voit le chien et le chat", " ")
+var counts = {} in Map of (Text, Int)
+for w in words:
+    if w in counts:
+        counts[w] += 1
+    else:
+        counts[w] = 1
+    ;
+;
+show(counts)
+show(counts.size)
+show(counts["le"])
+show(counts.get("oiseau"))
+show(counts.get("chat"))
+counts.remove("et")
+counts.remove("absent")
+show(counts)
+for w in counts: show("{w}: {counts[w]}") ;
+show([w, w in counts, counts[w] > 1])
+let empty = {} in Map of (Int, Text)
+show(empty)
+show(counts == counts)
+struct Library:
+    books in Map of (Text, List of Text) = {}
+;
+var lib = Library()
+lib.books["Hugo"] = ["Les Misérables"]
+lib.books["Hugo"].add("Notre-Dame")
+show(lib)
+show(compile {} as Map of (Int, Int))
+fun squares(n in Int) in Map of (Int, Int):
+    var m = {} in Map of (Int, Int)
+    for i in 1..n: m[i] = i * i ;
+    return m
+;
+show(compile squares(4))
+show(counts["zèbre"])

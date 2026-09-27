@@ -1,0 +1,19 @@
+// The keys of a Map are compared with the equality of their structure (§12.5, C79).
+use text
+struct Name:
+    value in Text
+;
+fun Name.equals(other in Name) in Bool = text.lower(self.value) == text.lower(other.value)
+var ages = {} in Map of (Name, Int)
+ages[Name("Léa")] = 14
+ages[Name("LÉA")] = 15
+ages[Name("Tom")] = 12
+show(ages.size)
+show(ages[Name("léa")])
+show(Name("TOM") in ages)
+ages.remove(Name("tom"))
+show(ages)
+var nested = {} in Map of (Name, List of Int)
+nested[Name("a")] = [1]
+nested[Name("A")].add(2)
+show(nested)

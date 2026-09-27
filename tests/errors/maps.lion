@@ -1,0 +1,10 @@
+let m = {} in Map of (Text, Int)
+m["a"] = 1
+var n = {} in Map of (Text, Int)
+n[1] = 2
+show(n.get(1, 2))
+let x = n.remove("a")
+show(n.keys)
+show(sum(n))
+let bad = {} in Map of Text
+show({})

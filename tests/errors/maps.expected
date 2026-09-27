@@ -1,0 +1,69 @@
+exit: 1
+----- stdout
+----- stderr
+error: cannot change the content of the constant `m`
+  --> tests/errors/maps.lion:2:1
+   |
+ 1 | let m = {} in Map of (Text, Int)
+   |     - declared with `let`
+ 2 | m["a"] = 1
+   | ^
+   |
+   = a value held by `let` never changes, nor does its content (§6.4)
+   = help: to change it, declare it with `var`: `var m = ...`
+
+error: mismatched types
+  --> tests/errors/maps.lion:4:3
+   |
+ 4 | n[1] = 2
+   | - the keys of this Map are a Text
+   |   ^ this is an Int
+   |
+   = expected: Text
+   = found: Int
+
+error: `get` takes one key: `m.get(key)`
+  --> tests/errors/maps.lion:5:6
+   |
+ 5 | show(n.get(1, 2))
+   |      ^^^^^^^^^^^
+
+error: `remove` is called on its own line: `m.remove(key)`
+  --> tests/errors/maps.lion:6:9
+   |
+ 6 | let x = n.remove("a")
+   |         ^^^^^^^^^^^^^
+   |
+   = `remove` changes the Map and gives no value (C79)
+
+error: A Map of (Text, Int) has no `keys`
+  --> tests/errors/maps.lion:7:8
+   |
+ 7 | show(n.keys)
+   |        ^^^^
+   |
+   = a Map has `m[key]`, `m.get(key)`, `m.remove(key)`, `key in m` and `m.size`; `for k in m` goes through its keys (C79)
+
+error: `sum` adds a list of numbers, not a Map of (Text, Int)
+  --> tests/errors/maps.lion:8:10
+   |
+ 8 | show(sum(n))
+   |          ^
+
+error: `Map` takes the types of its keys and of its values: `Map of (Text, Int)`
+  --> tests/errors/maps.lion:9:17
+   |
+ 9 | let bad = {} in Map of Text
+   |                 ^^^^^^^^^^^
+   |
+   = `of` gives the type parameters of a generic type (§15.1)
+
+error: the type of this empty set is not known
+   --> tests/errors/maps.lion:10:6
+    |
+ 10 | show({})
+    |      ^^
+    |
+    = help: write its type: `var s = {} in Set of Int`; `{}` is also the empty Map: `var m = {} in Map of (Text, Int)`
+
+8 errors found

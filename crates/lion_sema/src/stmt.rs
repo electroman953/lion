@@ -38,6 +38,12 @@ impl Checker<'_> {
                     let ast::ExprKind::Field { object, .. } = &callee.kind else { unreachable!() };
                     self.add_stmt(object, args, expr.span)
                 }
+                // `m.remove(key)` changes the Map in place (C79).
+                ast::ExprKind::Call { callee, args } if matches!(&callee.kind, ast::ExprKind::Field { name, object } if name.name == "remove" && matches!(self.place_type(object), Some(Type::Map(_)))) =>
+                {
+                    let ast::ExprKind::Field { object, .. } = &callee.kind else { unreachable!() };
+                    self.remove_stmt(object, args, expr.span)
+                }
                 _ => {
                     let checked = self.expr(expr)?;
                     // Nothing runs after `exit` (§20.1).
@@ -312,6 +318,27 @@ impl Checker<'_> {
         self.change_in_place(list, &arg.value, true)
     }
 
+    /// `m.remove(key)`: removes the key, if the Map has it (C79).
+    fn remove_stmt(&mut self, map: &ast::Expr, args: &[ast::Arg], span: Span) -> Option<ir::Stmt> {
+        let [arg] = args else {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`remove` takes one key, not {}", args.len()))
+                    .with_primary(span, ""),
+            );
+            return None;
+        };
+        let path = self.place_path(map)?;
+        let (key, _) = path.ty().map_parts().expect("a Map");
+        let given = self.expr(&arg.value)?;
+        let context = (map.span, format!("the keys of this Map are {}", article(key)));
+        let given = self.coerce(given, key, Some(context))?;
+        let (mut stmts, path) = self.stabilize(path);
+        let after = self.check_invariants(&path, false);
+        stmts.push(ir::Stmt::Remove { root: path.root, path: path.steps.clone(), key: given });
+        stmts.extend(after);
+        Some(ir::Stmt::Seq(stmts))
+    }
+
     /// `if c: ... elif d: ... else: ... ;` (§5.2). Each branch starts from the flow
     /// where its condition is tested; the paths meet after the `;`.
     fn if_stmt(&mut self, branches: &[ast::Branch], otherwise: Option<&ast::Block>) -> Option<ir::Stmt> {
@@ -508,9 +535,10 @@ impl Checker<'_> {
     }
 }
 
+/// `[]` or `{}`, whose type comes from where it goes.
 fn is_empty_list(expr: &ast::Expr) -> bool {
     match &expr.kind {
-        ast::ExprKind::List(elements) => elements.is_empty(),
+        ast::ExprKind::List(elements) | ast::ExprKind::Set(elements) => elements.is_empty(),
         ast::ExprKind::Paren(inner) => is_empty_list(inner),
         _ => false,
     }

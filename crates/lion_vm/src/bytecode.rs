@@ -118,6 +118,14 @@ pub enum Instr {
     /// A Set of the values of the `count` registers from `start`, without repetitions.
     MakeSet { dst: Reg, start: Reg, count: u32 },
     MakeTuple { dst: Reg, start: Reg, count: u32 },
+    /// A Map of the `count` keys and values of the registers from `start`, key first.
+    MakeMap { dst: Reg, start: Reg, count: u32 },
+    /// Whether the value in `a` is a key of the Map in `b`.
+    InMap { dst: Reg, a: Reg, b: Reg },
+    /// The value of the key in `key`, or `none` (C79).
+    MapGet { dst: Reg, map: Reg, key: Reg },
+    /// Removes the key in `src` from the Map reached from `target`, if it is there.
+    RemoveElement { target: Target, indices: Reg, depth: u32, src: Reg },
     /// Whether the value in `a` is an element of the Set in `b`.
     InSet { dst: Reg, a: Reg, b: Reg },
     SetUnion { dst: Reg, a: Reg, b: Reg },

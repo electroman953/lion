@@ -41,6 +41,15 @@ impl Checker<'_> {
             ast::ExprKind::Index { object, index } => {
                 let mut path = self.place_path(object)?;
                 let index = self.expr(index)?;
+                // `m[k] = v` adds the key, or changes its value (C79).
+                if let Some((key, value)) = path.ty().map_parts() {
+                    let context = (object.span, format!("the keys of this Map are {}", article(key)));
+                    let index = self.coerce(index, key, Some(context))?;
+                    path.steps.push(ir::Step::Index(index));
+                    path.types.push(value);
+                    path.span = target.span;
+                    return Some(path);
+                }
                 let element = match (path.ty(), index.ty) {
                     (Type::List(element), Type::Int) => element.get(),
                     (Type::Text, _) => {
@@ -161,9 +170,9 @@ impl Checker<'_> {
             if matches!(index.kind, ir::ExprKind::Int(_)) {
                 continue;
             }
-            let span = index.span;
-            let temp = self.temporary(Type::Int, span);
-            let value = std::mem::replace(index, typed(ir::ExprKind::Local(temp), Type::Int, span));
+            let (span, ty) = (index.span, index.ty);
+            let temp = self.temporary(ty, span);
+            let value = std::mem::replace(index, typed(ir::ExprKind::Local(temp), ty, span));
             stmts.push(ir::Stmt::Assign { place: ir::Place::Local(temp), value });
         }
         (stmts, path)

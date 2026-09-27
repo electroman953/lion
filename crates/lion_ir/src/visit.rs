@@ -18,7 +18,9 @@ pub fn exprs_in_stmts(stmts: &[Stmt], f: &mut dyn FnMut(&Expr)) {
                 exprs_in_stmts(body, f);
             }
             Stmt::Seq(stmts) => exprs_in_stmts(stmts, f),
-            Stmt::AssignElement { path, value, .. } | Stmt::Add { path, value, .. } => {
+            Stmt::AssignElement { path, value, .. }
+            | Stmt::Add { path, value, .. }
+            | Stmt::Remove { path, key: value, .. } => {
                 for step in path {
                     if let Step::Index(index) = step {
                         exprs_in(index, f);
@@ -107,6 +109,12 @@ pub fn exprs_in(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
                 exprs_in(arg, f);
             }
         }
+        ExprKind::Map(entries) => {
+            for (key, value) in entries {
+                exprs_in(key, f);
+                exprs_in(value, f);
+            }
+        }
     }
 }
 
@@ -128,7 +136,9 @@ pub fn exprs_in_stmts_mut(stmts: &mut [Stmt], f: &mut dyn FnMut(&mut Expr)) {
                 exprs_in_stmts_mut(body, f);
             }
             Stmt::Seq(stmts) => exprs_in_stmts_mut(stmts, f),
-            Stmt::AssignElement { path, value, .. } | Stmt::Add { path, value, .. } => {
+            Stmt::AssignElement { path, value, .. }
+            | Stmt::Add { path, value, .. }
+            | Stmt::Remove { path, key: value, .. } => {
                 for step in path {
                     if let Step::Index(index) = step {
                         exprs_in_mut(index, f);
@@ -214,6 +224,12 @@ pub fn exprs_in_mut(expr: &mut Expr, f: &mut dyn FnMut(&mut Expr)) {
             exprs_in_mut(callee, f);
             for arg in args {
                 exprs_in_mut(arg, f);
+            }
+        }
+        ExprKind::Map(entries) => {
+            for (key, value) in entries {
+                exprs_in_mut(key, f);
+                exprs_in_mut(value, f);
             }
         }
     }

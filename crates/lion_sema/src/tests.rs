@@ -147,7 +147,7 @@ fn one_mistake_gives_one_message() {
 
 #[test]
 fn unsupported_types_are_reported() {
-    assert_eq!(errors("var s in Map of (Text, Int)"), ["not implemented yet: collections"]);
+    assert_eq!(errors("let t = Type"), ["not implemented yet: types used as values"]);
 }
 
 #[test]

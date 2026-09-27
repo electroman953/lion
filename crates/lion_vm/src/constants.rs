@@ -116,6 +116,18 @@ fn literal(value: &Value, ty: Type, span: Span, program: &ir::Program) -> ir::Ex
                 set.items().iter().map(|value| literal(value, element, span, program)).collect(),
             )
         }
+        Value::Map(map) => {
+            let (key_type, value_type) =
+                member(|ty| matches!(ty, Type::Map(_))).map_parts().unwrap_or((Type::None, Type::None));
+            let entries = map
+                .entries()
+                .iter()
+                .map(|(key, value)| {
+                    (literal(key, key_type, span, program), literal(value, value_type, span, program))
+                })
+                .collect();
+            ir::ExprKind::Map(entries)
+        }
         Value::Tuple(elements) => {
             let types = match member(|ty| matches!(ty, Type::Tuple(_))) {
                 Type::Tuple(tuple) => tuple.elements(),

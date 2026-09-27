@@ -4,6 +4,7 @@ use std::rc::Rc;
 use lion_runtime::format::{format_float, format_rational, quote_text};
 
 use crate::bytecode::{EnumLayout, Layout};
+use crate::map::MapValue;
 use crate::set::SetValue;
 
 /// A value in a register of the virtual machine.
@@ -29,6 +30,8 @@ pub enum Value {
     Enum(Rc<EnumLayout>, u32),
     /// A Set, copied only when it is changed while shared (§16.1).
     Set(Rc<SetValue>),
+    /// A Map, copied only when it is changed while shared (C79).
+    Map(Rc<MapValue>),
     /// A tuple (§4.5).
     Tuple(Rc<Vec<Value>>),
     /// A task and its result (§19.1).
@@ -90,6 +93,16 @@ impl Value {
                 let elements: Vec<String> = set.items().iter().map(Value::literal).collect();
                 format!("{{{}}}", elements.join(", "))
             }
+            // `{"a": 1, "b": 2}`; the empty Map is `{:}`, the empty Set being `{}` (C79).
+            Value::Map(map) if map.is_empty() => "{:}".to_string(),
+            Value::Map(map) => {
+                let entries: Vec<String> = map
+                    .entries()
+                    .iter()
+                    .map(|(key, value)| format!("{}: {}", key.literal(), value.literal()))
+                    .collect();
+                format!("{{{}}}", entries.join(", "))
+            }
             Value::Tuple(elements) => {
                 let elements: Vec<String> = elements.iter().map(Value::literal).collect();
                 match elements.as_slice() {
@@ -126,6 +139,7 @@ impl Value {
                 | Value::Struct(_)
                 | Value::Enum(..)
                 | Value::Set(_)
+                | Value::Map(_)
                 | Value::Tuple(_)
                 | Value::Function(_)
                 | Value::Cell(_)
@@ -148,6 +162,7 @@ impl Value {
             Value::Struct(_) => kinds::STRUCT,
             Value::Enum(..) => kinds::ENUM,
             Value::Set(_) => kinds::SET,
+            Value::Map(_) => kinds::MAP,
             Value::Tuple(_) => kinds::TUPLE,
             Value::Function(_) => kinds::FUN,
             Value::Task(_) => kinds::TASK,
@@ -173,6 +188,7 @@ impl Value {
             }
             (Value::Enum(a, x), Value::Enum(b, y)) => a.index == b.index && x == y,
             (Value::Set(a), Value::Set(b)) => a.equals(b),
+            (Value::Map(a), Value::Map(b)) => a.equals(b),
             (Value::Tuple(a), Value::Tuple(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals(y))
             }
@@ -198,6 +214,7 @@ impl Value {
             Value::Struct(_) => "structure",
             Value::Enum(..) => "enumeration",
             Value::Set(_) => "Set",
+            Value::Map(_) => "Map",
             Value::Tuple(_) => "tuple",
             Value::Function(_) => "function",
             Value::Task(_) => "task",
@@ -225,4 +242,5 @@ pub mod kinds {
     pub const FUN: u16 = 1 << 12;
     pub const TASK: u16 = 1 << 13;
     pub const RATIONAL: u16 = 1 << 14;
+    pub const MAP: u16 = 1 << 15;
 }

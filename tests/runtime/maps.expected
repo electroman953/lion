@@ -1,0 +1,28 @@
+exit: 2
+----- stdout
+{"le": 3, "chat": 2, "voit": 1, "chien": 1, "et": 1}
+5
+3
+none
+2
+{"le": 3, "chat": 2, "voit": 1, "chien": 1}
+le: 3
+chat: 2
+voit: 1
+chien: 1
+["le", "chat"]
+{:}
+true
+Library(books: {"Hugo": ["Les Misérables", "Notre-Dame"]})
+{:}
+{1: 1, 2: 4, 3: 9, 4: 16}
+----- stderr
+bug: missing key
+   --> tests/runtime/maps.lion:39:6
+    |
+ 39 | show(counts["zèbre"])
+    |      ^^^^^^^^^^^^^^^
+    |
+    = the Map has no key "zèbre"
+    = help: test it first with `k in m`, or use `m.get(k)`, which gives `none`
+

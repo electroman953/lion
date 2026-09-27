@@ -63,7 +63,10 @@ impl Checker<'_> {
         if elements.is_empty() {
             let (what, example) = match kind {
                 Collection::List => ("list", "var l = [] in List of Int`, or `[] as List of Int"),
-                Collection::Set => ("set", "var s = {} in Set of Int`, or `{} as Set of Int"),
+                Collection::Set => (
+                    "set",
+                    "var s = {} in Set of Int`; `{}` is also the empty Map: `var m = {} in Map of (Text, Int)",
+                ),
             };
             self.diagnostics.push(
                 Diagnostic::error(format!("the type of this empty {what} is not known"))
@@ -114,8 +117,12 @@ impl Checker<'_> {
                 Some(typed(ir::ExprKind::List(Vec::new()), ty, expr.span))
             }
             ast::ExprKind::Set(elements) if elements.is_empty() => {
-                let ty = member(|ty| matches!(ty, Type::Set(_)))?;
-                Some(typed(ir::ExprKind::Set(Vec::new()), ty, expr.span))
+                if let Some(ty) = member(|ty| matches!(ty, Type::Set(_))) {
+                    return Some(typed(ir::ExprKind::Set(Vec::new()), ty, expr.span));
+                }
+                // `{}` is also the empty Map (C79).
+                let ty = member(|ty| matches!(ty, Type::Map(_)))?;
+                Some(typed(ir::ExprKind::Map(Vec::new()), ty, expr.span))
             }
             ast::ExprKind::Paren(inner) => self.empty_list(inner, expected),
             _ => None,
@@ -445,6 +452,13 @@ impl Checker<'_> {
         let object = self.expr(object);
         let index = self.expr(index);
         let (object, index) = (object?, index?);
+        // `m[k]`: the value of the key, which must be there (C79).
+        if let Some((key, value)) = object.ty.map_parts() {
+            let context = (object.span, format!("the keys of this Map are {}", article(key)));
+            let index = self.coerce(index, key, Some(context))?;
+            let kind = ir::ExprKind::Index { object: Box::new(object), index: Box::new(index) };
+            return Some(typed(kind, value, span));
+        }
         let element = match object.ty {
             Type::List(element) => element.get(),
             Type::Text => Type::Text,
@@ -488,7 +502,7 @@ impl Checker<'_> {
             return Some(typed(ir::ExprKind::Field { object: Box::new(object), field }, ty, span));
         }
         let (property, ty) = match (object.ty, name.name.as_str()) {
-            (Type::List(_) | Type::Set(_) | Type::Text | Type::Range, "size") => {
+            (Type::List(_) | Type::Set(_) | Type::Map(_) | Type::Text | Type::Range, "size") => {
                 (ir::Property::Size, Type::Int)
             }
             (Type::List(element), "first") => (ir::Property::First, element.get()),
@@ -512,6 +526,7 @@ impl Checker<'_> {
                         "a Domain is known by a property: only its membership can be tested (§16.5)"
                             .to_string()
                     }
+                    Type::Map(_) => "a Map has `m[key]`, `m.get(key)`, `m.remove(key)`, `key in m` and `m.size`; `for k in m` goes through its keys (C79)".to_string(),
                     _ => format!("it has {known} (§16)"),
                 };
                 self.diagnostics.push(
@@ -560,7 +575,7 @@ impl Checker<'_> {
             return None;
         };
         let values = self.expr(&arg.value)?;
-        let ty = match values.ty.element() {
+        let ty = match values.ty.element().filter(|_| !matches!(values.ty, Type::Map(_))) {
             Some(element @ (Type::Int | Type::Float | Type::Rational)) => element,
             _ => {
                 self.diagnostics.push(

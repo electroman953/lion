@@ -355,6 +355,18 @@ impl Checker<'_> {
             }
             Type::List(_) | Type::Set(_) => self.list_membership(value, set, span),
             Type::Domain(_) => self.domain_membership(value, set, span),
+            // `k in m`: whether the Map has the key (C79).
+            Type::Map(_) => {
+                let (key, _) = set.ty.map_parts().expect("a Map");
+                let context = (set.span, format!("the keys of this Map are {}", article(key)));
+                let value = self.coerce(value, key, Some(context))?;
+                let kind = ir::ExprKind::Binary {
+                    op: ir::BinaryOp::InMap,
+                    lhs: Box::new(value),
+                    rhs: Box::new(set),
+                };
+                Some(typed(kind, Type::Bool, span))
+            }
             Type::Range => {
                 self.diagnostics.push(
                     Diagnostic::error(format!("an interval holds Int values, not {}", article(value.ty)))
@@ -406,10 +418,11 @@ impl Checker<'_> {
         let kind = |ty: &Type| match ty {
             Type::List(_) => Some("list"),
             Type::Set(_) => Some("set"),
+            Type::Map(_) => Some("map"),
             Type::Tuple(_) => Some("tuple"),
             _ => None,
         };
-        for name in ["list", "set", "tuple"] {
+        for name in ["list", "set", "map", "tuple"] {
             let all = whole.members().iter().filter(|member| kind(member) == Some(name)).count();
             let tested = part.members().iter().filter(|member| kind(member) == Some(name)).count();
             if all > 1 && tested > 0 && tested < all {
@@ -970,6 +983,7 @@ impl Checker<'_> {
             (
                 Type::List(_)
                 | Type::Set(_)
+                | Type::Map(_)
                 | Type::Tuple(_)
                 | Type::Range
                 | Type::Union(_)

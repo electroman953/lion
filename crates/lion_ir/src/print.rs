@@ -104,6 +104,14 @@ impl Printer<'_> {
                         self.expr(value)
                     ));
                 }
+                Stmt::Remove { root, path, key } => {
+                    out.push_str(&format!(
+                        "{indent}{}{}.remove({})\n",
+                        self.place(*root),
+                        self.path(*root, path),
+                        self.expr(key)
+                    ));
+                }
                 Stmt::For { var, iterable, body } => {
                     out.push_str(&format!(
                         "{indent}for {} in {}\n",
@@ -166,6 +174,13 @@ impl Printer<'_> {
             ExprKind::Set(elements) => {
                 let elements: Vec<String> = elements.iter().map(print).collect();
                 format!("(set{}{})", if elements.is_empty() { "" } else { " " }, elements.join(" "))
+            }
+            ExprKind::Map(entries) => {
+                let entries: Vec<String> = entries
+                    .iter()
+                    .map(|(key, value)| format!(" ({} {})", print(key), print(value)))
+                    .collect();
+                format!("(map{})", entries.concat())
             }
             ExprKind::Tuple(elements) => {
                 let elements: Vec<String> = elements.iter().map(print).collect();

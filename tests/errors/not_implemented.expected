@@ -1,13 +1,13 @@
 exit: 1
 ----- stdout
 ----- stderr
-error: not implemented yet: collections
-  --> tests/errors/not_implemented.lion:1:10
+error: not implemented yet: methods of generic types
+  --> tests/errors/not_implemented.lion:1:5
    |
- 1 | var l in Map of (Text, Int)
-   |          ^^^^^^^^^^^^^^^^^^
+ 1 | fun List.second(l in Int) = l
+   |     ^^^^
    |
-   = this part of Lion (spec §16) is not supported by this version of the implementation
+   = this part of Lion (spec §12.4, §15) is not supported by this version of the implementation
 
 error: not implemented yet: types used as values
   --> tests/errors/not_implemented.lion:4:9
@@ -23,7 +23,7 @@ error: cannot find `x` in this scope
  6 | let t = x.name
    |         ^ not found
    |
-   = help: a similar name exists: `l`
+   = help: a similar name exists: `m`
 
 error: `sum` adds a list of numbers, not an Int
   --> tests/errors/not_implemented.lion:7:13

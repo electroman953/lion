@@ -47,6 +47,9 @@ impl Checker<'_> {
         }
         let value = self.expr(object)?;
         let value = self.within_try(value);
+        if let Some((key, entry)) = value.ty.map_parts() {
+            return self.map_method(value, key, entry, name, args, span);
+        }
         // A value of several possible types: the method of each, chosen at run time (§14.4).
         let members = value.ty.members();
         if self.visible_method(value.ty, &name.name).is_none()
@@ -76,6 +79,51 @@ impl Checker<'_> {
         let receiver =
             if self.functions[method].var_self { Pending::Temporary(value) } else { Pending::Value(value) };
         self.call_with(method, Some(receiver), Vec::new(), name.span, args, span)
+    }
+
+    /// `m.get(k)`: the value of the key, or `none` (C79).
+    fn map_method(
+        &mut self,
+        map: lion_ir::Expr,
+        key: Type,
+        entry: Type,
+        name: &ast::Ident,
+        args: &[ast::Arg],
+        span: Span,
+    ) -> Option<lion_ir::Expr> {
+        match (name.name.as_str(), args) {
+            ("get", [arg]) if arg.name.is_none() && arg.var_marker.is_none() => {
+                let given = self.expr(&arg.value)?;
+                let context = (map.span, format!("the keys of this Map are {}", article(key)));
+                let given = self.coerce(given, key, Some(context))?;
+                let kind = lion_ir::ExprKind::CallBuiltin {
+                    builtin: lion_ir::Builtin::MapGet,
+                    args: vec![map, given],
+                };
+                Some(crate::typed(kind, Type::maybe(entry), span))
+            }
+            ("remove", _) => {
+                self.diagnostics.push(
+                    Diagnostic::error("`remove` is called on its own line: `m.remove(key)`")
+                        .with_primary(span, "")
+                        .with_note("`remove` changes the Map and gives no value (C79)"),
+                );
+                None
+            }
+            ("get", _) => {
+                self.diagnostics
+                    .push(Diagnostic::error("`get` takes one key: `m.get(key)`").with_primary(span, ""));
+                None
+            }
+            _ => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("a Map has no method `{}`", name.name))
+                        .with_primary(name.span, "")
+                        .with_note("a Map has `m[key]`, `m.get(key)`, `m.remove(key)`, `key in m` and `m.size` (C79)"),
+                );
+                None
+            }
+        }
     }
 
     fn no_method(&mut self, ty: Type, name: &ast::Ident, object: Span) {
@@ -115,7 +163,7 @@ impl Checker<'_> {
 
     /// The type of `expr` when it is a variable or a part of one, found without checking
     /// anything or reporting; `None` otherwise.
-    fn place_type(&self, expr: &ast::Expr) -> Option<Type> {
+    pub(crate) fn place_type(&self, expr: &ast::Expr) -> Option<Type> {
         match &expr.kind {
             ast::ExprKind::Name(name) => match self.lookup(name) {
                 Some(local) => self.local_type(local),
@@ -130,6 +178,7 @@ impl Checker<'_> {
             ast::ExprKind::Paren(inner) => self.place_type(inner),
             ast::ExprKind::Index { object, .. } => match self.place_type(object)? {
                 Type::List(element) => Some(element.get()),
+                map @ Type::Map(_) => map.map_parts().map(|(_, value)| value),
                 _ => None,
             },
             ast::ExprKind::Field { object, name } => match self.place_type(object)? {

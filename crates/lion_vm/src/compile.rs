@@ -245,6 +245,21 @@ impl Compiler<'_> {
                 let src = self.operand(value);
                 self.emit(Instr::AddElement { target, indices: start, depth, src }, Some(value.span));
             }
+            ir::Stmt::Remove { root: ir::Place::Local(local), path, key } if self.boxed(*local) => {
+                let cell = register(*local);
+                let whole = self.temp();
+                let (_, start, depth) = self.path(ir::Place::Local(*local), path);
+                let src = self.operand(key);
+                self.emit(Instr::TakeCell { dst: whole, cell }, None);
+                let target = Target::Register(whole);
+                self.emit(Instr::RemoveElement { target, indices: start, depth, src }, Some(key.span));
+                self.emit(Instr::StoreCell { cell, src: whole }, None);
+            }
+            ir::Stmt::Remove { root, path, key } => {
+                let (target, start, depth) = self.path(*root, path);
+                let src = self.operand(key);
+                self.emit(Instr::RemoveElement { target, indices: start, depth, src }, Some(key.span));
+            }
             ir::Stmt::Break => {
                 let at = self.jump();
                 self.loops.last_mut().expect("`break` is inside a loop").breaks.push(at);
@@ -640,6 +655,22 @@ impl Compiler<'_> {
                 }
                 self.emit(Instr::MakeList { dst, start, count: elements.len() as u32 }, span);
             }
+            ExprKind::Map(entries) => {
+                let start = self.next_temp;
+                for _ in 0..entries.len() * 2 {
+                    self.temp();
+                }
+                for (offset, (key, value)) in entries.iter().enumerate() {
+                    self.expr_into(key, start + 2 * offset as u32);
+                    self.expr_into(value, start + 2 * offset as u32 + 1);
+                }
+                self.emit(Instr::MakeMap { dst, start, count: entries.len() as u32 }, span);
+            }
+            ExprKind::CallBuiltin { builtin: Builtin::MapGet, args } => {
+                let map = self.operand_before(&args[0], &args[1]);
+                let key = self.operand(&args[1]);
+                self.emit(Instr::MapGet { dst, map, key }, span);
+            }
             ExprKind::Set(elements) | ExprKind::Tuple(elements) => {
                 let start = self.next_temp;
                 for _ in elements {
@@ -965,6 +996,9 @@ fn calls_function(expr: &ir::Expr) -> bool {
         ExprKind::Range { start, end } => calls_function(start) || calls_function(end),
         // A comprehension may call functions from its statements.
         ExprKind::Block { .. } => true,
+        ExprKind::Map(entries) => {
+            entries.iter().any(|(key, value)| calls_function(key) || calls_function(value))
+        }
         ExprKind::List(elements) | ExprKind::Set(elements) | ExprKind::Tuple(elements) => {
             elements.iter().any(calls_function)
         }
@@ -1000,6 +1034,7 @@ fn kinds_of(ty: ir::Type) -> u16 {
             ir::Type::Range => kinds::RANGE,
             ir::Type::List(_) => kinds::LIST,
             ir::Type::Set(_) => kinds::SET,
+            ir::Type::Map(_) => kinds::MAP,
             ir::Type::Task(_) => kinds::TASK,
             ir::Type::Tuple(_) => kinds::TUPLE,
             ir::Type::Error => kinds::ERROR,
@@ -1092,6 +1127,7 @@ fn binary_instr(op: BinaryOp, dst: Reg, a: Reg, b: Reg) -> Instr {
         BinaryOp::InRange => Instr::InRange { dst, a, b },
         BinaryOp::InList => Instr::InList { dst, a, b },
         BinaryOp::InSet => Instr::InSet { dst, a, b },
+        BinaryOp::InMap => Instr::InMap { dst, a, b },
         BinaryOp::SetUnion => Instr::SetUnion { dst, a, b },
         BinaryOp::SetInter => Instr::SetInter { dst, a, b },
         BinaryOp::SetMinus => Instr::SetMinus { dst, a, b },

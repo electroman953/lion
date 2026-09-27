@@ -23,6 +23,9 @@ pub enum Type {
     /// `Domain of T`: the values of `T` that have a property, as `{x in Int, x > 0}`;
     /// only tested for membership (§16.5).
     Domain(TypeRef),
+    /// `Map of (K, V)`: values found by their keys, which are unique (§16.1, C79). The
+    /// tuple holds the type of the keys, then the type of the values.
+    Map(TupleRef),
     /// `Task of T`: a computation that gives a `T` (§19.1).
     Task(TypeRef),
     /// `(A, B)`: a tuple, whose elements have these types (§4.5).
@@ -62,6 +65,21 @@ impl Type {
 
     pub fn domain(element: Type) -> Type {
         Type::Domain(TypeRef::new(element))
+    }
+
+    pub fn map(key: Type, value: Type) -> Type {
+        Type::Map(TupleRef::new(vec![key, value]))
+    }
+
+    /// The type of the keys and the type of the values of a Map.
+    pub fn map_parts(self) -> Option<(Type, Type)> {
+        match self {
+            Type::Map(parts) => match parts.elements().as_slice() {
+                [key, value] => Some((*key, *value)),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     pub fn tuple(elements: Vec<Type>) -> Type {
@@ -138,6 +156,8 @@ impl Type {
         match self {
             Type::Range => Some(Type::Int),
             Type::List(element) | Type::Set(element) => Some(element.get()),
+            // A Map is gone through by its keys (C79).
+            Type::Map(_) => self.map_parts().map(|(key, _)| key),
             _ => None,
         }
     }
@@ -166,6 +186,10 @@ impl fmt::Display for Type {
                 union @ Type::Union(_) => write!(f, "Domain of ({union})"),
                 element => write!(f, "Domain of {element}"),
             },
+            Type::Map(parts) => {
+                let parts: Vec<String> = parts.elements().iter().map(Type::to_string).collect();
+                write!(f, "Map of ({})", parts.join(", "))
+            }
             Type::Task(result) => match result.get() {
                 union @ Type::Union(_) => write!(f, "Task of ({union})"),
                 result => write!(f, "Task of {result}"),
@@ -324,8 +348,10 @@ impl Type {
     pub fn has_vars(self) -> bool {
         match self {
             Type::Var(_) => true,
-            Type::List(inner) | Type::Set(inner) | Type::Task(inner) => inner.get().has_vars(),
-            Type::Tuple(tuple) => tuple.elements().into_iter().any(Type::has_vars),
+            Type::List(inner) | Type::Set(inner) | Type::Task(inner) | Type::Domain(inner) => {
+                inner.get().has_vars()
+            }
+            Type::Tuple(tuple) | Type::Map(tuple) => tuple.elements().into_iter().any(Type::has_vars),
             Type::Union(union) => union.members().into_iter().any(Type::has_vars),
             Type::Fun(function) => {
                 let data = function.get();
@@ -342,9 +368,13 @@ impl Type {
             Type::List(inner) => Type::list(inner.get().substitute(bindings)),
             Type::Set(inner) => Type::set(inner.get().substitute(bindings)),
             Type::Task(inner) => Type::Task(TypeRef::new(inner.get().substitute(bindings))),
+            Type::Domain(inner) => Type::domain(inner.get().substitute(bindings)),
             Type::Tuple(tuple) => {
                 Type::tuple(tuple.elements().into_iter().map(|ty| ty.substitute(bindings)).collect())
             }
+            Type::Map(parts) => Type::Map(TupleRef::new(
+                parts.elements().into_iter().map(|ty| ty.substitute(bindings)).collect(),
+            )),
             Type::Union(union) => Type::union(union.members().into_iter().map(|ty| ty.substitute(bindings))),
             Type::Fun(function) => {
                 let data = function.get();
@@ -368,8 +398,9 @@ impl Type {
             },
             (Type::List(pattern), Type::List(actual))
             | (Type::Set(pattern), Type::Set(actual))
-            | (Type::Task(pattern), Type::Task(actual)) => pattern.get().unify(actual.get(), bindings),
-            (Type::Tuple(pattern), Type::Tuple(actual)) => {
+            | (Type::Task(pattern), Type::Task(actual))
+            | (Type::Domain(pattern), Type::Domain(actual)) => pattern.get().unify(actual.get(), bindings),
+            (Type::Tuple(pattern), Type::Tuple(actual)) | (Type::Map(pattern), Type::Map(actual)) => {
                 let (pattern, actual) = (pattern.elements(), actual.elements());
                 pattern.len() == actual.len()
                     && pattern

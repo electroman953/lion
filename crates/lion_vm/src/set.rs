@@ -97,7 +97,7 @@ impl SetValue {
     }
 }
 
-fn hash_of(value: &Value) -> u64 {
+pub(crate) fn hash_of(value: &Value) -> u64 {
     let mut hasher = DefaultHasher::new();
     hash_value(value, &mut hasher);
     hasher.finish()
@@ -110,6 +110,7 @@ pub fn holds_nan(value: &Value) -> bool {
         Value::List(elements) | Value::Tuple(elements) => elements.iter().any(holds_nan),
         Value::Struct(record) => record.fields.iter().any(holds_nan),
         Value::Set(set) => set.items.iter().any(holds_nan),
+        Value::Map(map) => map.entries().iter().any(|(key, value)| holds_nan(key) || holds_nan(value)),
         _ => false,
     }
 }
@@ -149,6 +150,16 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
                 total.wrapping_add(hasher.finish())
             });
             (10u8, set.len(), combined).hash(state);
+        }
+        // The order of the entries does not count.
+        Value::Map(map) => {
+            let combined = map.entries().iter().fold(0u64, |total, (key, value)| {
+                let mut hasher = DefaultHasher::new();
+                hash_value(key, &mut hasher);
+                hash_value(value, &mut hasher);
+                total.wrapping_add(hasher.finish())
+            });
+            (12u8, map.len(), combined).hash(state);
         }
         Value::Function(_) | Value::Cell(_) | Value::Task(_) | Value::Ref(_) => {
             unreachable!("a function, a cell or a reference does not go in a Set")

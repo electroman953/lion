@@ -27,6 +27,8 @@ pub(crate) enum Const {
     Enum(EnumRef, u32),
     /// Without repetitions, in the order of their first appearance.
     Set(Vec<Const>),
+    /// Keys and values, in the order of the keys (C79).
+    Map(Vec<(Const, Const)>),
     Tuple(Vec<Const>),
 }
 
@@ -40,6 +42,9 @@ impl Const {
             }
             Const::List(values) | Const::Set(values) | Const::Tuple(values) => {
                 values.iter().any(Const::has_custom_equality)
+            }
+            Const::Map(entries) => {
+                entries.iter().any(|(key, value)| key.has_custom_equality() || value.has_custom_equality())
             }
             _ => false,
         }
@@ -55,6 +60,12 @@ impl Const {
             (Const::Text(a), Const::Text(b)) => a == b,
             (Const::None, Const::None) => true,
             (Const::Enum(a, x), Const::Enum(b, y)) => a == b && x == y,
+            (Const::Map(a), Const::Map(b)) => {
+                a.len() == b.len()
+                    && a.iter().all(|(key, value)| {
+                        b.iter().any(|(other, found)| other.equals(key) && found.equals(value))
+                    })
+            }
             (Const::Set(a), Const::Set(b)) => {
                 a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| x.equals(y)))
             }
@@ -82,6 +93,14 @@ impl Const {
             Const::Set(elements) => {
                 let elements: Vec<String> = elements.iter().map(|element| element.literal(fields)).collect();
                 format!("{{{}}}", elements.join(", "))
+            }
+            Const::Map(entries) if entries.is_empty() => "{:}".to_string(),
+            Const::Map(entries) => {
+                let entries: Vec<String> = entries
+                    .iter()
+                    .map(|(key, value)| format!("{}: {}", key.literal(fields), value.literal(fields)))
+                    .collect();
+                format!("{{{}}}", entries.join(", "))
             }
             Const::Tuple(elements) => {
                 let elements: Vec<String> = elements.iter().map(|element| element.literal(fields)).collect();
@@ -175,6 +194,20 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
         ir::ExprKind::Tuple(elements) => {
             Const::Tuple(elements.iter().map(|element| eval(element, env)).collect::<Option<_>>()?)
         }
+        ir::ExprKind::Map(entries) => {
+            let mut map: Vec<(Const, Const)> = Vec::new();
+            for (key, value) in entries {
+                let (key, value) = (eval(key, env)?, eval(value, env)?);
+                if key.has_custom_equality() || !key.equals(&key) {
+                    return None;
+                }
+                match map.iter_mut().find(|(known, _)| known.equals(&key)) {
+                    Some(entry) => entry.1 = value,
+                    None => map.push((key, value)),
+                }
+            }
+            Const::Map(map)
+        }
         ir::ExprKind::Set(elements) => {
             let mut set: Vec<Const> = Vec::new();
             for element in elements {
@@ -201,6 +234,7 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
             Const::Text(text)
         }
         ir::ExprKind::Property { object, property } => match (property, eval(object, env)?) {
+            (ir::Property::Size, Const::Map(entries)) => Const::Int(entries.len() as i64),
             (ir::Property::Size, Const::List(elements) | Const::Set(elements)) => {
                 Const::Int(elements.len() as i64)
             }

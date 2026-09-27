@@ -1764,6 +1764,7 @@ fn widen_returns(stmts: &mut [ir::Stmt]) {
             | ir::Stmt::Expr(_)
             | ir::Stmt::AssignElement { .. }
             | ir::Stmt::Add { .. }
+            | ir::Stmt::Remove { .. }
             | ir::Stmt::Break
             | ir::Stmt::Continue
             | ir::Stmt::Return(_) => {}

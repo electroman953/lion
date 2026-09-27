@@ -164,6 +164,12 @@ pub enum Stmt {
         path: Vec<Step>,
         value: Expr,
     },
+    /// `m.remove(key)`: removes the key of a Map inside `root`, if it is there (C79).
+    Remove {
+        root: Place,
+        path: Vec<Step>,
+        key: Expr,
+    },
     /// Goes through the elements of `iterable`, evaluated once, in `var` (§10.2).
     For {
         var: LocalId,
@@ -325,6 +331,9 @@ pub enum ExprKind {
     Task(Box<Expr>),
     /// `wait t`: the result of a task.
     Wait(Box<Expr>),
+    /// A Map with these keys and values, in this order (C79). The program writes only
+    /// the empty one, `{}`; `compile` may give others.
+    Map(Vec<(Expr, Expr)>),
     /// `compile value`: computed while the program is compiled, then replaced by the
     /// value it gives (§21.1, D21). No backend sees it.
     Compile(Box<Expr>),
@@ -426,6 +435,8 @@ pub enum BinaryOp {
     NeValue,
     /// A value among the elements of a Set (§16.1).
     InSet,
+    /// A key among the keys of a Map (C79).
+    InMap,
     /// `a union b`, `a inter b`, `a minus b` on Sets, and `a subset b` (§16.6).
     SetUnion,
     SetInter,
@@ -486,6 +497,8 @@ pub enum Builtin {
     Round,
     /// `isqrt(n)`: the integer square root (§23).
     Isqrt,
+    /// `m.get(k)`: the value of the key, or `none` (C79).
+    MapGet,
     /// A function of the standard library provided by the implementation, declared
     /// `foreign "lion"` (§23).
     Native(Native),
@@ -646,6 +659,7 @@ impl BinaryOp {
             EqValue => "eq_value",
             NeValue => "ne_value",
             InSet => "in_set",
+            InMap => "in_map",
             SetUnion => "union",
             SetInter => "inter",
             SetMinus => "minus",
@@ -698,6 +712,7 @@ impl Builtin {
             Builtin::Ceil => "ceil",
             Builtin::Round => "round",
             Builtin::Isqrt => "isqrt",
+            Builtin::MapGet => "map_get",
             Builtin::Native(_) => "native",
         }
     }

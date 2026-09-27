@@ -11,6 +11,7 @@ use lion_runtime::ops::RationalOp;
 use lion_runtime::{BugKind, MAX_CALL_DEPTH, ops};
 
 use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
+use crate::map::MapValue;
 use crate::set::{SetValue, holds_nan};
 use crate::value::{Closure, Record, Value};
 
@@ -676,6 +677,16 @@ impl<'a> Machine<'a> {
                     let elements = self.stack[first..first + count as usize].to_vec();
                     self.set(dst, Value::List(Rc::new(elements)));
                 }
+                Instr::GetIndex { dst, object, index }
+                    if matches!(self.stack[self.base + object as usize], Value::Map(_)) =>
+                {
+                    let map = self.map_rc(object);
+                    let key = self.stack[self.base + index as usize].clone();
+                    match self.map_position(&map, &key, at)? {
+                        Some(position) => self.set(dst, map.value_at(position).clone()),
+                        None => return Err(self.bug(BugKind::MissingKey { key: key.literal() }, at)),
+                    }
+                }
                 Instr::GetIndex { dst, object, index } => {
                     let value = self.get_index(object, index).map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, value);
@@ -688,6 +699,7 @@ impl<'a> Machine<'a> {
                     let size = match &self.stack[self.base + object as usize] {
                         Value::List(elements) => elements.len() as i64,
                         Value::Set(set) => set.len() as i64,
+                        Value::Map(map) => map.len() as i64,
                         Value::Text(text) => text.chars().count() as i64,
                         Value::Range(bounds) => {
                             range_size(bounds[0], bounds[1]).map_err(|kind| self.bug(kind, at))?
@@ -735,7 +747,7 @@ impl<'a> Machine<'a> {
                     self.set(dst, Value::Bool(equal != negate));
                 }
                 Instr::ForList { list, counter, target } => {
-                    if self.list(list).is_empty() {
+                    if self.sequence_len(list) == 0 {
                         pc = target as usize;
                     } else {
                         self.set(counter, Value::Int(0));
@@ -743,25 +755,84 @@ impl<'a> Machine<'a> {
                 }
                 Instr::ElementAt { dst, list, counter } => {
                     let position = self.int(counter) as usize;
-                    let value = self.list(list)[position].clone();
+                    let value = self.sequence_at(list, position);
                     self.set(dst, value);
                 }
                 Instr::NextList { list, counter, target } => {
                     let next = self.int(counter) + 1;
-                    if (next as usize) < self.list(list).len() {
+                    if (next as usize) < self.sequence_len(list) {
                         self.set(counter, Value::Int(next));
                         pc = target as usize;
                     }
                 }
                 Instr::StoreElement { target, indices, depth, src } => {
                     let value = self.stack[self.base + src as usize].clone();
-                    let stored = self.element_mut(target, indices, depth).map(|slot| *slot = value);
+                    let keys = self.key_positions(target, indices, depth, at)?;
+                    let stored = self
+                        .element_mut(target, indices, depth, keys.as_deref(), true)
+                        .map(|slot| *slot = value);
                     stored.map_err(|kind| self.bug(kind, at))?;
+                }
+                Instr::RemoveElement { target, indices, depth, src } => {
+                    let key = self.stack[self.base + src as usize].clone();
+                    let keys = self.key_positions(target, indices, depth, at)?;
+                    let map = match self.element_mut(target, indices, depth, keys.as_deref(), false) {
+                        Ok(Value::Map(map)) => Rc::clone(map),
+                        Ok(other) => {
+                            panic!("the virtual machine expected a Map but found {}", other.type_name())
+                        }
+                        Err(kind) => return Err(self.bug(kind, at)),
+                    };
+                    let found = self.map_position(&map, &key, at)?;
+                    drop(map);
+                    if let Some(position) = found {
+                        let removed =
+                            self.element_mut(target, indices, depth, keys.as_deref(), false).map(|slot| {
+                                if let Value::Map(map) = slot {
+                                    Rc::make_mut(map).remove_at(position);
+                                }
+                            });
+                        removed.map_err(|kind| self.bug(kind, at))?;
+                    }
+                }
+                Instr::MakeMap { dst, start, count } => {
+                    let first = self.base + start as usize;
+                    let values = self.stack[first..first + 2 * count as usize].to_vec();
+                    let mut map = MapValue::default();
+                    for pair in values.chunks(2) {
+                        let (key, value) = (pair[0].clone(), pair[1].clone());
+                        if holds_nan(&key) {
+                            return Err(self.bug(BugKind::NanKey, at));
+                        }
+                        match self.map_position(&map, &key, at)? {
+                            Some(position) => *map.value_mut(position) = value,
+                            None => {
+                                map.push_new(key, value);
+                            }
+                        }
+                    }
+                    self.set(dst, Value::Map(Rc::new(map)));
+                }
+                Instr::InMap { dst, a, b } => {
+                    let key = self.stack[self.base + a as usize].clone();
+                    let map = self.map_rc(b);
+                    let found = self.map_position(&map, &key, at)?.is_some();
+                    self.set(dst, Value::Bool(found));
+                }
+                Instr::MapGet { dst, map, key } => {
+                    let key = self.stack[self.base + key as usize].clone();
+                    let map = self.map_rc(map);
+                    let value = match self.map_position(&map, &key, at)? {
+                        Some(position) => map.value_at(position).clone(),
+                        None => Value::None,
+                    };
+                    self.set(dst, value);
                 }
                 Instr::AddElement { target, indices, depth, src } if self.program.custom_equality => {
                     let value = self.stack[self.base + src as usize].clone();
+                    let keys = self.key_positions(target, indices, depth, at)?;
                     // A Set gets the value unless an element equals it, as its `equals` says.
-                    let set = match self.element_mut(target, indices, depth) {
+                    let set = match self.element_mut(target, indices, depth, keys.as_deref(), false) {
                         Ok(Value::Set(set)) => Some(Rc::clone(set)),
                         _ => None,
                     };
@@ -772,37 +843,46 @@ impl<'a> Machine<'a> {
                         let present = self.set_contains(&set, &value, at)?;
                         drop(set);
                         if !present {
-                            let added = self.element_mut(target, indices, depth).map(|slot| {
-                                let Value::Set(set) = slot else { unreachable!("a Set above") };
-                                Rc::make_mut(set).push_new(value);
-                            });
+                            let added = self.element_mut(target, indices, depth, keys.as_deref(), false).map(
+                                |slot| {
+                                    let Value::Set(set) = slot else { unreachable!("a Set above") };
+                                    Rc::make_mut(set).push_new(value);
+                                },
+                            );
                             added.map_err(|kind| self.bug(kind, at))?;
                         }
                     } else {
-                        let added = self.element_mut(target, indices, depth).map(|slot| match slot {
-                            Value::List(elements) => Rc::make_mut(elements).push(value),
-                            other => {
-                                panic!("the virtual machine expected a List but found {}", other.type_name())
-                            }
-                        });
+                        let added =
+                            self.element_mut(target, indices, depth, keys.as_deref(), false).map(|slot| {
+                                match slot {
+                                    Value::List(elements) => Rc::make_mut(elements).push(value),
+                                    other => {
+                                        panic!(
+                                            "the virtual machine expected a List but found {}",
+                                            other.type_name()
+                                        )
+                                    }
+                                }
+                            });
                         added.map_err(|kind| self.bug(kind, at))?;
                     }
                 }
                 Instr::AddElement { target, indices, depth, src } => {
                     let value = self.stack[self.base + src as usize].clone();
-                    let added = self.element_mut(target, indices, depth).and_then(|slot| match slot {
-                        Value::List(elements) => {
-                            Rc::make_mut(elements).push(value);
-                            Ok(())
-                        }
-                        Value::Set(set) => Rc::make_mut(set).insert(value).map_err(|_| BugKind::NanInSet),
-                        other => {
-                            panic!(
-                                "the virtual machine expected a List or a Set but found {}",
-                                other.type_name()
-                            )
-                        }
-                    });
+                    let added =
+                        self.element_mut(target, indices, depth, None, false).and_then(|slot| match slot {
+                            Value::List(elements) => {
+                                Rc::make_mut(elements).push(value);
+                                Ok(())
+                            }
+                            Value::Set(set) => Rc::make_mut(set).insert(value).map_err(|_| BugKind::NanInSet),
+                            other => {
+                                panic!(
+                                    "the virtual machine expected a List or a Set but found {}",
+                                    other.type_name()
+                                )
+                            }
+                        });
                     added.map_err(|kind| self.bug(kind, at))?;
                 }
                 Instr::MakeSet { dst, start, count } if self.program.custom_equality => {
@@ -1119,6 +1199,19 @@ impl<'a> Machine<'a> {
                 let (x, y) = (Rc::clone(x), Rc::clone(y));
                 x.len() == y.len() && self.set_subset(&x, &y, at)?
             }
+            (Value::Map(x), Value::Map(y)) => {
+                let (x, y) = (Rc::clone(x), Rc::clone(y));
+                if x.len() != y.len() {
+                    return Ok(false);
+                }
+                for (key, value) in x.entries() {
+                    let Some(position) = self.map_position(&y, key, at)? else { return Ok(false) };
+                    if !self.equal(value, y.value_at(position), at)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
             _ => a.equals(b),
         })
     }
@@ -1371,30 +1464,147 @@ impl<'a> Machine<'a> {
 
     /// The element reached from a variable through indices, ready to be changed: every
     /// list on the way is copied first if it is shared (§17.1).
-    fn element_mut(&mut self, target: Target, indices: Reg, depth: u32) -> Result<&mut Value, BugKind> {
-        let root = match target {
-            Target::Register(reg) => self.base + reg as usize,
-            Target::Global(global) => global as usize,
-            Target::Reference(reg) => self.reference(reg),
-        };
-        let steps: Vec<i64> = (0..depth).map(|offset| self.int(indices + offset)).collect();
+    /// A step into a Map finds its key by position in `keys` when the machine compared
+    /// the keys itself (`key_positions`), and otherwise with the equality of content.
+    /// With `create`, the last key is added when it is missing (C79).
+    fn element_mut(
+        &mut self,
+        target: Target,
+        indices: Reg,
+        depth: u32,
+        keys: Option<&[Option<usize>]>,
+        create: bool,
+    ) -> Result<&mut Value, BugKind> {
+        let root = self.root_of(target);
+        let steps: Vec<Value> =
+            (0..depth).map(|offset| self.stack[self.base + (indices + offset) as usize].clone()).collect();
+        let last = steps.len().saturating_sub(1);
         let mut slot = &mut self.stack[root];
-        for step in steps {
-            slot = match slot {
-                Value::List(elements) => {
+        for (number, step) in steps.into_iter().enumerate() {
+            slot = match (slot, step) {
+                (Value::List(elements), Value::Int(step)) => {
                     let elements = Rc::make_mut(elements);
                     let position = position(step, elements.len())?;
                     &mut elements[position]
                 }
                 // The position of a field, from 0.
-                Value::Struct(record) => &mut Rc::make_mut(record).fields[step as usize],
-                other => panic!(
-                    "the virtual machine expected a List or a structure but found {}",
+                (Value::Struct(record), Value::Int(step)) => &mut Rc::make_mut(record).fields[step as usize],
+                (Value::Map(map), key) => {
+                    let map = Rc::make_mut(map);
+                    let found = match keys {
+                        Some(keys) => keys[number],
+                        None => map.position(&key),
+                    };
+                    match found {
+                        Some(position) => map.value_mut(position),
+                        None if create && number == last => {
+                            if holds_nan(&key) {
+                                return Err(BugKind::NanKey);
+                            }
+                            let position = map.push_new(key, Value::None);
+                            map.value_mut(position)
+                        }
+                        None => return Err(BugKind::MissingKey { key: key.literal() }),
+                    }
+                }
+                (other, _) => panic!(
+                    "the virtual machine expected a List, a structure or a Map but found {}",
                     other.type_name()
                 ),
             };
         }
         Ok(slot)
+    }
+
+    fn root_of(&self, target: Target) -> usize {
+        match target {
+            Target::Register(reg) => self.base + reg as usize,
+            Target::Global(global) => global as usize,
+            Target::Reference(reg) => self.reference(reg),
+        }
+    }
+
+    /// When a structure defines its equality, the positions of the keys of the Maps on
+    /// the path, found by the machine, which may call `equals` (§12.5); `None` for the
+    /// other steps, and for a missing key.
+    fn key_positions(
+        &mut self,
+        target: Target,
+        indices: Reg,
+        depth: u32,
+        at: usize,
+    ) -> Result<Option<Vec<Option<usize>>>, Fault> {
+        if !self.program.custom_equality {
+            return Ok(None);
+        }
+        let mut value = self.stack[self.root_of(target)].clone();
+        let mut positions = Vec::new();
+        for offset in 0..depth {
+            let step = self.stack[self.base + (indices + offset) as usize].clone();
+            let next = match (&value, &step) {
+                (Value::List(elements), Value::Int(index)) => {
+                    positions.push(None);
+                    position(*index, elements.len()).ok().map(|found| elements[found].clone())
+                }
+                (Value::Struct(record), Value::Int(field)) => {
+                    positions.push(None);
+                    record.fields.get(*field as usize).cloned()
+                }
+                (Value::Map(map), key) => {
+                    let map = Rc::clone(map);
+                    let found = self.map_position(&map, key, at)?;
+                    positions.push(found);
+                    found.map(|found| map.value_at(found).clone())
+                }
+                _ => None,
+            };
+            match next {
+                Some(next) => value = next,
+                None => break,
+            }
+        }
+        positions.resize(depth as usize, None);
+        Ok(Some(positions))
+    }
+
+    /// The position of the key in the Map, as the machine compares values.
+    fn map_position(&mut self, map: &MapValue, key: &Value, at: usize) -> Result<Option<usize>, Fault> {
+        if !self.program.custom_equality {
+            return Ok(map.position(key));
+        }
+        for position in map.candidates(key) {
+            let candidate = map.key_at(position).clone();
+            if self.equal(&candidate, key, at)? {
+                return Ok(Some(position));
+            }
+        }
+        Ok(None)
+    }
+
+    fn map_rc(&self, reg: Reg) -> Rc<MapValue> {
+        match &self.stack[self.base + reg as usize] {
+            Value::Map(map) => Rc::clone(map),
+            other => self.mismatch("Map", other),
+        }
+    }
+
+    /// The number of values that `for` goes through: elements, or keys of a Map.
+    fn sequence_len(&self, reg: Reg) -> usize {
+        match &self.stack[self.base + reg as usize] {
+            Value::List(elements) => elements.len(),
+            Value::Set(set) => set.len(),
+            Value::Map(map) => map.len(),
+            other => self.mismatch("List, Set or Map", other),
+        }
+    }
+
+    fn sequence_at(&self, reg: Reg, position: usize) -> Value {
+        match &self.stack[self.base + reg as usize] {
+            Value::List(elements) => elements[position].clone(),
+            Value::Set(set) => set.items()[position].clone(),
+            Value::Map(map) => map.key_at(position).clone(),
+            other => self.mismatch("List, Set or Map", other),
+        }
     }
 
     fn range(&self, reg: Reg) -> [i64; 2] {
