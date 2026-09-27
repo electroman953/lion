@@ -1,13 +1,14 @@
 exit: 1
 ----- stdout
 ----- stderr
-error: not implemented yet: methods of generic types
-  --> tests/errors/not_implemented.lion:1:5
+error: a method of `List` declares the type of its elements
+  --> tests/errors/not_implemented.lion:1:10
    |
  1 | fun List.second(l in Int) = l
-   |     ^^^^
+   |          ^^^^^^
    |
-   = this part of Lion (spec §12.4, §15) is not supported by this version of the implementation
+   = its first type variables are the types of the elements (C97)
+   = help: write it: `fun List.second() in maybe T, T in Type`
 
 error: not implemented yet: types used as values
   --> tests/errors/not_implemented.lion:4:9

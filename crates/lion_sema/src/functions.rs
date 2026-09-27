@@ -32,6 +32,9 @@ pub(crate) struct FunctionInfo {
     prefix: String,
     /// For a method, the type of `self` (§12.4).
     pub(crate) receiver: Option<Type>,
+    /// A method of `List`, `Set` or `Map`: its first type variables are the types of the
+    /// elements (C97). `receiver` is known once the signature is.
+    pub(crate) collection: Option<&'static str>,
     /// A method of a structure or an enumeration, declared in the file of its type: it
     /// goes wherever the values of the type go (C87).
     pub(crate) own_method: bool,
@@ -76,6 +79,9 @@ impl FunctionInfo {
 
     /// `passes`, `Student.passes` for a method, `geometry.area` in a module.
     fn full_name(&self) -> String {
+        if let Some(kind) = self.collection {
+            return format!("{kind}.{}", self.decl.name.name);
+        }
         match self.receiver {
             Some(receiver) => format!("{receiver}.{}", self.decl.name.name),
             None => format!("{}{}", self.prefix, self.decl.name.name),
@@ -345,6 +351,7 @@ impl<'a> Checker<'a> {
             prefix: self.qualified(""),
             receiver: None,
             own_method: false,
+            collection: None,
             struct_args: Vec::new(),
             implicit_self: false,
             var_self: false,
@@ -379,6 +386,7 @@ impl<'a> Checker<'a> {
             prefix: String::new(),
             receiver: Some(receiver),
             own_method: false,
+            collection: None,
             struct_args: type_args,
             implicit_self: false,
             var_self: false,
@@ -429,6 +437,7 @@ impl<'a> Checker<'a> {
             prefix: self.qualified(""),
             receiver: None,
             own_method: false,
+            collection: None,
             struct_args: Vec::new(),
             implicit_self: false,
             var_self: false,
@@ -447,6 +456,16 @@ impl<'a> Checker<'a> {
         if let Some(receiver) = &decl.receiver {
             if let Some(&template) = self.tables.generic_structs.get(&receiver.name) {
                 self.register_template_method(template, info.decl);
+                return;
+            }
+            // `fun List.second() in maybe T, T in Type` (§12.4, C97).
+            if let Some(kind) = ["List", "Set", "Map"].into_iter().find(|kind| *kind == receiver.name) {
+                if !self.check_collection_method_name(kind, decl) {
+                    return;
+                }
+                let key = (kind, decl.name.name.clone());
+                self.collection_methods.entry(key).or_default().push(self.functions.len());
+                self.functions.push(FunctionInfo { collection: Some(kind), ..info });
                 return;
             }
             let Some(ty) = self.receiver_type(receiver) else { return };
@@ -480,7 +499,7 @@ impl<'a> Checker<'a> {
             kind: ast::TypeExprKind::Named { module: Vec::new(), name: receiver.clone(), args: Vec::new() },
             span: receiver.span,
         };
-        if matches!(receiver.name.as_str(), "List" | "Set" | "Domain" | "Map") {
+        if receiver.name == "Domain" {
             self.not_implemented(receiver.span, "methods of generic types", "§12.4, §15");
             return None;
         }
@@ -536,6 +555,7 @@ impl<'a> Checker<'a> {
             prefix: self.qualified_in(module, ""),
             receiver: Some(ty),
             own_method: true,
+            collection: None,
             struct_args: self.structs[index].type_args.clone(),
             implicit_self: false,
             var_self: false,
@@ -567,6 +587,37 @@ impl<'a> Checker<'a> {
         if equals && self.equalities_registered {
             self.register_equality(function);
         }
+    }
+
+    /// A method of a collection has its own name among the methods of the collection in
+    /// its file, and among the operations of the language (C97).
+    fn check_collection_method_name(&mut self, kind: &'static str, decl: &ast::FunDecl) -> bool {
+        let name = &decl.name.name;
+        let previous = self.collection_methods.get(&(kind, name.clone())).and_then(|methods| {
+            methods.iter().copied().find(|&method| self.functions[method].module == self.module)
+        });
+        if let Some(previous) = previous {
+            self.diagnostics.push(
+                Diagnostic::error(format!("the method `{kind}.{name}` is already declared"))
+                    .with_primary(decl.name.span, "declared again here")
+                    .with_secondary(self.functions[previous].decl.name.span, "first declared here"),
+            );
+            return false;
+        }
+        let standard: &[&str] = match kind {
+            "List" => &["size", "first", "last", "add"],
+            "Set" => &["size", "add", "remove"],
+            _ => &["size", "get", "remove"],
+        };
+        if standard.contains(&name.as_str()) {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`{kind}` already has `{name}`"))
+                    .with_primary(decl.name.span, "")
+                    .with_help("give the method another name"),
+            );
+            return false;
+        }
+        true
     }
 
     /// A method has its own name among the methods and the fields of its type.
@@ -691,6 +742,35 @@ impl<'a> Checker<'a> {
         }
         if let Some(foreign) = &decl.foreign {
             supported &= self.foreign_function(index, foreign);
+        }
+        // The type of `self` in a method of a collection: its first type variables are the
+        // types of the elements, of the keys and of the values (C97).
+        if let Some(kind) = self.functions[index].collection {
+            let vars: Vec<Type> = type_params.iter().map(|&(var, _, _)| Type::Var(var)).collect();
+            let receiver = match (kind, vars.as_slice()) {
+                ("List", [element, ..]) => Some(Type::list(*element)),
+                ("Set", [element, ..]) => Some(Type::set(*element)),
+                ("Map", [key, value, ..]) => Some(Type::map(*key, *value)),
+                _ => None,
+            };
+            if receiver.is_none() {
+                let example = match kind {
+                    "Map" => "fun Map.keys_list() in List of K, K in Type, V in Type",
+                    "Set" => "fun Set.any_element() in maybe T, T in Type",
+                    _ => "fun List.second() in maybe T, T in Type",
+                };
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "a method of `{kind}` declares the type{} of its elements",
+                        if kind == "Map" { "s" } else { "" }
+                    ))
+                    .with_primary(decl.name.span, "")
+                    .with_note("its first type variables are the types of the elements (C97)")
+                    .with_help(format!("write it: `{example}`")),
+                );
+                supported = false;
+            }
+            self.functions[index].receiver = receiver;
         }
         let mut params = Vec::new();
         // `self` is the first parameter of a method: written `var self` when the method

@@ -1,0 +1,8 @@
+// A method of a collection declares the types of its elements (C97).
+fun List.second() = self[2]
+fun Map.first_key() in K, K in Type = 1
+fun List.size() in Int, T in Type = 0
+fun Set.remove() in Int, T in Type = 0
+fun List.twice() in List of T, T in Type = self
+fun List.twice() in List of T, T in Type = self
+show([1].missing())

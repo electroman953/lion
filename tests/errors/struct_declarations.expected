@@ -110,13 +110,14 @@ error: cannot find the type `Nope`
     |
     = help: a similar type exists: `None`
 
-error: not implemented yet: methods of generic types
-   --> tests/errors/struct_declarations.lion:33:5
+error: a method of `List` declares the type of its elements
+   --> tests/errors/struct_declarations.lion:33:10
     |
  33 | fun List.h() = 1
-    |     ^^^^
+    |          ^
     |
-    = this part of Lion (spec §12.4, §15) is not supported by this version of the implementation
+    = its first type variables are the types of the elements (C97)
+    = help: write it: `fun List.second() in maybe T, T in Type`
 
 error: `self` exists only in methods
    --> tests/errors/struct_declarations.lion:34:6

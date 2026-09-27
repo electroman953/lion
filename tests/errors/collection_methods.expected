@@ -1,0 +1,63 @@
+exit: 1
+----- stdout
+----- stderr
+error: a method of `List` declares the type of its elements
+  --> tests/errors/collection_methods.lion:2:10
+   |
+ 2 | fun List.second() = self[2]
+   |          ^^^^^^
+   |
+   = its first type variables are the types of the elements (C97)
+   = help: write it: `fun List.second() in maybe T, T in Type`
+
+error: a method of `Map` declares the types of its elements
+  --> tests/errors/collection_methods.lion:3:9
+   |
+ 3 | fun Map.first_key() in K, K in Type = 1
+   |         ^^^^^^^^^
+   |
+   = its first type variables are the types of the elements (C97)
+   = help: write it: `fun Map.keys_list() in List of K, K in Type, V in Type`
+
+error: `List` already has `size`
+  --> tests/errors/collection_methods.lion:4:10
+   |
+ 4 | fun List.size() in Int, T in Type = 0
+   |          ^^^^
+   |
+   = help: give the method another name
+
+error: `Set` already has `remove`
+  --> tests/errors/collection_methods.lion:5:9
+   |
+ 5 | fun Set.remove() in Int, T in Type = 0
+   |         ^^^^^^
+   |
+   = help: give the method another name
+
+warning: `twice` is never called, so it is not checked
+  --> tests/errors/collection_methods.lion:6:10
+   |
+ 6 | fun List.twice() in List of T, T in Type = self
+   |          ^^^^^
+   |
+   = a function with type variables is checked for the types of each call (§15.3)
+
+error: the method `List.twice` is already declared
+  --> tests/errors/collection_methods.lion:7:10
+   |
+ 6 | fun List.twice() in List of T, T in Type = self
+   |          ----- first declared here
+ 7 | fun List.twice() in List of T, T in Type = self
+   |          ^^^^^ declared again here
+
+error: A List of Int has no method `missing`
+  --> tests/errors/collection_methods.lion:8:10
+   |
+ 8 | show([1].missing())
+   |      --- this is a List of Int
+   |          ^^^^^^^
+   |
+   = a method is declared `fun List.missing(...), T in Type` (§12.4)
+
+6 errors found

@@ -263,6 +263,8 @@ struct Checker<'a> {
     /// The methods, by the type of `self` and their name (§12.4); several modules may
     /// add a method of the same name to a type (§20.3).
     methods: HashMap<(Type, String), Vec<usize>>,
+    /// The methods of `List`, `Set` and `Map`, by kind and name (C97).
+    collection_methods: HashMap<(&'static str, String), Vec<usize>>,
     structs: Vec<StructInfo<'a>>,
     /// The structures with type parameters, whose instances are in `structs` (§15.1).
     generic_structs: Vec<crate::generic_structs::GenericStruct<'a>>,
@@ -342,6 +344,7 @@ impl<'a> Checker<'a> {
             global_modules: HashMap::new(),
             functions: Vec::new(),
             methods: HashMap::new(),
+            collection_methods: HashMap::new(),
             structs: Vec::new(),
             generic_structs: Vec::new(),
             generic_traits: Vec::new(),

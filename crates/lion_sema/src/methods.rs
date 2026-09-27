@@ -47,7 +47,9 @@ impl Checker<'_> {
         }
         let value = self.expr(object)?;
         let value = self.within_try(value);
-        if let Some((key, entry)) = value.ty.map_parts() {
+        if let Some((key, entry)) = value.ty.map_parts()
+            && self.visible_method(value.ty, &name.name).is_none()
+        {
             return self.map_method(value, key, entry, name, args, span);
         }
         // A value of several possible types: the method of each, chosen at run time (§14.4).
@@ -161,7 +163,13 @@ impl Checker<'_> {
                 )
             };
         } else {
-            error = error.with_note(format!("a method is declared `fun {ty}.{}(...)` (§12.4)", name.name));
+            let declaration = match ty {
+                Type::List(_) => format!("fun List.{}(...), T in Type", name.name),
+                Type::Set(_) => format!("fun Set.{}(...), T in Type", name.name),
+                Type::Map(_) => format!("fun Map.{}(...), K in Type, V in Type", name.name),
+                _ => format!("fun {ty}.{}(...)", name.name),
+            };
+            error = error.with_note(format!("a method is declared `{declaration}` (§12.4)"));
         }
         self.diagnostics.push(error);
     }
@@ -176,8 +184,17 @@ impl Checker<'_> {
     /// of the type from its own file, or one of this module or of a module it uses
     /// (§20.3, C87).
     pub(crate) fn visible_method(&self, ty: Type, name: &str) -> Option<usize> {
-        let methods = self.methods.get(&(ty, name.to_string()))?;
-        methods.iter().copied().find(|&method| {
+        let own = self.methods.get(&(ty, name.to_string()));
+        // `fun List.second()`: a method of every List (C97).
+        let kind = match ty {
+            Type::List(_) => Some("List"),
+            Type::Set(_) => Some("Set"),
+            Type::Map(_) => Some("Map"),
+            _ => None,
+        };
+        let collection = kind.and_then(|kind| self.collection_methods.get(&(kind, name.to_string())));
+        let methods = own.into_iter().chain(collection).flatten();
+        methods.copied().find(|&method| {
             let function = &self.functions[method];
             if function.decl.private.is_some() {
                 return function.module == self.module;

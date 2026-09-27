@@ -19,6 +19,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
 - **Fonctions** (§11) : déclarations `fun` en bloc ou en forme courte (`fun square(x) = x * x`), paramètres sans type qui rendent la fonction générique (une version par types d'arguments, §15.3), types de retour écrits ou inférés, `return` vérifié sur tous les chemins, récursion, paramètres `var` qui modifient la variable de l'appelant, valeurs par défaut, arguments nommés, globales lues par les fonctions et modifiées avec `modifies`.
 - **Listes** (§16) : `[1, 2, 3]`, `List of T`, indices à partir de 1 et extraits `l[2..4]` (bug hors limites), `size`, `first`, `last`, `add`, `l[i] = v`, `x in l`, égalité par contenu, `for x in l`, compréhensions `[f(x), x in l, condition]`, `sum`, avec la sémantique de valeur (§17.1). Les Text s'indexent aussi par caractère.
 - **Ensembles et n-uplets** (§16) : `{1, 2}`, `Set of T`, compréhensions `{f(x), x in l, condition}`, `x in s`, `union`, `inter`, `minus`, `subset`, `size`, `for`, `sum`, `add`, `remove` ; n-uplets `(a, b)` comparables et utilisables dans les collections.
+- **Méthodes des collections** (§12.4) : `fun List.second() in maybe T, T in Type`, sur List, Set et Map (C97).
 - **Maps** (§16.1) : `var counts = {} in Map of (Text, Int)`, `counts[w] = 1`, `counts[w] += 1`, `w in counts`, `counts.get(w)`, `counts.remove(w)`, `for w in counts` (API minimale choisie en C79).
 - **Domaines** (§16.5) : `{x in Int, x > 0}` est un `Domain of Int`, qu'on teste avec `in` et combine avec `union`, `inter`, `minus` (`Int minus positives`) ; `{x in Int, 1 <= x, x <= n}` est un Set, car ses bornes sont reconnues.
 - **Unions et erreurs** (§7.3, §7.4, §18) : `maybe T`, `A or B`, tests de type `x in T`, affinage après un test ou une sortie anticipée, `if … then` sans `else`, `Error` (tout type qui a `message()` est une erreur), `error("…")`, `e.message()`, `"12" as Int` qui donne `Int or Error`, `try` dans une fonction ou au niveau du script, `match` en instruction et en expression (motifs de valeur, de type `in Int g`, d'appartenance `in 1..9`, conditions, `otherwise`, exhaustivité vérifiée).
@@ -50,7 +51,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 - **Mode compilé** (§22) : `lion build f.lion` produit un exécutable natif, par Rust et LLVM, qui donne exactement la même sortie, les mêmes bugs et le même code de sortie que `lion run`, sans les alertes. Il va de 3 à 13 fois plus vite que la machine virtuelle sur nos mesures.
 
-**Pas encore implémenté** : méthodes de List, Set et Map, types comme valeurs, lecture des éléments d'un n-uplet, modules `net` et `ui`, débogueur. La bibliothèque `ui` attend une décision de l'auteur : voir la [proposition](docs/design/ui.md). La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+**Pas encore implémenté** : types comme valeurs, lecture des éléments d'un n-uplet, modules `net` et `ui`, débogueur. La bibliothèque `ui` attend une décision de l'auteur : voir la [proposition](docs/design/ui.md). La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ## Construire et utiliser
 

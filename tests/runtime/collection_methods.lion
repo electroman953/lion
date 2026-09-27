@@ -1,0 +1,37 @@
+// Methods of List, Set and Map (§12.4, C97): the first type variables declared are
+// the types of the elements, of the keys and of the values.
+fun List.second() in maybe T, T in Type = if self.size >= 2 then self[2]
+fun List.total() in T, T in Comparable:
+    var result = self[1]
+    for x in self[2..self.size]:
+        result = result + x
+    ;
+    return result
+;
+fun List.push_twice(var self, value in T), T in Type:
+    self.add(value)
+    self.add(value)
+;
+fun List.mapped(f in fun(T) in U) in List of U, T in Type, U in Type = [f(x), x in self]
+fun Set.has_all(other in Set of T) in Bool, T in Type = other subset self
+fun Map.keys_list() in List of K, K in Type, V in Type = [k, k in self]
+fun Map.value_or(key in K, default in V) in V, K in Type, V in Type:
+    let found = self.get(key)
+    if found == none: return default ;
+    return found
+;
+show([1, 2, 3].second())
+show(["a"].second())
+show([1.5, 2.5].total())
+var l = [1]
+l.push_twice(7)
+show(l)
+fun double(n in Int) in Int = n * 2
+show([1, 2].mapped(double))
+show({1, 2, 3}.has_all({2, 3}))
+var m = {} in Map of (Text, Int)
+m["a"] = 1
+m["b"] = 2
+show(m.keys_list())
+show(m.value_or("z", 0))
+show(m.get("a"))
