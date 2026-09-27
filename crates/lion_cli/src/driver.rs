@@ -280,6 +280,119 @@ fn load(path: &str) -> Option<(SourceMap, SourceId)> {
 /// Lexes, parses and checks a script and the modules it uses. Returns the program if
 /// it has no errors, after reporting every diagnostic.
 fn front_end(sources: &mut SourceMap, id: SourceId) -> Option<ir::Program> {
+    let (program, diagnostics) = check_files(sources, id);
+    report(&diagnostics, sources);
+    program
+}
+
+/// `lion` alone: the interactive mode (§24, D26). Each input is checked with the
+/// ones before it, then only its statements run, on the variables of the session; an
+/// expression alone shows its value (C70).
+pub fn interactive() -> ExitCode {
+    use std::io::{BufRead, IsTerminal};
+    let terminal = io::stdin().is_terminal();
+    if terminal {
+        println!("Lion {} — interactive mode. Leave with `exit()` or Ctrl-D.", env!("CARGO_PKG_VERSION"));
+    }
+    let mut stdin = io::stdin().lock();
+    let (mut accepted, mut executed) = (String::new(), 0usize);
+    let mut session = lion_vm::Session::default();
+    loop {
+        // An input goes on while a block or a bracket is open.
+        let mut input = String::new();
+        loop {
+            if terminal {
+                print!("{}", if input.is_empty() { "lion> " } else { "...   " });
+                let _ = io::stdout().flush();
+            }
+            let mut line = String::new();
+            match stdin.read_line(&mut line) {
+                Ok(0) | Err(_) => {
+                    if terminal {
+                        println!();
+                    }
+                    return ExitCode::SUCCESS;
+                }
+                Ok(_) => {}
+            }
+            input.push_str(&line);
+            let mut scratch = SourceMap::new();
+            let scratch_id = scratch.add("<input>", input.clone());
+            let lexed = lion_syntax::lex(scratch_id, &input);
+            if lion_syntax::is_complete(&lexed.tokens) {
+                break;
+            }
+        }
+        if input.trim().is_empty() {
+            continue;
+        }
+        let candidate = format!("{accepted}{input}");
+        let mut sources = SourceMap::new();
+        let id = sources.add("<interactive>", candidate.clone());
+        let (program, diagnostics) = check_files(&mut sources, id);
+        // The earlier inputs were accepted: only what concerns this one is shown.
+        let fresh: Vec<Diagnostic> = diagnostics
+            .into_iter()
+            .filter(|diagnostic| {
+                diagnostic.is_fatal()
+                    || diagnostic
+                        .labels
+                        .iter()
+                        .any(|label| label.primary && label.span.start as usize >= accepted.len())
+            })
+            .collect();
+        report(&fresh, &sources);
+        let Some(mut program) = program else { continue };
+        let main = program.main.index();
+        let body = &mut program.functions[main].body;
+        // An expression alone shows its value.
+        let first = executed.min(body.len());
+        if let [ir::Stmt::Expr(value)] = &mut body[first..]
+            && value.ty != ir::Type::None
+        {
+            let shown = std::mem::replace(
+                value,
+                ir::Expr { kind: ir::ExprKind::None, ty: ir::Type::None, span: value.span },
+            );
+            let span = shown.span;
+            // Written as a literal: a Text between quotes.
+            let literal = ir::Expr {
+                kind: ir::ExprKind::Convert { conversion: ir::Conversion::Literal, value: Box::new(shown) },
+                ty: ir::Type::Text,
+                span,
+            };
+            *value = ir::Expr {
+                kind: ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Show, args: vec![literal] },
+                ty: ir::Type::None,
+                span,
+            };
+        }
+        let statements = body.len();
+        let chunk = lion_vm::compile(&program);
+        let mut out = BufWriter::new(io::stdout().lock());
+        let hidden = |span: lion_diagnostics::Span| sources.get(span.source).name().starts_with("<std>/");
+        let mut report_alert = |alert: lion_vm::Alert| {
+            eprintln!("{}", render(&alert.located(&hidden).to_diagnostic(), &sources));
+        };
+        let result =
+            lion_vm::run_from(&chunk, &mut session, executed, &mut out, &mut stdin, &mut report_alert);
+        let _ = out.flush();
+        drop(out);
+        match result {
+            Ok(()) => {
+                accepted = candidate;
+                executed = statements;
+            }
+            Err(lion_vm::Trap::Exit(code)) => return ExitCode::from(code),
+            // The input that met a bug is forgotten; what it did stays.
+            Err(trap) => eprintln!("{}", render(&trap.located(&hidden).to_diagnostic(), &sources)),
+        }
+    }
+}
+
+/// Lexes, parses and checks a script and the modules it uses: the program if it has no
+/// errors, and the diagnostics.
+fn check_files(sources: &mut SourceMap, id: SourceId) -> (Option<ir::Program>, Vec<Diagnostic>) {
     let mut diagnostics = Vec::new();
     // The files of the program: the script, then each module that a file uses, once.
     let mut files: Vec<(String, SourceId, bool)> = vec![(String::new(), id, false)];
@@ -339,8 +452,7 @@ fn front_end(sources: &mut SourceMap, id: SourceId) -> Option<ir::Program> {
         diagnostics.extend(checked.diagnostics);
         checked.program
     };
-    report(&diagnostics, sources);
-    program
+    (program, diagnostics)
 }
 
 /// The module `a.b`: a module of the standard library, or the file `a/b.lion` in the

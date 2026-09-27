@@ -1,0 +1,25 @@
+let x = 20
+x + 22
+fun square(n in Int) in Int = n * n
+square(x)
+var total = 0
+for i in 1..4:
+    total += i
+;
+total
+show("hello")
+"text"
+let bad = [1][2]
+bad
+let y = 3
+y * x
+undefined_name
+use math
+math.sqrt(16.0)
+if y > 2:
+    show("big")
+else:
+    show("small")
+;
+exit(0)
+show("never")

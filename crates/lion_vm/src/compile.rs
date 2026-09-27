@@ -123,9 +123,15 @@ fn compile_function(function: &ir::Function, is_script: bool, shared: &mut Share
         compiler.expr_into(value, *index);
         compiler.patch(skip);
     }
-    compiler.block(&function.body);
+    // Where each statement starts, so that the interactive mode runs only the new ones.
+    let mut starts = Vec::new();
+    for stmt in &function.body {
+        starts.push(compiler.code.len() as u32);
+        compiler.stmt(stmt);
+    }
     compiler.emit(if is_script { Instr::Halt } else { Instr::ReturnNone }, None);
     Chunk {
+        starts,
         label: Rc::from(function.name.as_str()),
         params: function.params,
         name: function.name.clone(),

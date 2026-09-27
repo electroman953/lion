@@ -147,6 +147,44 @@ pub fn run(
     machine.run().map_err(|fault| *fault)
 }
 
+/// What the interactive mode keeps from one input to the next: the registers of the
+/// script, which hold its variables, and the modules already initialized (§24, D26).
+#[derive(Default)]
+pub struct Session {
+    stack: Vec<Value>,
+    initialized: Vec<bool>,
+}
+
+/// Runs the statements of the script from the one at `first`, on the variables of the
+/// session. On a trap, the session keeps the values it had reached.
+pub fn run_from(
+    program: &Program,
+    session: &mut Session,
+    first: usize,
+    out: &mut dyn Write,
+    input: &mut dyn BufRead,
+    on_alert: &mut dyn FnMut(Alert),
+) -> Result<(), Trap> {
+    let mut machine = Machine::new(program, out, input, on_alert);
+    let stack = std::mem::take(&mut session.stack);
+    let size = machine.stack.len().max(stack.len());
+    machine.stack = stack;
+    machine.stack.resize(size, Value::None);
+    for (index, done) in session.initialized.iter().enumerate() {
+        if let Some(flag) = machine.initialized.get_mut(index) {
+            *flag = *done;
+        }
+    }
+    let main = machine.chunk;
+    let start = main.starts.get(first).map_or(main.code.len() - 1, |&start| start as usize);
+    let result = machine.run_at(start);
+    // The registers of the script are kept; those of calls that a bug stopped are not.
+    machine.stack.truncate(main.registers as usize);
+    session.stack = std::mem::take(&mut machine.stack);
+    session.initialized = machine.initialized;
+    result.map_err(|fault| *fault)
+}
+
 /// A failed `expect` of a test: where, and why (§24.1, D72).
 #[derive(Debug)]
 pub struct Failure {
@@ -250,7 +288,11 @@ impl<'a> Machine<'a> {
     }
 
     fn run(&mut self) -> Result<(), Fault> {
-        let mut pc = 0;
+        self.run_at(0)
+    }
+
+    fn run_at(&mut self, start: usize) -> Result<(), Fault> {
+        let mut pc = start;
         // The code of the running function, reloaded when a call enters or leaves one.
         let mut code: &[Instr] = &self.chunk.code;
         loop {

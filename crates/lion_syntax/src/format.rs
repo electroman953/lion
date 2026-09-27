@@ -115,6 +115,34 @@ pub fn format(text: &str, tokens: &[Token], block_comments: &[(usize, usize)]) -
     out
 }
 
+/// Whether the tokens end outside every block and bracket: an input of the interactive
+/// mode is complete (§24, D26).
+pub fn is_complete(tokens: &[Token]) -> bool {
+    let (mut blocks, mut brackets, mut expressions) = (0usize, 0usize, 0usize);
+    for token in tokens {
+        match token.kind {
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace | TokenKind::InterpStart => {
+                brackets += 1
+            }
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace | TokenKind::InterpEnd => {
+                brackets = brackets.saturating_sub(1)
+            }
+            TokenKind::Newline if brackets == 0 => expressions = 0,
+            TokenKind::Keyword(Keyword::Then) if brackets == 0 => expressions += 1,
+            TokenKind::Keyword(Keyword::Elif | Keyword::Else) if brackets == 0 && expressions > 0 => {
+                expressions -= 1
+            }
+            TokenKind::Keyword(Keyword::Elif | Keyword::Else) if brackets == 0 => {
+                blocks = blocks.saturating_sub(1)
+            }
+            TokenKind::Colon if brackets == 0 => blocks += 1,
+            TokenKind::Semicolon if brackets == 0 => blocks = blocks.saturating_sub(1),
+            _ => {}
+        }
+    }
+    blocks == 0 && brackets == 0
+}
+
 /// The line, from 1, of a byte of the text.
 fn line_of(text: &str, byte: usize) -> usize {
     text[..byte.min(text.len())].matches('\n').count() + 1

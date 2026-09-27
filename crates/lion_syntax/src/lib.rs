@@ -7,7 +7,7 @@ mod parser;
 mod print;
 mod token;
 
-pub use format::format;
+pub use format::{format, is_complete};
 pub use lexer::{Lexed, lex};
 pub use parser::{Parsed, parse};
 pub use print::{print_expr, print_module, print_stmt, print_type};

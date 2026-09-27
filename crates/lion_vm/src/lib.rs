@@ -14,7 +14,7 @@ mod value;
 
 pub use bytecode::{Chunk, Cmp, Instr, Program, Reg, Target, disassemble};
 pub use compile::compile;
-pub use machine::{Alert, AlertKind, Failure, Trap, run, run_test};
+pub use machine::{Alert, AlertKind, Failure, Session, Trap, run, run_from, run_test};
 pub use value::Value;
 
 #[cfg(test)]

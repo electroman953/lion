@@ -17,7 +17,9 @@ usage:
   lion debug <stage> <file.lion>   show a stage of the compiler: tokens, ast, ir or bytecode
   lion --version
 
-not implemented yet: `lion build` and the interactive mode (`lion` alone)
+  lion                             the interactive mode: type Lion line by line
+
+not implemented yet: `lion build`
 ";
 
 fn main() -> ExitCode {
@@ -65,10 +67,7 @@ fn dispatch(args: &[String]) -> ExitCode {
             eprintln!("error: `lion {command}` is not implemented yet\n\n{USAGE}");
             ExitCode::from(exit::USAGE)
         }
-        [] => {
-            eprintln!("error: the interactive mode is not implemented yet\n\n{USAGE}");
-            ExitCode::from(exit::USAGE)
-        }
+        [] => driver::interactive(),
         _ => {
             eprintln!("error: unknown command `{}`\n\n{USAGE}", args.join(" "));
             ExitCode::from(exit::USAGE)

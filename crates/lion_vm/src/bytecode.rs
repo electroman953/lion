@@ -277,6 +277,8 @@ pub struct EnumLayout {
 /// Compiled code for one function.
 pub struct Chunk {
     pub name: String,
+    /// Where each statement of the body starts.
+    pub starts: Vec<u32>,
     /// The name, shared by the function values of this function.
     pub label: Rc<str>,
     /// The number of its parameters; the variables it captures come after them.

@@ -20,6 +20,8 @@ const SUITES: &[(&str, &[&str])] = &[
     // The programs of the spec (§27), run from their folder, where they find their files.
     ("programs", &["run"]),
     ("testing", &["test"]),
+    // The interactive mode, with the file as its input.
+    ("interactive", &[]),
 ];
 
 #[test]
@@ -37,12 +39,14 @@ fn golden() {
             } else {
                 (root.clone(), relative.to_path_buf())
             };
-            let output = Command::new(env!("CARGO_BIN_EXE_lion"))
-                .args(*args)
-                .arg(&path)
-                .current_dir(&folder)
-                .output()
-                .expect("the lion binary runs");
+            let mut command = Command::new(env!("CARGO_BIN_EXE_lion"));
+            command.args(*args).current_dir(&folder);
+            if *suite == "interactive" {
+                command.stdin(fs::File::open(&file).unwrap());
+            } else {
+                command.arg(&path);
+            }
+            let output = command.output().expect("the lion binary runs");
             let actual = transcript(&output);
             let expected_path = file.with_extension("expected");
             if bless {
