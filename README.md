@@ -10,6 +10,7 @@ L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 2
 
 - **Programmes-scripts** (§20.1) : `let`, `var`, déclaration sans valeur (`let e in Text`), annotation (`in Float`), redéclaration dans le même bloc, `=`, `+=`, `-=`, `*=`.
 - **Contrôle de flux** : blocs `if`/`elif`/`else`, `while` et `for` (sur plusieurs lignes ou sur une seule), intervalles `a..b` et `x in a..b`, `break`, `continue`, `return` pour terminer le script, expression `if … then … else`. Les portées suivent les blocs ; un nom ne peut pas être redéclaré dans un bloc intérieur (§6.5).
+- **Fonctions comme valeurs** (§11) : type `fun(Int) in Int`, fonctions passées en argument, rangées dans des listes ou des champs, fonctions anonymes `fun(x in Int) = x * 2`, closures (copie des variables à la création, partage avec `modifies`), curryfication `f(1)(2)`.
 - **Fonctions** (§11) : déclarations `fun` en bloc ou en forme courte (`fun square(x) = x * x`), paramètres sans type qui rendent la fonction générique (une version par types d'arguments, §15.3), types de retour écrits ou inférés, `return` vérifié sur tous les chemins, récursion, paramètres `var` qui modifient la variable de l'appelant, valeurs par défaut, arguments nommés, globales lues par les fonctions et modifiées avec `modifies`.
 - **Listes** (§16) : `[1, 2, 3]`, `List of T`, indices à partir de 1 et extraits `l[2..4]` (bug hors limites), `size`, `first`, `last`, `add`, `l[i] = v`, `x in l`, égalité par contenu, `for x in l`, compréhensions `[f(x), x in l, condition]`, `sum`, avec la sémantique de valeur (§17.1). Les Text s'indexent aussi par caractère.
 - **Ensembles et n-uplets** (§16) : `{1, 2}`, `Set of T`, compréhensions `{f(x), x in l, condition}`, `x in s`, `union`, `inter`, `minus`, `subset`, `size`, `for`, `sum`, `add` ; n-uplets `(a, b)` comparables et utilisables dans les collections.
@@ -33,7 +34,7 @@ L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 2
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, exposant négatif, conversion Float → Int impossible, récursion sans fin (plus de 100 000 appels imbriqués). Chacun est signalé avec l'emplacement, les appels en cours, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 
-**Pas encore implémenté** : variables de type (`T in Comparable`), fonctions comme valeurs, closures et curryfication, méthodes détachées et méthodes d'opérateurs, lecture des éléments d'un n-uplet, `Domain` et `Map`, traits, valeurs `shared`, appel de code C, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, formateur, tests intégrés, mode interactif.
+**Pas encore implémenté** : variables de type (`T in Comparable`), fonctions anonymes génériques, méthodes détachées et méthodes d'opérateurs, lecture des éléments d'un n-uplet, `Domain` et `Map`, traits, valeurs `shared`, appel de code C, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, formateur, tests intégrés, mode interactif.
 
 ## Construire et utiliser
 

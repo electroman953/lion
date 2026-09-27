@@ -296,6 +296,8 @@ pub enum ExprKind {
     Tuple(Vec<Element>),
     /// `parallel [f(x), x in l]`: a comprehension computed in parallel (§19.2).
     Parallel(Box<Expr>),
+    /// `fun(x in Int) = x * 2`: an anonymous function (§11.1); its name is `fun`.
+    Fun(Box<FunDecl>),
 }
 
 /// An element of a tuple, named or not (§26: `element`).

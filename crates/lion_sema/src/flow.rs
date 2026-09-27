@@ -136,6 +136,10 @@ impl Checker<'_> {
             return true;
         }
         let name = &info.name;
+        if info.captured {
+            self.diagnostics.push(captured_change(name, span));
+            return false;
+        }
         if info.loop_variable {
             self.diagnostics.push(
                 Diagnostic::error(format!("cannot assign to the loop variable `{name}`"))
@@ -196,6 +200,16 @@ impl Checker<'_> {
             );
         }
     }
+}
+
+/// A function that changes a variable it reads from around it, without `modifies`.
+pub(crate) fn captured_change(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(format!("this function cannot change `{name}`, which is declared around it"))
+        .with_primary(span, "")
+        .with_note("a function reads a copy of the variables around it, taken where it is created (§11.5)")
+        .with_help(format!(
+            "to change the variable itself, add `modifies {name}` to the declaration of the function"
+        ))
 }
 
 #[cfg(test)]

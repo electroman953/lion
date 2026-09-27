@@ -69,12 +69,4 @@ error: `self` is a parameter of methods only
     |
     = a method is declared `fun Type.name(...)` (§12.4)
 
-error: not implemented yet: functions declared inside a block or a function (closures)
-   --> tests/errors/function_declarations.lion:12:9
-    |
- 12 |     fun nested() = 1
-    |         ^^^^^^
-    |
-    = this part of Lion (spec §11.5) is not supported by this version of the implementation
-
-8 errors found
+7 errors found

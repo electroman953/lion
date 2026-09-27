@@ -72,6 +72,7 @@ impl Checker<'_> {
             ast::ExprKind::Set(elements) => self.collection(Collection::Set, elements, span),
             ast::ExprKind::Tuple(elements) => self.tuple(elements, span),
             ast::ExprKind::Parallel(inner) => self.parallel_expr(inner, span),
+            ast::ExprKind::Fun(decl) => self.anonymous_function(decl, span, None),
         }
     }
 
@@ -194,8 +195,9 @@ impl Checker<'_> {
                 let GlobalType::Known(ty) = self.global_info(local).ty else { return None };
                 Some(typed(ir::ExprKind::Global(local), ty?, span))
             }
-            Resolved::Function(_) | Resolved::Standard(_) => {
-                self.not_implemented(span, "functions used as values", "§11.3");
+            Resolved::Function(index) => self.function_value(index, span, None),
+            Resolved::Standard(_) => {
+                self.not_implemented(span, "standard functions used as values", "§11, §23");
                 None
             }
             Resolved::Nothing => None,
@@ -670,6 +672,14 @@ impl Checker<'_> {
         let (lty, rty) = (lhs.ty, rhs.ty);
         let equality_op = |eq: B, ne: B| if op == Eq { eq } else { ne };
         let plain = |op| Comparison { op, on_floats: false, on_positions: false };
+        if matches!(lty, Type::Fun(_)) || matches!(rty, Type::Fun(_)) {
+            self.diagnostics.push(
+                Diagnostic::error("functions cannot be compared")
+                    .with_primary(op_span, "")
+                    .with_note("Lion 0.1 does not define `==` nor an order on functions (C65)"),
+            );
+            return None;
+        }
         let checked = match (lty, rty) {
             (Type::Int, Type::Int) => plain(pick(int_ops)),
             _ if lty.is_numeric() && rty.is_numeric() => {
@@ -838,18 +848,18 @@ impl Checker<'_> {
 
     fn call(&mut self, callee: &ast::Expr, args: &[ast::Arg], span: Span) -> Option<ir::Expr> {
         let ast::ExprKind::Name(name) = &callee.kind else {
-            let (what, section) = match callee.kind {
-                ast::ExprKind::TypeName(ref name) => return self.type_call(name, callee.span, args, span),
+            return match callee.kind {
+                ast::ExprKind::TypeName(ref name) => self.type_call(name, callee.span, args, span),
                 ast::ExprKind::Field { ref name, .. } if name.name == "add" => {
                     self.diagnostics.push(
                         Diagnostic::error("`add` is called on its own line: `l.add(value)`")
                             .with_primary(span, "")
                             .with_note("`add` changes the list and gives no value"),
                     );
-                    return None;
+                    None
                 }
                 ast::ExprKind::Field { ref object, ref name } if name.name == "message" => {
-                    return self.message(object, args, span);
+                    self.message(object, args, span)
                 }
                 ast::ExprKind::Field { ref object, ref name } => {
                     if let ast::ExprKind::Name(module) = &object.kind
@@ -857,12 +867,14 @@ impl Checker<'_> {
                     {
                         return self.module_member_call(module, name, args, span);
                     }
-                    return self.method_call(object, name, args, span);
+                    self.method_call(object, name, args, span)
                 }
-                _ => ("calling a computed function", "§11.3"),
+                // `f(1)(2)`, `handlers[1](x)`: a computed function value.
+                _ => {
+                    let value = self.expr(callee)?;
+                    self.call_value(value, args, span)
+                }
             };
-            self.not_implemented(callee.span, what, section);
-            return None;
         };
         let (decl_span, ty) = match self.resolve(name, callee.span) {
             Resolved::Function(index) => return self.call_function(index, callee.span, args, span),
@@ -892,6 +904,11 @@ impl Checker<'_> {
                 (global.decl.name.span, ty)
             }
         };
+        // A variable that holds a function (§11).
+        if let Some(Type::Fun(_)) = ty {
+            let value = self.expr(callee)?;
+            return self.call_value(value, args, span);
+        }
         let mut error = Diagnostic::error(format!("`{name}` is not a function"))
             .with_primary(callee.span, ty.map_or(String::new(), |ty| format!("`{name}` is {}", article(ty))))
             .with_secondary(decl_span, "declared here");
@@ -1035,6 +1052,16 @@ impl Checker<'_> {
     ) -> Option<ir::Expr> {
         if expr.ty == expected || expr.ty.is_subset_of(expected) {
             return Some(expr);
+        }
+        // A function with default values goes where fewer arguments are required.
+        if let (Type::Fun(given), Type::Fun(wanted)) = (expr.ty, expected) {
+            let (given, wanted) = (given.get(), wanted.get());
+            if given.params == wanted.params
+                && given.ret.is_subset_of(wanted.ret)
+                && given.required <= wanted.required
+            {
+                return Some(ir::Expr { ty: expected, ..expr });
+            }
         }
         // An Int goes where a Float is expected, also in a union (§8.5).
         let members = expected.members();

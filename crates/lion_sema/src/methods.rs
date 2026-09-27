@@ -48,6 +48,19 @@ impl Checker<'_> {
         let value = self.expr(object)?;
         let value = self.within_try(value);
         let Some(method) = self.visible_method(value.ty, &name.name) else {
+            // A field that holds a function: `button.on_click()` (§11).
+            if let Type::Struct(structure) = value.ty {
+                let info = &self.structs[self.struct_index(structure)];
+                let field = info.fields.iter().position(|field| field.name == name.name);
+                if let Some(field) =
+                    field.filter(|&field| matches!(info.fields[field].ty, Some(Type::Fun(_))))
+                {
+                    let ty = info.fields[field].ty.expect("checked");
+                    let span = value.span.to(name.span);
+                    let kind = lion_ir::ExprKind::Field { object: Box::new(value), field: field as u32 };
+                    return self.call_value(crate::typed(kind, ty, span), args, span);
+                }
+            }
             self.no_method(value.ty, name, value.span);
             return None;
         };

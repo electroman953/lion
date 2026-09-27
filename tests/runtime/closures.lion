@@ -1,0 +1,78 @@
+// Functions as values, closures and currying (§11.3, §11.5).
+fun square(x in Int) in Int = x * x
+fun apply(f in fun(Int) in Int, x in Int) in Int = f(x)
+show(apply(square, 5))
+let twice = fun(x in Int) = x * 2
+show(twice(21))
+show(apply(fun(n) = n + 1, 41))
+let ops = [square, twice]
+show([op(3), op in ops])
+fun make_counter() in fun() in Int:
+    var count = 0
+    fun next() in Int modifies count:
+        count += 1
+        return count
+    ;
+    return next
+;
+let c = make_counter()
+show(c())
+show(c())
+let d = make_counter()
+show(d())
+var x = 1
+if true:
+    var y = 10
+    fun add_y(n in Int) in Int = n + y
+    y = 20
+    show(add_y(1))
+;
+fun fact(n in Int) in Int:
+    fun go(k in Int, acc in Int) in Int:
+        if k <= 1: return acc ;
+        return go(k - 1, acc * k)
+    ;
+    return go(n, 1)
+;
+show(fact(10))
+let log = fun(msg in Text): show("> {msg}") ;
+log("hello")
+show(square)
+fun f(a in Int, b in Int, c in Int = 1) in Int = a * 100 + b * 10 + c
+let g = f(1)
+show(g(2))
+show(f(1)(2, 5))
+show(g(3, 7))
+let add = fun(x in Int, y in Int) = x + y
+let inc = add(1)
+show(inc(41))
+show([inc(n), n in 1..3])
+// A copy of the variables around, taken where the function is created (D71).
+fun adders() in List of (fun(Int) in Int):
+    var result = [] in List of (fun(Int) in Int)
+    for i in 1..3:
+        var step = i * 10
+        result.add(fun(x in Int) = x + step)
+    ;
+    return result
+;
+show([adder(1), adder in adders()])
+// A variable shared with `modifies` lives as long as the function (§11.5).
+fun accumulate() in fun(Int) in List of Int:
+    var seen = [] in List of Int
+    fun push(value in Int) in List of Int modifies seen:
+        seen.add(value)
+        return seen
+    ;
+    return push
+;
+let push = accumulate()
+push(1)
+push(2)
+show(push(3))
+struct Button:
+    label in Text
+    on_click in fun() in Text
+;
+let b = Button("OK", fun() = "clicked")
+show(b.on_click())

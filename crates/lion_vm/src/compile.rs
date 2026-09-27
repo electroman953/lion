@@ -102,6 +102,8 @@ fn compile_function(function: &ir::Function, is_script: bool, shared: &mut Share
     compiler.block(&function.body);
     compiler.emit(if is_script { Instr::Halt } else { Instr::ReturnNone }, None);
     Chunk {
+        label: Rc::from(function.name.as_str()),
+        params: function.params,
         name: function.name.clone(),
         code: compiler.code,
         spans: compiler.spans,
@@ -138,6 +140,10 @@ impl Compiler<'_> {
         let mark = self.next_temp;
         match stmt {
             ir::Stmt::Assign { place, value } => self.assign(*place, value),
+            ir::Stmt::Declare { local } if self.boxed(*local) => {
+                self.emit(Instr::NewCell { dst: register(*local) }, None);
+            }
+            ir::Stmt::Declare { .. } => {}
             ir::Stmt::Expr(expr) => self.effect(expr),
             ir::Stmt::If { cond, then, otherwise } => {
                 let to_otherwise = self.jump_unless(cond);
@@ -175,6 +181,27 @@ impl Compiler<'_> {
                 let dst = self.temp();
                 self.emit(Instr::InitModule { module: *module, dst }, None);
             }
+            ir::Stmt::AssignElement { root: ir::Place::Local(local), path, value } if self.boxed(*local) => {
+                // The value leaves the cell while it changes, so that it is not copied.
+                let cell = register(*local);
+                let whole = self.temp();
+                let (_, start, depth) = self.path(ir::Place::Local(*local), path);
+                let src = self.operand(value);
+                self.emit(Instr::TakeCell { dst: whole, cell }, None);
+                let target = Target::Register(whole);
+                self.emit(Instr::StoreElement { target, indices: start, depth, src }, Some(value.span));
+                self.emit(Instr::StoreCell { cell, src: whole }, None);
+            }
+            ir::Stmt::Add { root: ir::Place::Local(local), path, value } if self.boxed(*local) => {
+                let cell = register(*local);
+                let whole = self.temp();
+                let (_, start, depth) = self.path(ir::Place::Local(*local), path);
+                let src = self.operand(value);
+                self.emit(Instr::TakeCell { dst: whole, cell }, None);
+                let target = Target::Register(whole);
+                self.emit(Instr::AddElement { target, indices: start, depth, src }, Some(value.span));
+                self.emit(Instr::StoreCell { cell, src: whole }, None);
+            }
             ir::Stmt::AssignElement { root, path, value } => {
                 let (target, start, depth) = self.path(*root, path);
                 let src = self.operand(value);
@@ -204,6 +231,11 @@ impl Compiler<'_> {
     fn assign(&mut self, place: ir::Place, value: &ir::Expr) {
         let span = Some(value.span);
         match place {
+            // A variable shared with a nested function lives in a cell (§11.5).
+            ir::Place::Local(local) if self.boxed(local) => {
+                let src = self.operand(value);
+                self.emit(Instr::StoreCell { cell: register(local), src }, span);
+            }
             ir::Place::Local(local) if !self.by_reference(local) => {
                 let dst = register(local);
                 if writes_destination_early(value) {
@@ -382,6 +414,52 @@ impl Compiler<'_> {
             }
             ExprKind::Local(local) if self.by_reference(*local) => {
                 self.emit(Instr::LoadRef { dst, reference: register(*local) }, span);
+            }
+            ExprKind::Local(local) if self.boxed(*local) => {
+                self.emit(Instr::LoadCell { dst, cell: register(*local) }, span);
+            }
+            ExprKind::Cell(local) => {
+                let src = register(*local);
+                if src != dst {
+                    self.emit(Instr::Move { dst, src }, span);
+                }
+            }
+            ExprKind::Closure { function, captures } => {
+                let start = self.next_temp;
+                for _ in captures {
+                    self.temp();
+                }
+                for (offset, capture) in captures.iter().enumerate() {
+                    self.expr_into(capture, start + offset as u32);
+                }
+                let count = captures.len() as u32;
+                self.emit(Instr::MakeClosure { dst, function: function.0, start, count }, span);
+            }
+            ExprKind::Partial { callee, args } => {
+                let callee_reg = self.temp();
+                self.expr_into(callee, callee_reg);
+                let start = self.next_temp;
+                for _ in args {
+                    self.temp();
+                }
+                for (offset, arg) in args.iter().enumerate() {
+                    self.expr_into(arg, start + offset as u32);
+                }
+                let count = args.len() as u32;
+                self.emit(Instr::Bind { dst, callee: callee_reg, start, count }, span);
+            }
+            ExprKind::CallValue { callee, args } => {
+                let callee_reg = self.temp();
+                self.expr_into(callee, callee_reg);
+                let start = self.next_temp;
+                for _ in args {
+                    self.temp();
+                }
+                for (offset, arg) in args.iter().enumerate() {
+                    self.expr_into(arg, start + offset as u32);
+                }
+                let count = args.len() as u32;
+                self.emit(Instr::CallValue { dst, callee: callee_reg, args: start, count }, span);
             }
             ExprKind::Local(local) => {
                 let src = register(*local);
@@ -681,6 +759,7 @@ impl Compiler<'_> {
     fn operand(&mut self, expr: &ir::Expr) -> Reg {
         if let ExprKind::Local(local) = expr.kind
             && !self.by_reference(local)
+            && !self.boxed(local)
         {
             return register(local);
         }
@@ -703,6 +782,11 @@ impl Compiler<'_> {
 
     fn by_reference(&self, local: ir::LocalId) -> bool {
         self.function.local(local).by_reference
+    }
+
+    /// A variable shared with a nested function, whose register holds a cell (§11.5).
+    fn boxed(&self, local: ir::LocalId) -> bool {
+        self.function.local(local).boxed
     }
 
     fn temp(&mut self) -> Reg {
@@ -798,7 +882,10 @@ fn calls_function(expr: &ir::Expr) -> bool {
         ExprKind::CallBuiltin { args, .. } => args.iter().any(calls_function),
         ExprKind::Struct { fields, .. } => fields.iter().any(calls_function),
         ExprKind::Field { object, .. } => calls_function(object),
-        ExprKind::Enum { .. } => false,
+        ExprKind::Enum { .. } | ExprKind::Cell(_) => false,
+        ExprKind::Closure { captures, .. } => captures.iter().any(calls_function),
+        ExprKind::CallValue { .. } => true,
+        ExprKind::Partial { callee, args } => calls_function(callee) || args.iter().any(calls_function),
     }
 }
 
@@ -820,6 +907,7 @@ fn kinds_of(ty: ir::Type) -> u16 {
             ir::Type::Error => kinds::ERROR,
             ir::Type::Struct(_) => kinds::STRUCT,
             ir::Type::Enum(_) => kinds::ENUM,
+            ir::Type::Fun(_) => kinds::FUN,
             ir::Type::Union(_) => unreachable!("the members of a union are not unions"),
         })
         .fold(0, |all, kind| all | kind)

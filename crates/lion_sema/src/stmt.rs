@@ -65,14 +65,7 @@ impl Checker<'_> {
             ast::StmtKind::Fun(_) if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 => {
                 None
             }
-            ast::StmtKind::Fun(decl) => {
-                self.not_implemented(
-                    decl.name.span,
-                    "functions declared inside a block or a function (closures)",
-                    "§11.5",
-                );
-                None
-            }
+            ast::StmtKind::Fun(decl) => self.local_function(decl, stmt.span),
             // `use` is resolved beforehand, from the top level only (§20.2).
             ast::StmtKind::Use(_) if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 => {
                 None
@@ -142,7 +135,17 @@ impl Checker<'_> {
         if let Some(value) = &value {
             self.narrow_to_value(local, value.ty);
         }
-        value.map(|value| ir::Stmt::Assign { place: ir::Place::Local(local), value })
+        let assign = value.map(|value| ir::Stmt::Assign { place: ir::Place::Local(local), value });
+        // A `var` starts here: a nested function may share it later (§11.5).
+        let global = self.ctx.kind == ContextKind::Script && self.global_names.contains_key(&local);
+        if !decl.mutable || global {
+            return assign;
+        }
+        let declare = ir::Stmt::Declare { local };
+        Some(match assign {
+            Some(assign) => ir::Stmt::Seq(vec![declare, assign]),
+            None => declare,
+        })
     }
 
     /// `x = value`, `x += value`, ... (§6.3, D44).

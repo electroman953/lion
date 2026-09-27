@@ -1,0 +1,27 @@
+// Mistakes with functions as values and closures (§11.3, §11.5).
+fun outer():
+    var total = 0
+    let limit = 10
+    fun bad2():
+        total += 1
+    ;
+    fun bad3() modifies limit:
+        show(limit)
+    ;
+    fun later() = unknown_later
+    var unknown_later = 3
+    let f = fun(x) = x
+    let g = fun(x in Int, y in Int = 2) = x + y
+    let h = fun(x in Int) = x
+    show(h(1, 2))
+    show(h("a"))
+    show(h == h)
+    let n = 3
+    show(n(1))
+;
+fun generic(x) = x
+let k = generic
+fun twice(var n in Int):
+    n *= 2
+;
+let tw = twice

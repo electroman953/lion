@@ -1,5 +1,6 @@
 //! Execution of bytecode.
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{self, BufRead, Write};
 use std::rc::Rc;
@@ -10,7 +11,7 @@ use lion_runtime::{BugKind, MAX_CALL_DEPTH, ops};
 
 use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
 use crate::set::SetValue;
-use crate::value::{Record, Value};
+use crate::value::{Closure, Record, Value};
 
 /// Why execution stopped before the end of the program.
 #[derive(Debug)]
@@ -365,6 +366,72 @@ impl Machine<'_> {
                         self.alert(AlertKind::SpecialFloat { value }, at);
                     }
                     self.set(dst, result);
+                }
+                Instr::MakeClosure { dst, function, start, count } => {
+                    let first = self.base + start as usize;
+                    let captures = self.stack[first..first + count as usize].to_vec();
+                    let name = Rc::clone(&self.program.functions[function as usize].label);
+                    let closure = Closure { function, name, bound: Vec::new(), captures };
+                    self.set(dst, Value::Function(Rc::new(closure)));
+                }
+                Instr::Bind { dst, callee, start, count } => {
+                    let closure = match &self.stack[self.base + callee as usize] {
+                        Value::Function(closure) => Rc::clone(closure),
+                        other => self.mismatch("function", other),
+                    };
+                    let first = self.base + start as usize;
+                    let mut bound = closure.bound.clone();
+                    bound.extend_from_slice(&self.stack[first..first + count as usize]);
+                    let name = Rc::clone(&closure.name);
+                    let captures = closure.captures.clone();
+                    let bound = Closure { function: closure.function, name, bound, captures };
+                    self.set(dst, Value::Function(Rc::new(bound)));
+                }
+                Instr::CallValue { dst, callee, args, count } => {
+                    let closure = match &self.stack[self.base + callee as usize] {
+                        Value::Function(closure) => Rc::clone(closure),
+                        other => self.mismatch("function", other),
+                    };
+                    // The arguments given before come first (§11.3); the captured values
+                    // follow the parameters (§11.5).
+                    let function = closure.function as usize;
+                    let params = self.program.functions[function].params as usize;
+                    let start = self.base + args as usize;
+                    let bound = closure.bound.len();
+                    let needed = start + params.max(bound + count as usize) + closure.captures.len();
+                    if self.stack.len() < needed {
+                        self.stack.resize(needed, Value::None);
+                    }
+                    if bound > 0 {
+                        for offset in (0..count as usize).rev() {
+                            self.stack[start + bound + offset] =
+                                std::mem::take(&mut self.stack[start + offset]);
+                        }
+                        for (offset, value) in closure.bound.iter().enumerate() {
+                            self.stack[start + offset] = value.clone();
+                        }
+                    }
+                    for (offset, value) in closure.captures.iter().enumerate() {
+                        self.stack[start + params + offset] = value.clone();
+                    }
+                    let count = count + bound as u32;
+                    pc = self.call(function, dst, args, count, pc, at)?;
+                    code = &self.chunk.code;
+                }
+                Instr::NewCell { dst } => {
+                    self.set(dst, Value::Cell(Rc::new(RefCell::new(Value::None))));
+                }
+                Instr::LoadCell { dst, cell } => {
+                    let value = self.cell(cell).borrow().clone();
+                    self.set(dst, value);
+                }
+                Instr::StoreCell { cell, src } => {
+                    let value = self.stack[self.base + src as usize].clone();
+                    *self.cell(cell).borrow_mut() = value;
+                }
+                Instr::TakeCell { dst, cell } => {
+                    let value = std::mem::take(&mut *self.cell(cell).borrow_mut());
+                    self.set(dst, value);
                 }
                 Instr::InitModule { module, dst } => {
                     let module = module as usize;
@@ -830,6 +897,13 @@ impl Machine<'_> {
             Value::List(elements) => elements,
             Value::Set(set) => set.items(),
             other => self.mismatch("List or Set", other),
+        }
+    }
+
+    fn cell(&self, reg: Reg) -> &RefCell<Value> {
+        match &self.stack[self.base + reg as usize] {
+            Value::Cell(cell) => cell,
+            other => self.mismatch("cell", other),
         }
     }
 

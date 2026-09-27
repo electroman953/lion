@@ -184,6 +184,19 @@ pub enum Instr {
     /// Gives the globals of `module` their values, unless it is done: calls its
     /// initialization function, whose result goes to `dst` (D81).
     InitModule { module: u32, dst: Reg },
+    /// A function value: `function`, with the `count` captured values from `start`.
+    MakeClosure { dst: Reg, function: u32, start: Reg, count: u32 },
+    /// The function value in `callee` with the `count` arguments from `start` given
+    /// first (§11.3).
+    Bind { dst: Reg, callee: Reg, start: Reg, count: u32 },
+    /// Calls the function value in `callee` with `count` arguments from `args`.
+    CallValue { dst: Reg, callee: Reg, args: Reg, count: u32 },
+    /// A new cell for a variable shared with a nested function (§11.5).
+    NewCell { dst: Reg },
+    LoadCell { dst: Reg, cell: Reg },
+    StoreCell { cell: Reg, src: Reg },
+    /// Moves the value out of the cell, to change it in place and store it back.
+    TakeCell { dst: Reg, cell: Reg },
     Halt,
 }
 
@@ -258,6 +271,10 @@ pub struct EnumLayout {
 /// Compiled code for one function.
 pub struct Chunk {
     pub name: String,
+    /// The name, shared by the function values of this function.
+    pub label: Rc<str>,
+    /// The number of its parameters; the variables it captures come after them.
+    pub params: u32,
     pub code: Vec<Instr>,
     /// The source span of each instruction, for bug and alert reports.
     pub spans: Vec<Option<Span>>,

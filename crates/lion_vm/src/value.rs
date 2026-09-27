@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use lion_runtime::format::{format_float, quote_text};
@@ -28,8 +29,22 @@ pub enum Value {
     Set(Rc<SetValue>),
     /// A tuple (§4.5).
     Tuple(Rc<Vec<Value>>),
+    /// A function value, with the values it captured (§11).
+    Function(Rc<Closure>),
+    /// A variable shared by a function and the code around it (§11.5).
+    Cell(Rc<RefCell<Value>>),
     /// A reference to a register of the stack, held by a `var` parameter (§11.2).
     Ref(u32),
+}
+
+/// A function value: the function, and the values of the variables it captured.
+#[derive(Debug)]
+pub struct Closure {
+    pub function: u32,
+    pub name: Rc<str>,
+    /// The first arguments, given by a partial application (§11.3).
+    pub bound: Vec<Value>,
+    pub captures: Vec<Value>,
 }
 
 /// The fields of a value of a structure.
@@ -77,6 +92,8 @@ impl Value {
                     _ => format!("({})", elements.join(", ")),
                 }
             }
+            Value::Function(closure) => format!("<fun {}>", closure.name),
+            Value::Cell(cell) => cell.borrow().to_text(),
             Value::Ref(_) => "<reference>".to_string(),
         }
     }
@@ -103,6 +120,8 @@ impl Value {
                 | Value::Enum(..)
                 | Value::Set(_)
                 | Value::Tuple(_)
+                | Value::Function(_)
+                | Value::Cell(_)
         )
     }
 
@@ -121,6 +140,8 @@ impl Value {
             Value::Enum(..) => kinds::ENUM,
             Value::Set(_) => kinds::SET,
             Value::Tuple(_) => kinds::TUPLE,
+            Value::Function(_) => kinds::FUN,
+            Value::Cell(_) => 0,
             Value::Ref(_) => 0,
         }
     }
@@ -165,6 +186,8 @@ impl Value {
             Value::Enum(..) => "enumeration",
             Value::Set(_) => "Set",
             Value::Tuple(_) => "tuple",
+            Value::Function(_) => "function",
+            Value::Cell(_) => "cell",
             Value::Ref(_) => "reference",
         }
     }
@@ -185,4 +208,5 @@ pub mod kinds {
     pub const ENUM: u16 = 1 << 9;
     pub const SET: u16 = 1 << 10;
     pub const TUPLE: u16 = 1 << 11;
+    pub const FUN: u16 = 1 << 12;
 }

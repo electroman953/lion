@@ -11,18 +11,21 @@
 //! is checked: it must not read a global that may have no value at that point (§6.1, C3).
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use lion_diagnostics::{Diagnostic, Span};
 use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
+use crate::closures::ClosureInfo;
 use crate::flow::Assigned;
 use crate::names::Resolved;
 use crate::places::Path;
 use crate::{Checker, Context, ContextKind, GlobalInfo, GlobalType, LocalInfo, article, ir_locals, typed};
 
-pub(crate) struct FunctionInfo<'a> {
-    pub(crate) decl: &'a ast::FunDecl,
+pub(crate) struct FunctionInfo {
+    /// Shared, so that a function declared inside a body can be registered too.
+    pub(crate) decl: Rc<ast::FunDecl>,
     /// The file that declares it, and how names of that file are qualified: `geometry.`,
     /// or nothing in the script.
     pub(crate) module: usize,
@@ -35,19 +38,23 @@ pub(crate) struct FunctionInfo<'a> {
     pub(crate) var_self: bool,
     /// A function of the standard library that the implementation provides (§23).
     native: Option<ir::Native>,
+    /// A function declared inside a body: the variables it captures (§11.5).
+    pub(crate) closure: Option<ClosureInfo>,
+    /// For an anonymous function, the function type expected where it is written.
+    expected: Option<ir::FunData>,
     /// `None` when the declaration has an error or needs what is not implemented.
-    signature: Option<Vec<ParamInfo>>,
+    pub(crate) signature: Option<Vec<ParamInfo>>,
     /// The return type, when written.
-    declared_ret: Option<Type>,
+    pub(crate) declared_ret: Option<Type>,
     /// The globals named after `modifies` (§11.5).
     modifies: Vec<ir::LocalId>,
     /// The instances of a generic function, by the types of the given arguments.
     instances: HashMap<Vec<Type>, usize>,
     /// The only instance of a function whose parameters all have a type.
-    instance: Option<usize>,
+    pub(crate) instance: Option<usize>,
 }
 
-impl FunctionInfo<'_> {
+impl FunctionInfo {
     fn is_generic(&self) -> bool {
         self.signature.as_ref().is_some_and(|params| params.iter().any(|param| param.ty.is_none()))
     }
@@ -62,13 +69,13 @@ impl FunctionInfo<'_> {
 }
 
 #[derive(Clone)]
-struct ParamInfo {
-    name: String,
+pub(crate) struct ParamInfo {
+    pub(crate) name: String,
     /// `None` for a parameter without a type, which makes the function generic.
-    ty: Option<Type>,
-    by_reference: bool,
-    has_default: bool,
-    span: Span,
+    pub(crate) ty: Option<Type>,
+    pub(crate) by_reference: bool,
+    pub(crate) has_default: bool,
+    pub(crate) span: Span,
 }
 
 /// One checked version of a function.
@@ -91,7 +98,7 @@ pub(crate) struct Instance {
 }
 
 #[derive(Clone, Copy)]
-enum Ret {
+pub(crate) enum Ret {
     Declared(Type),
     /// Not written: inferred from the body (C12).
     Unknown,
@@ -110,6 +117,8 @@ enum BodyState {
 
 struct CheckedBody {
     params: Vec<Type>,
+    /// The number of variables captured by a function declared in a body (§11.5).
+    captures: u32,
     locals: Vec<LocalInfo>,
     body: Vec<ir::Stmt>,
     defaults: Vec<(u32, ir::Expr)>,
@@ -157,6 +166,7 @@ impl Instance {
             return ir::Function {
                 name,
                 params: checked.params.len() as u32,
+                captures: 0,
                 defaults: Vec::new(),
                 ret,
                 locals: ir_locals(checked.locals),
@@ -165,7 +175,7 @@ impl Instance {
             };
         }
         let function = &functions[self.function];
-        let decl = function.decl;
+        let decl = function.decl.clone();
         let name = if self.arg_types.is_empty() {
             function.full_name()
         } else {
@@ -175,6 +185,7 @@ impl Instance {
         ir::Function {
             name,
             params: checked.params.len() as u32,
+            captures: checked.captures,
             defaults: checked.defaults,
             ret,
             locals: ir_locals(checked.locals),
@@ -283,8 +294,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn register_function(&mut self, decl: &'a ast::FunDecl) {
-        let info = FunctionInfo {
+    /// A function declared inside a body, or anonymous (§11.5).
+    pub(crate) fn register_nested_function(
+        &mut self,
+        decl: Rc<ast::FunDecl>,
+        captures: Vec<crate::closures::Capture>,
+        expected: Option<ir::FunData>,
+    ) {
+        self.functions.push(FunctionInfo {
             decl,
             module: self.module,
             prefix: self.qualified(""),
@@ -292,6 +309,37 @@ impl<'a> Checker<'a> {
             implicit_self: false,
             var_self: false,
             native: None,
+            closure: Some(ClosureInfo { captures }),
+            expected,
+            signature: None,
+            declared_ret: None,
+            modifies: Vec::new(),
+            instances: HashMap::new(),
+            instance: None,
+        });
+    }
+
+    /// The types of the parameters of an instance.
+    pub(crate) fn instance_param_types(&self, instance: usize, params: &[ParamInfo]) -> Vec<Type> {
+        let arg_types = &self.instances[instance].arg_types;
+        params
+            .iter()
+            .enumerate()
+            .map(|(position, param)| param.ty.or(arg_types.get(position).copied()).unwrap_or(Type::None))
+            .collect()
+    }
+
+    fn register_function(&mut self, decl: &'a ast::FunDecl) {
+        let info = FunctionInfo {
+            decl: Rc::new(decl.clone()),
+            module: self.module,
+            prefix: self.qualified(""),
+            receiver: None,
+            implicit_self: false,
+            var_self: false,
+            native: None,
+            closure: None,
+            expected: None,
             signature: None,
             declared_ret: None,
             modifies: Vec::new(),
@@ -384,7 +432,7 @@ impl<'a> Checker<'a> {
         true
     }
 
-    fn new_instance(
+    pub(crate) fn new_instance(
         &mut self,
         function: usize,
         arg_types: Vec<Type>,
@@ -406,8 +454,8 @@ impl<'a> Checker<'a> {
     }
 
     /// The types of the parameters, the return type and the `modifies` clause (§11.1).
-    fn resolve_signature(&mut self, index: usize) {
-        let decl = self.functions[index].decl;
+    pub(crate) fn resolve_signature(&mut self, index: usize) {
+        let decl = self.functions[index].decl.clone();
         let mut supported = true;
         if decl.infix {
             self.not_implemented(decl.name.span, "`infix` functions", "§9.5");
@@ -518,7 +566,7 @@ impl<'a> Checker<'a> {
                 span: param.name.span,
             });
         }
-        let declared_ret = match &decl.ret {
+        let mut declared_ret = match &decl.ret {
             Some(ty) => {
                 let ty = self.resolve_type(ty);
                 supported &= ty.is_some();
@@ -526,7 +574,26 @@ impl<'a> Checker<'a> {
             }
             None => None,
         };
-        let modifies = decl.modifies.iter().filter_map(|name| self.modified_global(name)).collect();
+        // An anonymous function takes the types of the function type expected there.
+        if let Some(expected) = self.functions[index].expected.clone() {
+            for (param, ty) in params.iter_mut().zip(&expected.params) {
+                param.ty.get_or_insert(*ty);
+            }
+            declared_ret.get_or_insert(expected.ret);
+        }
+        // The variables that a nested function shares are not globals (§11.5).
+        let shared: Vec<String> = match &self.functions[index].closure {
+            Some(closure) => {
+                closure.captures.iter().filter(|c| c.by_reference).map(|c| c.name.clone()).collect()
+            }
+            None => Vec::new(),
+        };
+        let modifies = decl
+            .modifies
+            .iter()
+            .filter(|name| !shared.contains(&name.name))
+            .filter_map(|name| self.modified_global(name))
+            .collect();
         let function = &mut self.functions[index];
         function.declared_ret = declared_ret;
         function.modifies = modifies;
@@ -580,7 +647,8 @@ impl<'a> Checker<'a> {
         for function in &self.functions {
             // The functions of the standard library are checked by its own tests.
             let standard = self.modules[function.module].standard;
-            if function.is_generic() && function.instances.is_empty() && !standard {
+            let nested = function.closure.is_some();
+            if function.is_generic() && function.instances.is_empty() && !standard && !nested {
                 let name = &function.decl.name.name;
                 self.diagnostics.push(
                     Diagnostic::new(lion_diagnostics::Severity::Warning, format!("`{name}` is never called, so it is not checked"))
@@ -623,7 +691,11 @@ impl<'a> Checker<'a> {
         let checked = &mut self.instances[instance];
         checked.reads = ctx.reads;
         checked.calls = ctx.calls;
-        checked.checked = Some(CheckedBody { params: param_types, locals: ctx.locals, body, defaults });
+        let captures =
+            self.functions[function].closure.as_ref().map_or(0, |closure| closure.captures.len() as u32);
+        let checked = &mut self.instances[instance];
+        checked.checked =
+            Some(CheckedBody { params: param_types, captures, locals: ctx.locals, body, defaults });
         checked.state = BodyState::Checked;
     }
 
@@ -634,7 +706,7 @@ impl<'a> Checker<'a> {
         params: &[ParamInfo],
     ) -> (Vec<ir::Stmt>, Vec<(u32, ir::Expr)>, Vec<Type>) {
         let function = self.instances[instance].function;
-        let decl = self.functions[function].decl;
+        let decl = self.functions[function].decl.clone();
         let arg_types = self.instances[instance].arg_types.clone();
         let generic = self.functions[function].is_generic();
         // The written parameters, after the `self` of a method that does not write it.
@@ -655,11 +727,38 @@ impl<'a> Checker<'a> {
                     initialized: true,
                     first_assignment: None,
                     loop_variable: false,
+                    captured: false,
+                    boxed: false,
                 });
                 self.ctx.flow.set(id, Assigned::Yes);
                 id
             })
             .collect();
+        // The variables captured by a function declared inside a body follow its
+        // parameters; it sees its own name, to call itself (§11.5).
+        let captures = self.functions[function].closure.as_ref().map(|closure| closure.captures.clone());
+        for capture in captures.iter().flatten() {
+            let id = self.push_local(LocalInfo {
+                name: capture.name.clone(),
+                ty: Some(capture.ty),
+                mutable: capture.by_reference,
+                temporary: false,
+                by_reference: false,
+                decl_span: capture.span,
+                initialized: true,
+                first_assignment: None,
+                loop_variable: false,
+                captured: true,
+                boxed: capture.by_reference,
+            });
+            self.ctx.flow.set(id, Assigned::Yes);
+            let scope = self.ctx.scopes.first_mut().expect("the outermost block");
+            scope.names.insert(capture.name.clone(), id);
+        }
+        if captures.is_some() && decl.name.name != "fun" {
+            let scope = self.ctx.scopes.first_mut().expect("the outermost block");
+            scope.functions.insert(decl.name.name.clone(), function);
+        }
         // A default value sees the globals and the parameters before it (C10). In a
         // generic instance, only the omitted arguments need it, and a parameter without
         // a type takes the type of its default value.
@@ -749,7 +848,7 @@ impl<'a> Checker<'a> {
             self.instances[instance].ret = Ret::Failed;
             return None;
         }
-        let decl = self.functions[self.instances[instance].function].decl;
+        let decl = self.functions[self.instances[instance].function].decl.clone();
         let returns = std::mem::take(&mut self.ctx.returns);
         let values: Vec<(Type, Span)> =
             returns.iter().filter_map(|&(ty, span)| ty.map(|ty| (ty, span))).collect();
@@ -791,7 +890,7 @@ impl<'a> Checker<'a> {
     }
 
     /// The return type of an instance, checking its body first if it is inferred.
-    fn return_type_of(&mut self, instance: usize, call: Span) -> Option<Type> {
+    pub(crate) fn return_type_of(&mut self, instance: usize, call: Span) -> Option<Type> {
         if let Ret::Unknown = self.instances[instance].ret {
             self.demands.push(call);
             self.check_instance(instance);
@@ -800,7 +899,7 @@ impl<'a> Checker<'a> {
         match self.instances[instance].ret {
             Ret::Declared(ty) | Ret::Inferred(ty) => Some(ty),
             Ret::Inferring => {
-                let decl = self.functions[self.instances[instance].function].decl;
+                let decl = self.functions[self.instances[instance].function].decl.clone();
                 let name = &decl.name.name;
                 self.diagnostics.push(
                     Diagnostic::error(format!("the return type of `{name}` must be written"))
@@ -828,7 +927,7 @@ impl<'a> Checker<'a> {
             Ret::Declared(ty) => Some(ty),
             _ => None,
         };
-        let decl = self.functions[self.instances[instance].function].decl;
+        let decl = self.functions[self.instances[instance].function].decl.clone();
         let stmt = match value {
             None => {
                 if let Some(ty) = declared.filter(|ty| *ty != Type::None) {
@@ -901,6 +1000,7 @@ impl<'a> Checker<'a> {
             return None;
         };
         let mut pending = Vec::new();
+        let has_receiver = receiver.is_some();
         if let Some(receiver) = receiver {
             params.remove(0);
             pending.push(Some(receiver));
@@ -923,16 +1023,23 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
-        if args.len() < required {
-            self.not_implemented(
-                span,
-                "partial application (a call that gives only some of the arguments)",
-                "§11.3",
-            );
-            return None;
+        if args.len() < required && !has_receiver {
+            // `f(1)`: the function that waits for the other arguments (§11.3).
+            let value = self.function_value(index, callee, None)?;
+            let Type::Fun(data) = value.ty else { unreachable!("a function value") };
+            return self.partial(value, &data.get(), args, span);
         }
         for (arg, param) in args.iter().zip(&params) {
             pending.push(self.argument(&name, arg, param));
+        }
+        // A function declared inside a body calls itself with the variables it captured.
+        if let Some(closure) = self.functions[index].closure.clone() {
+            for capture in &closure.captures {
+                let local = self.lookup(&capture.name).expect("the captures are visible in the function");
+                let kind =
+                    if capture.by_reference { ir::ExprKind::Cell(local) } else { ir::ExprKind::Local(local) };
+                pending.push(Some(Pending::Value(typed(kind, capture.ty, span))));
+            }
         }
         let pending: Vec<Pending> = pending.into_iter().collect::<Option<_>>()?;
         let instance = match self.functions[index].instance {
@@ -959,7 +1066,7 @@ impl<'a> Checker<'a> {
     }
 
     /// The instance of a generic function for the types of the given arguments (C1).
-    fn instantiate(&mut self, function: usize, arg_types: Vec<Type>, call: Span) -> Option<usize> {
+    pub(crate) fn instantiate(&mut self, function: usize, arg_types: Vec<Type>, call: Span) -> Option<usize> {
         if let Some(&instance) = self.functions[function].instances.get(&arg_types) {
             return Some(instance);
         }
@@ -1170,7 +1277,7 @@ impl<'a> Checker<'a> {
     /// provides. Other foreign functions call C code (§21.2).
     fn foreign_function(&mut self, index: usize, abi: &str, span: Span) -> bool {
         let function = &self.functions[index];
-        let decl = function.decl;
+        let decl = function.decl.clone();
         let module = &self.modules[function.module];
         if abi != "lion" {
             self.not_implemented(span, "calling C code", "§21.2");
@@ -1256,7 +1363,7 @@ impl<'a> Checker<'a> {
     ) {
         let instance = &mut self.instances[instance];
         instance.calls = calls;
-        instance.checked = Some(CheckedBody { params, locals, body, defaults: Vec::new() });
+        instance.checked = Some(CheckedBody { params, captures: 0, locals, body, defaults: Vec::new() });
     }
 
     /// A call of a function made by the checker, checked like the others when the
@@ -1268,7 +1375,7 @@ impl<'a> Checker<'a> {
 
     /// A call made by the script or by the values of the globals of a module: the
     /// function must not read a global that may have no value yet (C3).
-    fn record_early_call(&mut self, instance: usize, span: Span) {
+    pub(crate) fn record_early_call(&mut self, instance: usize, span: Span) {
         let unassigned = match self.ctx.kind {
             ContextKind::Script => self.unassigned_globals(),
             // The globals of the module that come later have no value yet.
@@ -1401,6 +1508,7 @@ fn widen_returns(stmts: &mut [ir::Stmt]) {
             }
             ir::Stmt::Assign { .. }
             | ir::Stmt::InitModule { .. }
+            | ir::Stmt::Declare { .. }
             | ir::Stmt::Expr(_)
             | ir::Stmt::AssignElement { .. }
             | ir::Stmt::Add { .. }

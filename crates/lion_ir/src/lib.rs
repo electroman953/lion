@@ -10,7 +10,7 @@ mod print;
 mod types;
 
 pub use print::print_program;
-pub use types::{EnumRef, StructRef, TupleRef, Type, TypeRef, UnionRef};
+pub use types::{EnumRef, FunData, FunRef, StructRef, TupleRef, Type, TypeRef, UnionRef};
 
 use lion_diagnostics::Span;
 
@@ -57,8 +57,10 @@ impl FunctionId {
 
 pub struct Function {
     pub name: String,
-    /// The first `params` locals are the parameters, in order.
+    /// The first `params` locals are the parameters, in order; the `captures` locals
+    /// after them are the variables it captures (§11.5).
     pub params: u32,
+    pub captures: u32,
     /// The values of omitted arguments. A call that gives fewer than `index + 1`
     /// arguments gives parameter `index` this value, evaluated at the call, in the
     /// order of the parameters (§11.2).
@@ -87,6 +89,11 @@ impl LocalId {
 
 pub struct Local {
     pub name: String,
+    /// A variable that a nested function modifies (§11.5): it lives in a cell, which
+    /// the function shares. A captured variable of a function is already a cell.
+    pub boxed: bool,
+    /// A variable captured by the function, received after its parameters.
+    pub captured: bool,
     pub ty: Type,
     pub mutable: bool,
     /// Introduced by the compiler, for instance to evaluate an operand of a chained
@@ -163,6 +170,11 @@ pub enum Stmt {
     /// Gives the globals of a module their values, unless it is done (D81).
     InitModule {
         module: u32,
+    },
+    /// A `var` starts: a new variable at each run of its declaration. Only a variable
+    /// that a nested function shares needs it: it gets a new cell (§11.5).
+    Declare {
+        local: LocalId,
     },
 }
 
@@ -284,6 +296,26 @@ pub enum ExprKind {
     Enum {
         enumeration: EnumRef,
         value: u32,
+    },
+    /// A function as a value (§11): `function`, with the values of the variables it
+    /// captures, taken now (§11.5, D71). They follow its parameters.
+    Closure {
+        function: FunctionId,
+        captures: Vec<Expr>,
+    },
+    /// The cell of a variable that a nested function shares (§11.5), to give it to that
+    /// function.
+    Cell(LocalId),
+    /// A call of a function value, with all its arguments or the first ones (§11.2).
+    CallValue {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
+    /// `f(1)` with fewer arguments than `f` requires: the function that waits for the
+    /// others (§11.3).
+    Partial {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
     },
 }
 

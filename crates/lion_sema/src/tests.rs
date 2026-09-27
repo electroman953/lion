@@ -509,3 +509,33 @@ fn modules_keep_their_names_qualified() {
         ["a module contains only declarations"]
     );
 }
+
+#[test]
+fn functions_as_values() {
+    let ir = check_text("fun square(x in Int) in Int = x * x\nlet f = square\nshow(f(3))").unwrap();
+    assert!(ir.contains("f#0 let fun(Int) in Int"), "{ir}");
+    assert!(ir.contains("(call_value f#0 3)"), "{ir}");
+    // A generic function takes the types expected of the value.
+    assert!(check_text("fun id(x) = x\nlet f = id in fun(Int) in Int\nshow(f(1))").is_ok());
+    assert_eq!(
+        errors("fun id(x) = x\nlet f = id"),
+        [
+            "`id` is never called, so it is not checked",
+            "the types of the parameters of `id` are not known here"
+        ]
+    );
+    // Fewer arguments than required: a function that waits for the others (§11.3).
+    let ir = check_text("fun add(a in Int, b in Int) in Int = a + b\nlet inc = add(1)").unwrap();
+    assert!(ir.contains("inc#0 let fun(Int) in Int"), "{ir}");
+    assert_eq!(errors("let f = fun(x in Int) = x\nshow(f == f)"), ["functions cannot be compared"]);
+}
+
+#[test]
+fn closures_capture_copies_or_share_with_modifies() {
+    let text = "fun counter() in fun() in Int:\n    var n = 0\n    fun next() in Int modifies n:\n        n += 1\n        return n\n    ;\n    return next\n;";
+    let ir = check_text(text).unwrap();
+    assert!(ir.contains("(fun next (cell n#0))"), "{ir}");
+    assert!(ir.contains("n#0 var capture Int"), "{ir}");
+    let text = "fun f():\n    var n = 0\n    fun g():\n        n += 1\n    ;\n;";
+    assert_eq!(errors(text), ["this function cannot change `n`, which is declared around it"]);
+}

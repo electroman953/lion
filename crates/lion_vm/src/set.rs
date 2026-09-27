@@ -144,6 +144,8 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
             });
             (10u8, set.len(), combined).hash(state);
         }
-        Value::Ref(_) => unreachable!("a reference is not a value of the program"),
+        Value::Function(_) | Value::Cell(_) | Value::Ref(_) => {
+            unreachable!("a function, a cell or a reference does not go in a Set")
+        }
     }
 }

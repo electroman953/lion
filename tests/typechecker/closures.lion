@@ -1,0 +1,11 @@
+// A variable shared with a nested function lives in a cell (§11.5).
+fun make_counter() in fun() in Int:
+    var count = 0
+    fun next() in Int modifies count:
+        count += 1
+        return count
+    ;
+    return next
+;
+let c = make_counter()
+show(c())

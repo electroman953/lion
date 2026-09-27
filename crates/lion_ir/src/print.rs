@@ -38,6 +38,8 @@ fn print_function(program: &Program, function: &Function, out: &mut String) {
     for (index, local) in function.locals.iter().enumerate() {
         let kind = if (index as u32) < function.params {
             if local.by_reference { "var param" } else { "param" }
+        } else if local.captured {
+            if local.boxed { "var capture" } else { "capture" }
         } else if local.temporary {
             "temp"
         } else if local.mutable {
@@ -113,6 +115,10 @@ impl Printer<'_> {
                 }
                 Stmt::Break => out.push_str(&format!("{indent}break\n")),
                 Stmt::InitModule { module } => out.push_str(&format!("{indent}init_module {module}\n")),
+                Stmt::Declare { local } if self.function.local(*local).boxed => {
+                    out.push_str(&format!("{indent}new_cell {}\n", self.local(local.index())));
+                }
+                Stmt::Declare { .. } => {}
                 Stmt::Continue => out.push_str(&format!("{indent}continue\n")),
                 Stmt::Return(None) => out.push_str(&format!("{indent}return\n")),
                 Stmt::Return(Some(value)) => out.push_str(&format!("{indent}return {}\n", self.expr(value))),
@@ -191,6 +197,28 @@ impl Printer<'_> {
             ExprKind::Struct { structure, fields } => {
                 let fields: Vec<String> = fields.iter().map(print).collect();
                 format!("(struct {} {})", structure.name(), fields.join(" "))
+            }
+            ExprKind::Closure { function, captures } => {
+                let mut out = format!("(fun {}", self.program.function(*function).name);
+                for capture in captures {
+                    out.push(' ');
+                    out.push_str(&print(capture));
+                }
+                out + ")"
+            }
+            ExprKind::Cell(local) => format!("(cell {})", self.local(local.index())),
+            ExprKind::Partial { callee, args } => {
+                let args: Vec<String> = args.iter().map(print).collect();
+                format!("(partial {} {})", print(callee), args.join(" "))
+            }
+            ExprKind::CallValue { callee, args } => {
+                let args: Vec<String> = args.iter().map(print).collect();
+                format!(
+                    "(call_value {}{}{})",
+                    print(callee),
+                    if args.is_empty() { "" } else { " " },
+                    args.join(" ")
+                )
             }
             ExprKind::Enum { enumeration, value } => {
                 format!("{}.{}", enumeration.name(), enumeration.values()[*value as usize])

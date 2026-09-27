@@ -35,6 +35,9 @@ impl Checker<'_> {
         if let Some(local) = self.lookup(name) {
             return Resolved::Local(local);
         }
+        if let Some(&index) = self.ctx.scopes.iter().rev().find_map(|scope| scope.functions.get(name)) {
+            return Resolved::Function(index);
+        }
         if let ContextKind::Structure(_) = self.ctx.kind
             && self.tables.globals.contains_key(name)
         {
@@ -62,6 +65,12 @@ impl Checker<'_> {
         Resolved::Nothing
     }
 
+    /// Whether `name` designates a function of the file here, without reporting.
+    pub(crate) fn is_function(&self, name: &str) -> bool {
+        self.tables.function_names.contains_key(name)
+            || self.ctx.scopes.iter().any(|scope| scope.functions.contains_key(name))
+    }
+
     /// Whether `name` designates a variable here, without reporting.
     pub(crate) fn is_variable(&self, name: &str) -> bool {
         self.lookup(name).is_some()
@@ -71,6 +80,7 @@ impl Checker<'_> {
     /// Whether `name` designates anything here, without reporting.
     pub(crate) fn is_known(&self, name: &str) -> bool {
         self.lookup(name).is_some()
+            || self.ctx.scopes.iter().any(|scope| scope.functions.contains_key(name))
             || (self.ctx.kind != ContextKind::Script && self.tables.globals.contains_key(name))
             || self.tables.function_names.contains_key(name)
             || IMPLEMENTED_FUNCTIONS.contains(&name)

@@ -9,6 +9,7 @@
 //! a function body is checked when a call needs its inferred return type, and every
 //! other body afterwards.
 
+mod closures;
 mod collections;
 mod consteval;
 mod enums;
@@ -80,6 +81,10 @@ struct LocalInfo {
     first_assignment: Option<Span>,
     /// The variable of a `for` loop.
     loop_variable: bool,
+    /// A variable that the function captures, received after its parameters (§11.5).
+    captured: bool,
+    /// A variable that a nested function modifies: it lives in a cell (§11.5).
+    boxed: bool,
 }
 
 impl LocalInfo {
@@ -94,6 +99,8 @@ impl LocalInfo {
             initialized,
             first_assignment: None,
             loop_variable: false,
+            captured: false,
+            boxed: false,
         }
     }
 }
@@ -102,6 +109,8 @@ impl LocalInfo {
 #[derive(Default)]
 struct Scope {
     names: HashMap<String, ir::LocalId>,
+    /// A function declared inside a body sees its own name, to call itself (§11.5).
+    functions: HashMap<String, usize>,
     /// In order of declaration, including those hidden by a later declaration.
     declared: Vec<ir::LocalId>,
 }
@@ -202,7 +211,7 @@ struct Checker<'a> {
     global_names: HashMap<ir::LocalId, String>,
     /// The module of each global of a module other than the script.
     global_modules: HashMap<ir::LocalId, usize>,
-    functions: Vec<FunctionInfo<'a>>,
+    functions: Vec<FunctionInfo>,
     /// The methods, by the type of `self` and their name (§12.4); several modules may
     /// add a method of the same name to a type (§20.3).
     methods: HashMap<(Type, String), Vec<usize>>,
@@ -332,6 +341,8 @@ impl<'a> Checker<'a> {
             initialized: true,
             first_assignment: None,
             loop_variable: false,
+            captured: false,
+            boxed: false,
         });
         self.ctx.flow.set(id, Assigned::Yes);
         id
@@ -368,6 +379,7 @@ impl<'a> Checker<'a> {
         let main = ir::Function {
             name: "script".to_string(),
             params: 0,
+            captures: 0,
             defaults: Vec::new(),
             ret: Type::None,
             locals: ir_locals(script.locals),
@@ -408,6 +420,8 @@ fn ir_locals(locals: Vec<LocalInfo>) -> Vec<ir::Local> {
             mutable: info.mutable,
             temporary: info.temporary,
             by_reference: info.by_reference,
+            boxed: info.boxed,
+            captured: info.captured,
             span: info.decl_span,
         })
         .collect()

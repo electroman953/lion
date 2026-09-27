@@ -2,6 +2,7 @@ exit: 1
 ----- stdout
 (fun square ((x)) = (* x x))
 (for i (.. 1 3) [(call show i)])
+(let twice (fun fun ((x)) = (* x 2)))
 (let l (list 1 2 3))
 (let t (tuple "Léa" 12))
 (let w (try (call f)))
@@ -15,14 +16,6 @@ error: not implemented yet: traits
    |
    = this part of Lion (spec §14) is not supported by this version of the implementation
 
-error: not implemented yet: anonymous functions
-  --> tests/parser/unsupported.lion:5:13
-   |
- 5 | let twice = fun(x) = x * 2
-   |             ^^^
-   |
-   = this part of Lion (spec §11.1) is not supported by this version of the implementation
-
 error: not implemented yet: tasks
   --> tests/parser/unsupported.lion:7:11
    |
@@ -31,4 +24,4 @@ error: not implemented yet: tasks
    |
    = this part of Lion (spec §19.1) is not supported by this version of the implementation
 
-3 errors found
+2 errors found

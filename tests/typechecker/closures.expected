@@ -1,0 +1,24 @@
+exit: 0
+----- stdout
+script
+  locals
+    c#0 let fun() in Int
+  body
+    c#0 = (call make_counter)
+    (show (call_value c#0))
+fun make_counter in fun() in Int
+  locals
+    count#0 var Int
+    next#1 let fun() in Int
+  body
+    new_cell count#0
+    count#0 = 0
+    next#1 = (fun next (cell count#0))
+    return next#1
+fun next in Int
+  locals
+    count#0 var capture Int
+  body
+    count#0 = (add_int count#0 1)
+    return count#0
+----- stderr

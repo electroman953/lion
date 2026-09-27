@@ -1,14 +1,6 @@
 exit: 1
 ----- stdout
 ----- stderr
-error: not implemented yet: partial application (a call that gives only some of the arguments)
-  --> tests/errors/function_calls.lion:3:1
-   |
- 3 | area(1)
-   | ^^^^^^^
-   |
-   = this part of Lion (spec §11.3) is not supported by this version of the implementation
-
 error: `area` takes 2 arguments, not 0
   --> tests/errors/function_calls.lion:4:1
    |
@@ -103,12 +95,4 @@ error: mismatched types
     = expected: Float
     = found: Text
 
-error: not implemented yet: functions used as values
-   --> tests/errors/function_calls.lion:15:9
-    |
- 15 | let v = area
-    |         ^^^^
-    |
-    = this part of Lion (spec §11.3) is not supported by this version of the implementation
-
-11 errors found
+9 errors found

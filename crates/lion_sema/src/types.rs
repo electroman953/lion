@@ -38,9 +38,9 @@ pub(crate) fn is_standard_type(name: &str) -> bool {
 impl Checker<'_> {
     /// The type written, or `None` after reporting why it cannot be used.
     pub(crate) fn resolve_type(&mut self, ty: &ast::TypeExpr) -> Option<Type> {
-        let (what, section) = match &ty.kind {
+        match &ty.kind {
             ast::TypeExprKind::Named { module, name, args } if module.is_empty() => {
-                return self.named_type(name, args, ty);
+                self.named_type(name, args, ty)
             }
             ast::TypeExprKind::Named { module, name, args } => {
                 let found = match module.as_slice() {
@@ -63,24 +63,31 @@ impl Checker<'_> {
                     self.not_implemented(ty.span, "generic types of modules", "§15.1");
                     return None;
                 }
-                return self.module_type(found, name);
+                self.module_type(found, name)
             }
             // `maybe maybe T` is `maybe T` (§7.3).
-            ast::TypeExprKind::Maybe(inner) => return self.resolve_type(inner).map(Type::maybe),
+            ast::TypeExprKind::Maybe(inner) => self.resolve_type(inner).map(Type::maybe),
             ast::TypeExprKind::Union(members) => {
                 let members: Vec<Option<Type>> =
                     members.iter().map(|member| self.resolve_type(member)).collect();
-                return members.into_iter().collect::<Option<Vec<Type>>>().map(Type::union);
+                members.into_iter().collect::<Option<Vec<Type>>>().map(Type::union)
             }
             ast::TypeExprKind::Tuple(elements) => {
                 let elements: Vec<Option<Type>> =
                     elements.iter().map(|element| self.resolve_type(element)).collect();
-                return elements.into_iter().collect::<Option<Vec<Type>>>().map(Type::tuple);
+                elements.into_iter().collect::<Option<Vec<Type>>>().map(Type::tuple)
             }
-            ast::TypeExprKind::Fun { .. } => ("function types", "§7.2, §11"),
-        };
-        self.not_implemented(ty.span, what, section);
-        None
+            ast::TypeExprKind::Fun { params, ret } => {
+                let params: Vec<Option<Type>> = params.iter().map(|param| self.resolve_type(param)).collect();
+                let ret = match ret {
+                    Some(ret) => self.resolve_type(ret),
+                    None => Some(Type::None),
+                };
+                let params = params.into_iter().collect::<Option<Vec<Type>>>()?;
+                let required = params.len();
+                Some(Type::function(params, required, ret?))
+            }
+        }
     }
 
     fn named_type(&mut self, name: &ast::Ident, args: &[ast::TypeExpr], ty: &ast::TypeExpr) -> Option<Type> {

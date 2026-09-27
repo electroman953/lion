@@ -424,6 +424,8 @@ impl<'a> Checker<'a> {
             initialized: true,
             first_assignment: None,
             loop_variable: false,
+            captured: false,
+            boxed: false,
         });
         self.ctx.flow.set(id, Assigned::Yes);
         id
@@ -711,9 +713,13 @@ impl<'a> Checker<'a> {
         if let Some(position) = fields.iter().position(|field| field.name == name.name) {
             if fields[position].private && self.structs[index].module != self.module {
                 self.diagnostics.push(
-                    Diagnostic::error(format!("the field `{}` of `{}` is private", name.name, structure.name()))
-                        .with_primary(name.span, "")
-                        .with_note("`private` limits a field to the file of its structure (§20.3, D10)"),
+                    Diagnostic::error(format!(
+                        "the field `{}` of `{}` is private",
+                        name.name,
+                        structure.name()
+                    ))
+                    .with_primary(name.span, "")
+                    .with_note("`private` limits a field to the file of its structure (§20.3, D10)"),
                 );
                 return None;
             }
@@ -812,6 +818,7 @@ fn names_in(expr: &ast::Expr, names: &mut Vec<String>) {
             }
         }
         Paren(inner) | Try(inner) | Parallel(inner) => names_in(inner, names),
+        Fun(_) => {}
         List(elements) | Set(elements) => elements.iter().for_each(|element| names_in(element, names)),
         Tuple(elements) => elements.iter().for_each(|element| names_in(&element.value, names)),
         Unary { operand, .. } => names_in(operand, names),

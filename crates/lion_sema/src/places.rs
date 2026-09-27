@@ -105,7 +105,9 @@ impl Checker<'_> {
                 let info = &self.ctx.locals[local.index()];
                 if !info.mutable {
                     let decl_span = info.decl_span;
-                    let error = if name == "self" {
+                    let error = if info.captured {
+                        crate::flow::captured_change(name, span)
+                    } else if name == "self" {
                         Diagnostic::error("this method cannot change `self`")
                             .with_primary(span, "")
                             .with_note("a method changes its object only when it is declared with `var self` (§12.4)")

@@ -137,6 +137,18 @@ impl Checker<'_> {
             ast::ExprKind::If { branches, otherwise } => {
                 self.if_expr(branches, otherwise.as_deref(), expr.span, Some(expected))
             }
+            // A function value takes the types of the function type expected (§11).
+            ast::ExprKind::Fun(decl) => self.anonymous_function(decl, expr.span, Some(expected)),
+            ast::ExprKind::Name(name)
+                if matches!(expected, Type::Fun(_)) && !self.is_variable(name) && self.is_function(name) =>
+            {
+                match self.resolve(name, expr.span) {
+                    crate::names::Resolved::Function(index) => {
+                        self.function_value(index, expr.span, Some(expected))
+                    }
+                    _ => self.expr(expr),
+                }
+            }
             // The elements of a list expect the type of the elements: `[red, blue] in List of Color`.
             ast::ExprKind::List(elements) | ast::ExprKind::Set(elements)
                 if !elements.is_empty() && !self.generators(elements).contains(&true) =>

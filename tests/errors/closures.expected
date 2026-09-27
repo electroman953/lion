@@ -1,0 +1,105 @@
+exit: 1
+----- stdout
+----- stderr
+error: this function cannot change `total`, which is declared around it
+  --> tests/errors/closures.lion:6:9
+   |
+ 6 |         total += 1
+   |         ^^^^^
+   |
+   = a function reads a copy of the variables around it, taken where it is created (§11.5)
+   = help: to change the variable itself, add `modifies total` to the declaration of the function
+
+error: `limit` cannot be shared with the function
+  --> tests/errors/closures.lion:9:14
+   |
+ 4 |     let limit = 10
+   |         ----- declared here
+  ...
+ 9 |         show(limit)
+   |              ^^^^^
+   |
+   = a function modifies a `var` variable declared around it, not a constant nor a parameter (§11.5, C65)
+
+error: cannot find `unknown_later` in this scope
+   --> tests/errors/closures.lion:11:19
+    |
+ 11 |     fun later() = unknown_later
+    |                   ^^^^^^^^^^^^^ not found
+
+error: the type of this parameter must be written
+   --> tests/errors/closures.lion:13:17
+    |
+ 13 |     let f = fun(x) = x
+    |                 ^
+    |
+    = a function declared inside a body, or used as a value, is not generic (C65)
+    = help: write it: `x in Int`
+
+error: a function declared inside a body has no default values
+   --> tests/errors/closures.lion:14:38
+    |
+ 14 |     let g = fun(x in Int, y in Int = 2) = x + y
+    |                                      ^
+    |
+    = give every argument at the call (C65)
+
+error: this function takes 1 argument, not 2
+   --> tests/errors/closures.lion:16:10
+    |
+ 16 |     show(h(1, 2))
+    |          ^^^^^^^
+    |
+    = it is a fun(Int) in Int
+
+error: mismatched types
+   --> tests/errors/closures.lion:17:12
+    |
+ 17 |     show(h("a"))
+    |            ^^^ this is a Text
+    |
+    = expected: Int
+    = found: Text
+
+error: functions cannot be compared
+   --> tests/errors/closures.lion:18:12
+    |
+ 18 |     show(h == h)
+    |            ^^
+    |
+    = Lion 0.1 does not define `==` nor an order on functions (C65)
+
+error: `n` is not a function
+   --> tests/errors/closures.lion:20:10
+    |
+ 19 |     let n = 3
+    |         - declared here
+ 20 |     show(n(1))
+    |          ^ `n` is an Int
+
+warning: `generic` is never called, so it is not checked
+   --> tests/errors/closures.lion:22:5
+    |
+ 22 | fun generic(x) = x
+    |     ^^^^^^^
+    |
+    = a function with parameters without a type is checked for the types of each call (§15.3)
+
+error: the types of the parameters of `generic` are not known here
+   --> tests/errors/closures.lion:23:9
+    |
+ 23 | let k = generic
+    |         ^^^^^^^
+    |
+    = `generic` is generic: it has parameters without a type (§15.3)
+    = help: give the value a function type, as `let f = generic in fun(Int) in Int`
+
+error: `twice` has `var` parameters: it cannot be used as a value
+   --> tests/errors/closures.lion:27:10
+    |
+ 27 | let tw = twice
+    |          ^^^^^
+    |
+    = the variables of a call are known only where the function is called by its name (C65)
+
+11 errors found

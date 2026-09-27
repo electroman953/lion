@@ -101,6 +101,10 @@ impl<'t> Parser<'t> {
                 Ok(Stmt { kind: StmtKind::Continue, span: self.bump().span })
             }
             TokenKind::Keyword(Keyword::Return) => self.return_statement(),
+            // `fun(x) = ...` alone on a line is a value, whose use would be lost.
+            TokenKind::Keyword(Keyword::Fun) if self.kind_at(self.pos + 1) == &TokenKind::LParen => {
+                self.expr_statement()
+            }
             TokenKind::Keyword(Keyword::Fun | Keyword::Infix | Keyword::Foreign) => self.fun_statement(),
             TokenKind::Keyword(Keyword::Use) => self.use_statement(),
             TokenKind::Keyword(Keyword::Private) => self.private_statement(),
@@ -302,9 +306,6 @@ impl<'t> Parser<'t> {
         if !self.eat_keyword(Keyword::Fun) {
             return Err(self.expected("`fun`"));
         }
-        if self.at(&TokenKind::LParen) {
-            return Err(self.not_implemented(start.to(self.span()), "anonymous functions", "§11.1"));
-        }
         let receiver = match (self.peek(), self.kind_at(self.pos + 1)) {
             (TokenKind::UpperIdent(name), TokenKind::Dot) => {
                 let receiver = Ident { name: name.clone(), span: self.span() };
@@ -315,6 +316,28 @@ impl<'t> Parser<'t> {
             _ => None,
         };
         let name = self.binding_name()?;
+        let decl = self.fun_rest(index, foreign, infix, receiver, name)?;
+        Ok(Stmt { kind: StmtKind::Fun(decl), span: start.to(self.previous_span()) })
+    }
+
+    /// `fun(params) ...` as a value: an anonymous function (§11.1).
+    fn anonymous_function(&mut self) -> PResult<Expr> {
+        let index = self.pos;
+        let start = self.bump().span;
+        let name = Ident { name: "fun".to_string(), span: start };
+        let decl = self.fun_rest(index, None, false, None, name)?;
+        Ok(Expr { kind: ExprKind::Fun(Box::new(decl)), span: start.to(self.previous_span()) })
+    }
+
+    /// The parameters, the signature and the body of a function (§11.1, §26).
+    fn fun_rest(
+        &mut self,
+        index: usize,
+        foreign: Option<(String, Span)>,
+        infix: bool,
+        receiver: Option<Ident>,
+        name: Ident,
+    ) -> PResult<FunDecl> {
         if !self.eat(&TokenKind::LParen) {
             return Err(self.expected("`(` and the parameters"));
         }
@@ -369,7 +392,7 @@ impl<'t> Parser<'t> {
         } else {
             return Err(self.expected("`:` and the body of the function, or `=` and its value"));
         };
-        let decl = FunDecl {
+        Ok(FunDecl {
             private: None,
             foreign,
             infix,
@@ -380,8 +403,7 @@ impl<'t> Parser<'t> {
             type_params,
             modifies,
             body,
-        };
-        Ok(Stmt { kind: StmtKind::Fun(decl), span: start.to(self.previous_span()) })
+        })
     }
 
     /// `struct Name: fields and invariants ;`, one per line (§12.1, §26).
@@ -950,8 +972,10 @@ impl<'t> Parser<'t> {
                 let value = self.expr()?;
                 return Ok(Expr { span: start.to(value.span), kind: ExprKind::Parallel(Box::new(value)) });
             }
+            if *keyword == Keyword::Fun {
+                return self.anonymous_function();
+            }
             let unsupported = match keyword {
-                Keyword::Fun => Some(("anonymous functions", "§11.1")),
                 Keyword::Task | Keyword::Wait => Some(("tasks", "§19.1")),
                 Keyword::Compile => Some(("`compile`", "§21.1")),
                 Keyword::Shared | Keyword::Synced => Some(("shared values", "§17.2")),

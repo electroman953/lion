@@ -329,7 +329,6 @@ fn function_declaration_errors() {
     );
     assert_eq!(first_error("fun f():\n    show(1)\n"), "the `fun` block is never closed");
     assert_eq!(first_error("fun Area() = 1"), "`Area` cannot name a value");
-    assert_eq!(first_error("fun(x) = x"), "not implemented yet: anonymous functions");
 }
 
 #[test]
@@ -466,4 +465,14 @@ fn sets() {
 fn parallel_parts() {
     assert_eq!(ast("let r = parallel [f(x), x in l]"), "(let r (parallel (list (call f x) (in x l))))");
     assert_eq!(ast("parallel for f in files: show(f) ;"), "(parallel-for f files [(call show f)])");
+}
+
+#[test]
+fn anonymous_functions() {
+    assert_eq!(ast("let twice = fun(x) = x * 2"), "(let twice (fun fun ((x)) = (* x 2)))");
+    assert_eq!(
+        ast("let log = fun(msg in Text): show(msg) ;"),
+        "(let log (fun fun ((msg : Text)) [(call show msg)]))"
+    );
+    assert_eq!(ast("f(1)(2)"), "(call (call f 1) 2)");
 }

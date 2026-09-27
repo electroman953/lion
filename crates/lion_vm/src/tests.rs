@@ -42,6 +42,8 @@ impl Builder {
             mutable: true,
             temporary: false,
             by_reference: false,
+            boxed: false,
+            captured: false,
             span: self.span,
         });
         ir::LocalId(self.locals.len() as u32 - 1)
@@ -61,6 +63,7 @@ impl Builder {
         let script = ir::Function {
             name: "script".to_string(),
             params: 0,
+            captures: 0,
             defaults: Vec::new(),
             ret: Type::None,
             locals: self.locals,

@@ -29,6 +29,8 @@ pub enum Type {
     Struct(StructRef),
     /// An enumeration declared by the program (§13.1).
     Enum(EnumRef),
+    /// `fun(A, B) in R`: a function used as a value (§7.2, D63).
+    Fun(FunRef),
 }
 
 impl Type {
@@ -46,6 +48,11 @@ impl Type {
 
     pub fn tuple(elements: Vec<Type>) -> Type {
         Type::Tuple(TupleRef::new(elements))
+    }
+
+    /// `fun(params) in ret`, of which the first `required` parameters must be given.
+    pub fn function(params: Vec<Type>, required: usize, ret: Type) -> Type {
+        Type::Fun(FunRef::new(FunData { params, required: required as u32, ret }))
     }
 
     /// `A or B or ...`, flattened, without repetitions; a single member is that member.
@@ -136,6 +143,26 @@ impl fmt::Display for Type {
             Type::Error => f.write_str("Error"),
             Type::Struct(structure) => f.write_str(&structure.name()),
             Type::Enum(enumeration) => f.write_str(&enumeration.name()),
+            Type::Fun(function) => {
+                let data = function.get();
+                let params: Vec<String> = data
+                    .params
+                    .iter()
+                    .enumerate()
+                    .map(|(position, ty)| {
+                        if position < data.required as usize { ty.to_string() } else { format!("{ty} = ...") }
+                    })
+                    .collect();
+                write!(f, "fun({})", params.join(", "))?;
+                if data.ret != Type::None {
+                    // A union reads better between parentheses after `in`.
+                    match data.ret {
+                        union @ Type::Union(_) => write!(f, " in ({union})")?,
+                        ret => write!(f, " in {ret}")?,
+                    }
+                }
+                Ok(())
+            }
             Type::Union(union) => {
                 let members = union.members();
                 // `maybe T` reads better than `T or None` (§7.3).
@@ -220,6 +247,42 @@ impl fmt::Debug for EnumRef {
     }
 }
 
+/// The type of a function value: its parameters and its result.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FunData {
+    pub params: Vec<Type>,
+    /// The first parameters, which a call must give; the others have default values.
+    pub required: u32,
+    pub ret: Type,
+}
+
+/// A function type, stored once for the whole process.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FunRef(u32);
+
+impl FunRef {
+    fn new(data: FunData) -> FunRef {
+        let mut interner = interner().lock().expect("the type interner is never poisoned");
+        if let Some(&id) = interner.function_ids.get(&data) {
+            return FunRef(id);
+        }
+        let id = interner.functions.len() as u32;
+        interner.functions.push(data.clone());
+        interner.function_ids.insert(data, id);
+        FunRef(id)
+    }
+
+    pub fn get(self) -> FunData {
+        interner().lock().expect("the type interner is never poisoned").functions[self.0 as usize].clone()
+    }
+}
+
+impl fmt::Debug for FunRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.get())
+    }
+}
+
 /// The types of the elements of a tuple, stored once for the whole process.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TupleRef(u32);
@@ -289,6 +352,8 @@ struct Interner {
     enums: Vec<EnumData>,
     tuples: Vec<Vec<Type>>,
     tuple_ids: HashMap<Vec<Type>, u32>,
+    functions: Vec<FunData>,
+    function_ids: HashMap<FunData, u32>,
 }
 
 fn interner() -> &'static Mutex<Interner> {
