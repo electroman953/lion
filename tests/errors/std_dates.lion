@@ -1,0 +1,5 @@
+// A date written with constants is checked when the program is compiled (D39, C89).
+use dates
+let leap = dates.Date(2024, 2, 29)
+let wrong = dates.Date(2023, 2, 29)
+let april = dates.Date(2026, 4, 31)

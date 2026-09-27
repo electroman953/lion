@@ -37,7 +37,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
   - conversions `as` entre nombres et vers Text.
 - **Textes** : échappements et interpolation `"x = {x}"`.
 - **Modules** (§20) : `use geometry`, `use shapes.circle`, noms qualifiés (`geometry.area(...)`, `geometry.Point`), `private`, globales initialisées au premier usage, modules qui s'utilisent mutuellement.
-- **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles), `csv` et `sets` (tri, `min`, `max`, ensemble des parties, `any`, `all`, `count`, `group`).
+- **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles), `csv`, `sets` (tri, `min`, `max`, ensemble des parties, `any`, `all`, `count`, `group`), `time` (horloge, mesure des durées, attente) et `dates` (dates vérifiées, `d + 30`, `b - a`, jour de la semaine, format ISO).
 - **Tâches** (§19.1) : `task f(x)`, `wait t`, avec les règles de sûreté du §19.3 ; méthodes détachées `s.passes` (§12.6). Une tâche qui ne lit rien que le programme peut changer tourne sur son propre fil ; ce qu'elle écrit apparaît à son `wait` (C85).
 - **Partage explicite** (§17.2) : `var score = shared Counter()`, `shared synced` pour les tâches, `a same b`, méthodes détachées d'un objet partagé (`score.increment`), avec les règles de la spec vérifiées à la compilation.
 - **Parallélisme de données** (§19.2) : `parallel [...]`, `parallel {...}`, `parallel for`, avec les règles de sûreté du §19.3 vérifiées à la compilation. Les tours s'exécutent sur tous les cœurs (ou `LION_THREADS` fils), dans les deux modes, avec le résultat du calcul séquentiel : la sortie arrive dans l'ordre des tours, et le premier bug dans cet ordre arrête le programme (C83).
@@ -50,7 +50,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 - **Mode compilé** (§22) : `lion build f.lion` produit un exécutable natif, par Rust et LLVM, qui donne exactement la même sortie, les mêmes bugs et le même code de sortie que `lion run`, sans les alertes. Il va de 3 à 13 fois plus vite que la machine virtuelle sur nos mesures.
 
-**Pas encore implémenté** : traits génériques, méthodes d'une structure générique, types et fonctions standard comme valeurs, lecture des éléments d'un n-uplet, modules `json`, `dates`, `time`, `net` et `ui`, débogueur. La bibliothèque `ui` attend une décision de l'auteur : voir la [proposition](docs/design/ui.md). La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+**Pas encore implémenté** : traits génériques, méthodes d'une structure générique, types et fonctions standard comme valeurs, lecture des éléments d'un n-uplet, modules `json`, `net` et `ui`, débogueur. La bibliothèque `ui` attend une décision de l'auteur : voir la [proposition](docs/design/ui.md). La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ## Construire et utiliser
 

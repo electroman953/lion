@@ -1,0 +1,12 @@
+// Time (§23): the clock, durations in seconds, and waiting.
+
+// The seconds since 1970-01-01 at 00:00 UTC, with their fraction.
+foreign "lion" fun now() in Float
+
+// The seconds on a clock that only goes forward, from a moment chosen at the first
+// call: the difference of two readings measures a duration, even if the date of the
+// system changes in between.
+foreign "lion" fun clock() in Float
+
+// Waits `seconds`, which may have a fraction; a negative duration is a bug.
+foreign "lion" fun sleep(seconds in Float) in None

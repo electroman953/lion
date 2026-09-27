@@ -1,0 +1,4 @@
+// `compile` does not read the clock, nor wait (§21.1, D82).
+use time
+let t = compile time.now()
+let w = compile time.sleep(1)

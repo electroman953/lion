@@ -1,0 +1,119 @@
+// Dates (§23): the days of the Gregorian calendar, from 0001-01-01 to 9999-12-31.
+// `d + n` is the date `n` days later, `b - a` the number of days from `a` to `b`, and
+// dates compare with `<` (§9.5).
+
+Weekday = [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
+
+// A date whose values are constants is checked when the program is compiled (D39): the
+// conditions compute the length of the month themselves, without calling a function.
+struct Date:
+    year in Int, 1 <= year <= 9999
+    month in Int, 1 <= month <= 12
+    day in Int, 1 <= day <= 31
+    // April, June, September and November have 30 days.
+    day <= 30 or not (month == 4 or month == 6 or month == 9 or month == 11)
+    // February has 28 days, 29 in a leap year.
+    month != 2 or day <= 28 or (day == 29 and year mod 4 == 0 and (year mod 100 != 0 or year mod 400 == 0))
+;
+
+// Whether `year` has a 29 February.
+fun is_leap(year in Int) in Bool = year mod 4 == 0 and (year mod 100 != 0 or year mod 400 == 0)
+
+// The number of days of the month, from 28 to 31; 0 for a month outside 1..12.
+fun days_in_month(year in Int, month in Int) in Int:
+    if month == 2: return if is_leap(year) then 29 else 28 ;
+    if month == 4 or month == 6 or month == 9 or month == 11: return 30 ;
+    if 1 <= month <= 12: return 31 ;
+    return 0
+;
+
+// Today, in the time zone of the system.
+fun today() in Date = from_number(local_day())
+
+// The date written YYYY-MM-DD (ISO 8601), or an Error.
+fun parse(t in Text) in Date or Error:
+    let wrong = error("`{t}` is not a date written YYYY-MM-DD")
+    if t.size != 10 or t[5] != "-" or t[8] != "-": return wrong ;
+    for i in [1, 2, 3, 4, 6, 7, 9, 10]:
+        if not t[i] in digits: return wrong ;
+    ;
+    let year = try t[1..4] as Int
+    let month = try t[6..7] as Int
+    let day = try t[9..10] as Int
+    if year == 0: return error("`{t}` is not a date: the years go from 0001 to 9999") ;
+    if month < 1 or month > 12: return error("`{t}` is not a date: there is no month {month}") ;
+    let length = days_in_month(year, month)
+    if day < 1 or day > length:
+        return error("`{t}` is not a date: the month {month} of {year} has {length} days")
+    ;
+    return Date(year, month, day)
+;
+
+// The date `days` days later, or earlier if `days` is negative: `d + days`.
+fun Date.plus(days in Int) in Date = from_number(self.number() + days)
+
+// The number of days from `other` to this date: `d - other`.
+fun Date.subtract(other in Date) in Int = self.number() - other.number()
+
+// Whether this date comes before `other`: `d < other`.
+fun Date.less(other in Date) in Bool = self.number() < other.number()
+
+// The day of the week.
+fun Date.weekday() in Weekday = weekdays[(self.number() + 3) mod 7 + 1]
+
+// The position of the day in its year, from 1 to 366.
+fun Date.day_of_year() in Int = self.number() - day_number(self.year, 1, 1) + 1
+
+// The date written YYYY-MM-DD (ISO 8601).
+fun Date.text() in Text = "{padded(self.year, 4)}-{padded(self.month, 2)}-{padded(self.day, 2)}"
+
+private let digits = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"}
+private let weekdays = [w, w in Weekday]
+private let first = day_number(1, 1, 1)
+private let last = day_number(9999, 12, 31)
+
+private foreign "lion" fun local_day() in Int
+// The bug of a date outside 0001-01-01..9999-12-31.
+private foreign "lion" fun beyond(n in Int) in None
+
+private fun padded(n in Int, width in Int) in Text:
+    var t = n as Text
+    while t.size < width:
+        t = "0{t}"
+    ;
+    return t
+;
+
+// The number of the day, counted from 1970-01-01 (days_from_civil, by H. Hinnant).
+private fun Date.number() in Int = day_number(self.year, self.month, self.day)
+
+private fun day_number(year in Int, month in Int, day in Int) in Int:
+    let y = if month <= 2 then year - 1 else year
+    let era = y div 400
+    let year_of_era = y - era * 400
+    let shifted_month = (month + 9) mod 12
+    let day_of_year = (153 * shifted_month + 2) div 5 + day - 1
+    let day_of_era = year_of_era * 365 + year_of_era div 4 - year_of_era div 100 + day_of_year
+    return era * 146097 + day_of_era - 719468
+;
+
+// The date of the day number `n` (civil_from_days, by H. Hinnant).
+private fun from_number(n in Int) in Date:
+    if n < first or n > last: beyond(n) ;
+    let z = n + 719468
+    let era = z div 146097
+    let day_of_era = z - era * 146097
+    let year_of_era = (day_of_era - day_of_era div 1460 + day_of_era div 36524 - day_of_era div 146096) div 365
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era div 4 - year_of_era div 100)
+    let shifted_month = (5 * day_of_year + 2) div 153
+    let day = day_of_year - (153 * shifted_month + 2) div 5 + 1
+    let month = if shifted_month < 10 then shifted_month + 3 else shifted_month - 9
+    let year = year_of_era + era * 400 + (if month <= 2 then 1 else 0)
+    // Built from a constant, then changed field by field: each step is a valid date,
+    // so the result is a `Date`, not a `Date or Error` (§12.3).
+    var date = Date(1970, 1, 1)
+    date.year = year
+    date.month = month
+    date.day = day
+    return date
+;

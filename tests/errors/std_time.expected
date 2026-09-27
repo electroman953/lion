@@ -1,0 +1,20 @@
+exit: 1
+----- stdout
+----- stderr
+error: `compile` cannot run `time.now`, which reads the clock
+  --> tests/errors/std_time.lion:3:9
+   |
+ 3 | let t = compile time.now()
+   |         ^^^^^^^^^^^^^^^^^^
+   |
+   = `compile` computes its value while the program is compiled: it reads nothing from outside and changes nothing (§21.1, D82)
+
+error: `compile` cannot run `time.sleep`, which waits
+  --> tests/errors/std_time.lion:4:9
+   |
+ 4 | let w = compile time.sleep(1)
+   |         ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = `compile` computes its value while the program is compiled: it reads nothing from outside and changes nothing (§21.1, D82)
+
+2 errors found

@@ -1,0 +1,46 @@
+// The module `dates` (§23, C89): days of the Gregorian calendar.
+use dates
+use sets
+
+let d = dates.Date(2026, 9, 27)
+show(d)
+show(d.text())
+show(d.weekday())
+if d.weekday() == sunday: show("a Sunday") ;
+show(dates.Date(1970, 1, 1).weekday())
+
+// `d + n`, `b - a` and `<` come from the methods `plus`, `subtract` and `less` (§9.5).
+show((d + 5).text())
+show((d + -270).text())
+show(d - dates.Date(2026, 1, 1))
+show(dates.Date(9999, 12, 31) - dates.Date(1, 1, 1))
+show(dates.Date(2026, 1, 1) < d)
+show((dates.Date(2024, 2, 28) + 1).text())
+show((dates.Date(2023, 2, 28) + 1).text())
+show([x.text(), x in sets.sorted({d, dates.Date(2020, 5, 1), dates.Date(2026, 1, 1)})])
+
+show(d.day_of_year())
+show(dates.Date(2024, 12, 31).day_of_year())
+show(dates.is_leap(1900))
+show(dates.is_leap(2000))
+show(dates.days_in_month(2024, 2))
+show(dates.days_in_month(2026, 4))
+
+show(dates.parse("2024-02-29"))
+show(dates.parse("2026-02-30"))
+show(dates.parse("2026-13-01"))
+show(dates.parse("0000-01-01"))
+show(dates.parse("26-9-27"))
+show(dates.parse("2026-O9-27"))
+
+// A date built from values known only when the program runs is `Date or Error`.
+let day = 31
+match dates.Date(2026, 4, day):
+    in Error e: show(e.message()) ;
+    in dates.Date x: show(x) ;
+;
+
+show(dates.today().year >= 2026)
+show(parallel [(d + i).weekday(), i in 1..7])
+
+show(dates.Date(9999, 12, 31) + 1)

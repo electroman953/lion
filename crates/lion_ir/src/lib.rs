@@ -574,6 +574,11 @@ pub enum Native {
     RandomBelow,
     RandomSeed,
     CsvParse,
+    TimeNow,
+    TimeClock,
+    TimeSleep,
+    DatesLocalDay,
+    DatesBeyond,
 }
 
 impl Builtin {
@@ -587,7 +592,10 @@ impl Builtin {
             Builtin::ExpectFailed => Some("records a failed test"),
             Builtin::Native(Native::FilesRead | Native::FilesExists) => Some("reads files"),
             Builtin::Native(Native::FilesWrite) => Some("writes a file"),
-            Builtin::Native(Native::RandomSeed) => Some("reads the clock"),
+            Builtin::Native(
+                Native::RandomSeed | Native::TimeNow | Native::TimeClock | Native::DatesLocalDay,
+            ) => Some("reads the clock"),
+            Builtin::Native(Native::TimeSleep) => Some("waits"),
             Builtin::Foreign { pure: false, .. } => Some("calls C code that may change a global state"),
             _ => None,
         }
@@ -632,6 +640,11 @@ impl Native {
         ("random", "below", Native::RandomBelow),
         ("random", "seed", Native::RandomSeed),
         ("csv", "parse", Native::CsvParse),
+        ("time", "now", Native::TimeNow),
+        ("time", "clock", Native::TimeClock),
+        ("time", "sleep", Native::TimeSleep),
+        ("dates", "local_day", Native::DatesLocalDay),
+        ("dates", "beyond", Native::DatesBeyond),
     ];
 
     /// The function `name` of the standard module `module`.

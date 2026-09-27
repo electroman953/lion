@@ -1,0 +1,23 @@
+// The module `time` (§23, C88): the clock, measuring durations, and waiting.
+use time
+
+show(time.now() > 1_700_000_000.0)
+
+let start = time.clock()
+time.sleep(0.05)
+let elapsed = time.clock() - start
+show(elapsed >= 0.05 and elapsed < 5.0)
+time.sleep(0)
+
+// Two tasks that wait at the same time (C85).
+fun slow(n in Int) in Int:
+    time.sleep(0.1)
+    return n * 2
+;
+let a = task slow(1)
+let b = task slow(2)
+show((wait a) + (wait b))
+show(parallel [slow(i), i in 1..3])
+
+time.sleep(-1)
+show("not reached")

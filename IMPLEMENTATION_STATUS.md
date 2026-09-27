@@ -1,9 +1,9 @@
 # État de l'implémentation de Lion
 
-Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélisme sur plusieurs cœurs (étape 6), le module `sets` et la proposition de la bibliothèque `ui` (étape 7). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
+Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélisme sur plusieurs cœurs (étape 6), les modules `sets`, `time` et `dates`, et la proposition de la bibliothèque `ui` (étape 7). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C87) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C89) ;
 - [`docs/design/ui.md`](docs/design/ui.md) : la proposition de la bibliothèque `ui`, en attente des réponses de l'auteur ;
 - [`README.md`](README.md) : la présentation et l'usage.
 
@@ -14,7 +14,7 @@ Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélism
 | `cargo build` | OK |
 | `cargo clippy --all-targets` | 0 avertissement |
 | `cargo fmt --check` | OK |
-| `cargo test` (tout le workspace) | OK : 143 tests unitaires, 180 programmes golden, et les 84 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
+| `cargo test` (tout le workspace) | OK : 145 tests unitaires, 184 programmes golden, et les 86 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
 | Programmes du §27 de la spec | 27.1 (CSV, structures) et 27.2 (hasard, parallèle, ensembles) tournent sans modification, dans les deux modes ; Sur 12 cœurs, 27.2 prend 0,67 s interprété (`--release`) et 0,19 s compilé ; avec `LION_THREADS=1`, 3,2 s et 0,65 s. 27.3 dépend du module `ui`, imaginaire |
 
 L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié en privé sur GitHub : <https://github.com/electroman953/lion> (remote `origin`).
@@ -24,7 +24,7 @@ L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié
 | Étape | État |
 | --- | --- |
 | 1–2. Frontend complet et mode interprété | **Atteinte** |
-| 3. Bibliothèque standard | **Atteinte** pour `files`, `text`, `math`, `random`, `csv`, `sets` et le noyau. Manquent `json`, `dates`, `time`, `net` |
+| 3. Bibliothèque standard | **Atteinte** pour `files`, `text`, `math`, `random`, `csv`, `sets`, `time`, `dates` et le noyau. Manquent `json` (question posée à l'auteur) et `net` |
 | 4. Outillage | **Atteinte** : `lion test`, `lion fmt`, mode interactif |
 | 5. Compilateur natif `lion build` | **Atteinte** : les deux modes donnent les mêmes résultats sur tous les programmes de test (C81, C82) |
 | 6. Parallélisme et tâches | **Atteinte** : les parties parallèles utilisent tous les cœurs, dans les deux modes, avec le résultat du calcul séquentiel (C83, C84) ; les tâches tournent sur leur propre fil quand rien de ce qu'elles lisent ne peut changer (C85) |
@@ -145,7 +145,7 @@ Principes :
 
 **`lion_runtime`** : `ops.rs` (arithmétique vérifiée, rationnels, conversions), `bug.rs` (les `BugKind` et leurs messages), `format.rs` (affichage des Float et des rationnels), `stdlib.rs`.
 
-**`lion_std/std/*.lion`** : `csv`, `files`, `math`, `random`, `sets`, `text`.
+**`lion_std/std/*.lion`** : `csv`, `dates`, `files`, `math`, `random`, `sets`, `text`, `time`.
 
 **`lion_cli`** :
 - `main.rs` : les commandes ;
@@ -219,7 +219,8 @@ Chacun de ces cas donne une erreur « not implemented yet » ou un refus explici
 | Types comme valeurs (`let t = Int`) | §7.1 |
 | Fonctions standard comme valeurs (`let f = show`) | §11, §23 |
 | Lire un élément de n-uplet : la spec ne dit pas comment (C53) | §16 |
-| Modules `json`, `dates`, `time`, `net`, `ui` de la bibliothèque standard | §23 |
+| Modules `json`, `net`, `ui` de la bibliothèque standard | §23 |
+| Heures d'une journée, fuseaux horaires, ajout de mois dans `dates` | C89 |
 | Retirer un élément d'un Set (`s.remove(x)`) : une méthode du langage, laissée à l'auteur | C86 |
 | Écriture littérale d'une Map, que la spec laisse ouverte (§29) | C79 |
 
@@ -238,8 +239,8 @@ Chaque test golden est un fichier `tests/<suite>/*.lion` accompagné de son `.ex
 | `tests/lexer` | 4 | `lion debug tokens` |
 | `tests/parser` | 23 | `lion debug ast` |
 | `tests/typechecker` | 15 | `lion debug ir` |
-| `tests/errors` | 48 | `lion check` (erreurs de compilation) |
-| `tests/runtime` | 67 | `lion run` (sémantique, bugs, alertes) |
+| `tests/errors` | 52 | `lion check` (erreurs de compilation) |
+| `tests/runtime` | 71 | `lion run` (sémantique, bugs, alertes) |
 | `tests/integration` | 13 | `lion run` (programmes complets) |
 | `tests/programs` | 2 | `lion run` depuis leur dossier (programmes 27.1 et 27.2 de la spec) |
 | `tests/testing` | 3 | `lion test` |
@@ -251,7 +252,7 @@ Le mode compilé a ses propres tests (`cargo test --test native`, `crates/lion_c
 
 Ces tests demandent cargo, qu'ils trouvent dans la variable `CARGO` posée par `cargo test`. Un programme ajouté à `tests/runtime` est donc testé dans les deux modes.
 
-Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (18), `lion_vm` (11), `lion_codegen` (12), `lion_native` (5), `lion_diagnostics` (4) et `lion_ir` (2).
+Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (18), `lion_vm` (13), `lion_codegen` (12), `lion_native` (5), `lion_diagnostics` (4) et `lion_ir` (2).
 
 Les tests golden tournent avec autant de fils que de cœurs ; `LION_THREADS=1` les fait tourner sur un seul, avec la même sortie.
 
@@ -307,7 +308,7 @@ Questions posées à l'auteur le 2026-09-27, en attente :
 - une méthode `s.remove(x)` pour les Sets, sur le modèle de `m.remove(k)` (C79, C86).
 
 Ce qui peut se faire sans nouvelle règle de langage :
-1. **Bibliothèque standard (§23, étape 3)** : les modules `time` et `dates`, dont l'API est déléguée (§B.2). `json` attend la réponse de l'auteur.
+1. **Bibliothèque standard (§23, étape 3)** : `json` attend la réponse de l'auteur ; `net` vient après l'étape 3. `dates` pourra recevoir les heures et les fuseaux horaires (C89).
 2. **Génériques (§15.1)** :
    - traits génériques ;
    - méthodes d'une structure générique ;
@@ -328,7 +329,7 @@ Ce qui peut se faire sans nouvelle règle de langage :
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C88**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C90**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README et des notes, puis un commit Conventional Commits. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

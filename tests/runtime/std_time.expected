@@ -1,0 +1,16 @@
+exit: 2
+----- stdout
+true
+true
+6
+[2, 4, 6]
+----- stderr
+bug: cannot wait for this duration
+   --> tests/runtime/std_time.lion:22:1
+    |
+ 22 | time.sleep(-1)
+    | ^^^^^^^^^^^^^^
+    |
+    = -1.0 is not a number of seconds from 0 up
+    = help: check the value before the call
+
