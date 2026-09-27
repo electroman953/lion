@@ -11,7 +11,7 @@ Les huit étapes de la feuille de route (§28) sont atteintes :
 - la bibliothèque graphique `ui` ouvre de vraies fenêtres (X11, et Wayland par XWayland), dessinées par Lion lui-même, sans dépendance ;
 - `lion add` installe une bibliothèque en une commande, depuis un dépôt git ou un dossier.
 
-Le bilan détaillé, avec les limites connues et les prochaines étapes, est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
+Le bilan détaillé, avec les limites connues et les prochaines étapes, est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). L'historique des modifications est dans [CHANGELOG.md](CHANGELOG.md). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
 
 **Ce qui fonctionne aujourd'hui**
 

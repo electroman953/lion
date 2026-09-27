@@ -5,7 +5,8 @@ Mis à jour le 2026-09-27 : les huit étapes de la feuille de route sont atteint
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
 - [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C101) ;
 - [`docs/design/ui.md`](docs/design/ui.md) et [`docs/design/packages.md`](docs/design/packages.md) : les conceptions de `ui` et des paquets, validées par l'auteur et implémentées (C98, C101) ;
-- [`README.md`](README.md) : la présentation et l'usage.
+- [`README.md`](README.md) : la présentation et l'usage ;
+- [`CHANGELOG.md`](CHANGELOG.md) : l'historique des modifications, session par session.
 
 ## 1. Vérification faite pour ce bilan
 
@@ -229,7 +230,7 @@ Chacun de ces cas donne une erreur « not implemented yet » ou un refus explici
 | Types comme valeurs (`let t = Int`) | §7.1 |
 | Lire un élément de n-uplet : la spec ne dit pas comment (C53) | §16 |
 | Module `net` de la bibliothèque standard | §23 |
-| `ui` sur Windows et macOS, touches mortes, défilement, styles, images | C98 |
+| `ui` sur Windows et macOS, touches mortes, défilement, styles, images, écrans à haute densité | C98 |
 | Heures d'une journée, fuseaux horaires, ajout de mois dans `dates` | C89 |
 | Écriture littérale d'une Map, que la spec laisse ouverte (§29) | C79 |
 
@@ -330,6 +331,8 @@ Les huit étapes de la feuille de route sont atteintes. La suite dépend de ce q
 - **les paquets** : un registre central et la publication, quand il y aura des paquets à partager ;
 - **la spec** : l'étape 1 de la feuille de route demande qu'elle n'ait plus de point ouvert bloquant. Les choix délégués (Dn, Cn) et les décisions de l'auteur de cette session pourraient y entrer.
 
+À confirmer par l'auteur : C87, qui rend les méthodes d'une structure visibles partout où vont ses valeurs (elle précise C61).
+
 Questions encore ouvertes pour l'auteur : ce qu'on peut faire d'un type comme valeur (`let t = Int`, §7.1), la lecture des éléments d'un n-uplet (C53), l'écriture de `json`.
 
 Ce qui peut se faire sans nouvelle règle de langage :
@@ -349,7 +352,7 @@ Ce qui peut se faire sans nouvelle règle de langage :
 ## 10. Conventions de travail
 
 - La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C102**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
-- Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README et des notes, puis un commit Conventional Commits. Chaque message de commit se termine par :
+- Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README, des notes et de `CHANGELOG.md`, puis un commit Conventional Commits, poussé sur le dépôt privé. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_016or6ey4wHpi3riTFJbw1TL
