@@ -16,6 +16,8 @@ use crate::token::{Keyword, Token, TokenKind};
 pub struct Lexed {
     pub tokens: Vec<Token>,
     pub diagnostics: Vec<Diagnostic>,
+    /// The byte ranges of the `/* ... */` comments, for the formatter.
+    pub block_comments: Vec<(usize, usize)>,
 }
 
 pub fn lex(source: SourceId, text: &str) -> Lexed {
@@ -27,9 +29,10 @@ pub fn lex(source: SourceId, text: &str) -> Lexed {
         diagnostics: Vec::new(),
         frames: vec![Frame::Code { depth: 0 }],
         counted: (0, 1),
+        block_comments: Vec::new(),
     };
     lexer.run();
-    Lexed { tokens: lexer.tokens, diagnostics: lexer.diagnostics }
+    Lexed { tokens: lexer.tokens, diagnostics: lexer.diagnostics, block_comments: lexer.block_comments }
 }
 
 /// What the lexer is inside of. The bottom frame is always `Code`.
@@ -51,6 +54,7 @@ struct Lexer<'a> {
     frames: Vec<Frame>,
     /// A byte offset and its line, from which the line of the next token is counted.
     counted: (usize, u32),
+    block_comments: Vec<(usize, usize)>,
 }
 
 impl Lexer<'_> {
@@ -217,6 +221,7 @@ impl Lexer<'_> {
         match self.text[start + 2..].find("*/") {
             Some(length) => {
                 self.pos = start + 2 + length + 2;
+                self.block_comments.push((start, self.pos));
                 if self.text[start..self.pos].contains('\n') {
                     self.line_end(start);
                 }

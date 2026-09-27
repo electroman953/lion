@@ -132,6 +132,54 @@ pub fn test(path: &str) -> ExitCode {
     if failed + refused > 0 { ExitCode::from(exit::REFUSED) } else { ExitCode::SUCCESS }
 }
 
+/// `lion fmt`: lays out a file, or every Lion file of a folder, in the official style
+/// (§24, D20). With `--check`, only says which files would change.
+pub fn fmt(path: &str, check: bool) -> ExitCode {
+    let files = if path.ends_with(".lion") {
+        vec![std::path::PathBuf::from(path)]
+    } else if Path::new(path).is_dir() {
+        let mut files = Vec::new();
+        collect_lion_files(Path::new(path), &mut files);
+        files
+    } else {
+        eprintln!("error: `{path}` is neither a Lion file nor a folder");
+        return ExitCode::from(exit::USAGE);
+    };
+    let (mut changed, mut refused) = (0, 0);
+    for file in &files {
+        let name = file.display().to_string();
+        let Some((sources, id)) = load(&name) else {
+            refused += 1;
+            continue;
+        };
+        let text = sources.get(id).text();
+        let lexed = lion_syntax::lex(id, text);
+        let parsed = lion_syntax::parse(text, &lexed.tokens);
+        let diagnostics: Vec<Diagnostic> =
+            lexed.diagnostics.iter().cloned().chain(parsed.diagnostics).collect();
+        // A file with syntax errors is left as it is: its blocks are not known.
+        if diagnostics.iter().any(Diagnostic::is_fatal) {
+            report(&diagnostics, &sources);
+            refused += 1;
+            continue;
+        }
+        let formatted = lion_syntax::format(text, &lexed.tokens, &lexed.block_comments);
+        if formatted == text {
+            continue;
+        }
+        changed += 1;
+        if check {
+            println!("{name} is not formatted");
+        } else if let Err(error) = std::fs::write(file, formatted) {
+            eprintln!("error: cannot write `{name}`: {error}");
+            refused += 1;
+        } else {
+            println!("formatted {name}");
+        }
+    }
+    if refused > 0 || (check && changed > 0) { ExitCode::from(exit::REFUSED) } else { ExitCode::SUCCESS }
+}
+
 /// The Lion files of a folder and of its subfolders, in order; hidden folders and the
 /// build folder `target` are skipped.
 fn collect_lion_files(folder: &Path, files: &mut Vec<std::path::PathBuf>) {

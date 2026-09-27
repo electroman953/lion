@@ -495,3 +495,27 @@ fn tests_and_expect() {
         "(test \"sum\" (fun test () [(expect (== (+ 1 1) 2))]))"
     );
 }
+
+/// The text laid out by `lion fmt`.
+fn formatted(text: &str) -> String {
+    let mut map = SourceMap::new();
+    let id = map.add("t.lion", text);
+    let lexed = lex(id, text);
+    crate::format(text, &lexed.tokens, &lexed.block_comments)
+}
+
+#[test]
+fn formatter_indents_blocks_with_four_spaces() {
+    let messy = "fun f(a in Int) in Int:\n  if a > 0:\n            return 1\n  elif a == 0:\nreturn 0\n  else:\n  return -1\n  ;\n;\n";
+    let clean = "fun f(a in Int) in Int:\n    if a > 0:\n        return 1\n    elif a == 0:\n        return 0\n    else:\n        return -1\n    ;\n;\n";
+    assert_eq!(formatted(messy), clean);
+    // Laid out once, the text stays as it is.
+    assert_eq!(formatted(clean), clean);
+}
+
+#[test]
+fn formatter_keeps_comments_and_expressions() {
+    let text = "let l = [\n1,\n  2\n]\nlet y = if true then 1 else 2\nif y > 1: show(1) else: show(2) ;\n/* kept\n     as it is\n*/\nwhile false:\n// inside\n;\n\n\n\nshow(y)   \n\n";
+    let expected = "let l = [\n    1,\n    2\n]\nlet y = if true then 1 else 2\nif y > 1: show(1) else: show(2) ;\n/* kept\n     as it is\n*/\nwhile false:\n    // inside\n;\n\nshow(y)\n";
+    assert_eq!(formatted(text), expected);
+}

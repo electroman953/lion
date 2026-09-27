@@ -37,7 +37,7 @@ L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 2
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, exposant négatif, conversion Float → Int impossible, récursion sans fin (plus de 100 000 appels imbriqués). Chacun est signalé avec l'emplacement, les appels en cours, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 
-**Pas encore implémenté** : structures et traits génériques (`Pair of (A, B)`), fonctions anonymes génériques, méthodes détachées, égalité définie par `equals`, lecture des éléments d'un n-uplet, `Domain` et `Map`, valeurs `shared`, appel de code C, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, formateur, mode interactif.
+**Pas encore implémenté** : structures et traits génériques (`Pair of (A, B)`), fonctions anonymes génériques, méthodes détachées, égalité définie par `equals`, lecture des éléments d'un n-uplet, `Domain` et `Map`, valeurs `shared`, appel de code C, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, mode interactif.
 
 ## Construire et utiliser
 
@@ -61,6 +61,7 @@ show(z)          // 30
 | `lion run f.lion` | vérifie puis exécute en mode interprété, avec les alertes |
 | `lion check f.lion` | vérifie sans exécuter |
 | `lion test [f.lion \| dossier]` | lance les blocs `test "nom": ... ;` et leurs `expect` |
+| `lion fmt [--check] [f.lion \| dossier]` | met en page selon le style officiel (4 espaces par bloc) |
 | `lion debug tokens\|ast\|ir\|bytecode f.lion` | montre une étape du compilateur |
 
 Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 ligne de commande incorrecte, 70 erreur interne.
