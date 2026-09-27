@@ -2,6 +2,7 @@
 
 mod driver;
 mod native;
+mod project;
 
 use std::panic;
 use std::process::ExitCode;
@@ -15,6 +16,12 @@ usage:
   lion build <file.lion> [-o <executable>]
                                    compile a program to native code (compiled mode)
   lion test [file.lion | folder]   run the tests of a file, or of every file of a folder
+  lion new <name>                  create a project: lion.toml and main.lion
+  lion add <git address | folder> [name]
+                                   use a package in the project (--git for a local repository)
+  lion remove <name>               stop using a package
+  lion update [name]               take the latest versions that lion.toml accepts
+  lion run | check | build | test  without a file, in a project: its main.lion
   lion fmt [--check] [file.lion | folder]
                                    lay out files in the official style (4 spaces per block)
   lion debug <stage> <file.lion>   show a stage of the compiler: tokens, ast, ir, bytecode
@@ -58,8 +65,35 @@ fn dispatch(args: &[String]) -> ExitCode {
         }
         ["run", file] => driver::run(file),
         ["check", file] => driver::check(file),
+        ["run"] => with_main(driver::run),
+        ["check"] => with_main(driver::check),
+        ["build"] => with_main(|main| driver::build(main, None)),
+        ["new", name] => done(project::new_project(name)),
+        ["add", "--git", source] => done(project::add(source, None, true)),
+        ["add", "--git", source, name] => done(project::add(source, Some(name), true)),
+        ["add", source] if !source.starts_with('-') => done(project::add(source, None, false)),
+        ["add", source, name] if !source.starts_with('-') && !name.starts_with('-') => {
+            done(project::add(source, Some(name), false))
+        }
+        ["remove", name] => done(project::remove(name)),
+        ["update"] => done(project::update(None)),
+        ["update", name] => done(project::update(Some(name))),
         ["debug", stage, file] => driver::debug(stage, file),
-        ["test"] => driver::test("."),
+        ["test"] => match project::find_root(std::path::Path::new(".")) {
+            Some(root) => {
+                let current =
+                    std::env::current_dir().ok().and_then(|folder| std::fs::canonicalize(folder).ok());
+                let shown = match current
+                    .and_then(|current| root.strip_prefix(&current).ok().map(std::path::Path::to_path_buf))
+                {
+                    Some(relative) if relative.as_os_str().is_empty() => ".".to_string(),
+                    Some(relative) => relative.display().to_string(),
+                    None => root.display().to_string(),
+                };
+                driver::test(&shown)
+            }
+            None => driver::test("."),
+        },
         ["test", path] => driver::test(path),
         ["fmt"] => driver::fmt(".", false),
         ["fmt", "--check"] => driver::fmt(".", true),
@@ -73,4 +107,39 @@ fn dispatch(args: &[String]) -> ExitCode {
             ExitCode::from(exit::USAGE)
         }
     }
+}
+
+/// A command of the project: a message, or the problem that stopped it.
+fn done(result: Result<String, String>) -> ExitCode {
+    match result {
+        Ok(message) => {
+            println!("{message}");
+            ExitCode::SUCCESS
+        }
+        Err(problem) => {
+            eprintln!("error: {problem}");
+            ExitCode::from(exit::REFUSED)
+        }
+    }
+}
+
+/// Runs `command` on the `main.lion` of the project of the current folder.
+fn with_main(command: impl FnOnce(&str) -> ExitCode) -> ExitCode {
+    let Some(root) = project::find_root(std::path::Path::new(".")) else {
+        eprintln!(
+            "error: which file? There is no project here (no `lion.toml`): write `lion run file.lion`\n\n{USAGE}"
+        );
+        return ExitCode::from(exit::USAGE);
+    };
+    let main = root.join("main.lion");
+    if !main.is_file() {
+        eprintln!("error: the project has no `main.lion`, the script that `lion run` runs");
+        return ExitCode::from(exit::REFUSED);
+    }
+    // The paths of the messages start from the current folder when they can.
+    let current = std::env::current_dir().ok();
+    let shown = current
+        .and_then(|current| main.strip_prefix(&current).ok().map(std::path::Path::to_path_buf))
+        .unwrap_or(main);
+    command(&shown.display().to_string())
 }

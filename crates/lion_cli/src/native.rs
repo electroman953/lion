@@ -149,7 +149,7 @@ fn find_cargo() -> Option<PathBuf> {
 
 /// Where compiled runtimes and programs are kept: `LION_CACHE`, or the cache folder of
 /// the user.
-fn cache_folder() -> PathBuf {
+pub fn cache_folder() -> PathBuf {
     if let Some(folder) = env::var_os("LION_CACHE") {
         return PathBuf::from(folder);
     }

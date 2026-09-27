@@ -58,7 +58,7 @@ pub struct Checked {
 
 /// Checks a program of one file.
 pub fn check(module: &ast::Module) -> Checked {
-    check_program(&[Source { name: String::new(), module, standard: false }])
+    check_program(&[Source { name: String::new(), module, standard: false, imports: HashMap::new() }])
 }
 
 /// Checks a program: the script first, then the modules that the files use (§20).
@@ -330,6 +330,7 @@ impl<'a> Checker<'a> {
                 ast: file.module,
                 standard: file.standard,
                 imports: HashMap::new(),
+                uses: file.imports.clone(),
                 tables: Tables::default(),
                 init: None,
             })

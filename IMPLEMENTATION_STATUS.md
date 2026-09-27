@@ -1,10 +1,10 @@
 # État de l'implémentation de Lion
 
-Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélisme sur plusieurs cœurs (étape 6), la bibliothèque graphique `ui` (étape 7), les modules `sets`, `json`, `time` et `dates`, et les génériques complets (§15.1). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
+Mis à jour le 2026-09-27 : les huit étapes de la feuille de route sont atteintes, avec le compilateur natif (5), le parallélisme sur plusieurs cœurs (6), la bibliothèque graphique `ui` (7) et le gestionnaire de paquets (8). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C100) ;
-- [`docs/design/ui.md`](docs/design/ui.md) : la conception de la bibliothèque `ui`, validée par l'auteur et implémentée (C98) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C101) ;
+- [`docs/design/ui.md`](docs/design/ui.md) et [`docs/design/packages.md`](docs/design/packages.md) : les conceptions de `ui` et des paquets, validées par l'auteur et implémentées (C98, C101) ;
 - [`README.md`](README.md) : la présentation et l'usage.
 
 ## 1. Vérification faite pour ce bilan
@@ -29,6 +29,7 @@ L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié
 | 5. Compilateur natif `lion build` | **Atteinte** : les deux modes donnent les mêmes résultats sur tous les programmes de test (C81, C82) |
 | 6. Parallélisme et tâches | **Atteinte** : les parties parallèles utilisent tous les cœurs, dans les deux modes, avec le résultat du calcul séquentiel (C83, C84) ; les tâches tournent sur leur propre fil quand rien de ce qu'elles lisent ne peut changer (C85) |
 | 7. Bibliothèque `ui` | **Atteinte** : 27.3 tourne. Fenêtres X11 dessinées par Lion (crate `lion_ui`), éléments, mise en page et boucle d'événements écrits en Lion (`std/ui.lion`), backend sans écran pour les tests (C98) |
+| 8. Gestionnaire de paquets | **Atteinte** : `lion add` installe une bibliothèque en une commande, depuis git ou un dossier ; `lion.toml`, `lion.lock`, versions, éditions (C101) |
 
 ## 3. Architecture
 
@@ -159,10 +160,12 @@ Principes :
 **`lion_cli`** :
 - `main.rs` : les commandes ;
 - `driver.rs` : le pipeline ;
+- `project.rs` : les projets et les paquets (C101) : `lion.toml`, `lion.lock`, versions, git, résolution, et les commandes `new`, `add`, `remove`, `update` ;
 - `native.rs` : `lion build`. Il écrit le runtime dans un cache, prépare un paquet cargo par exécutable, lance `cargo build --release --offline` et copie le binaire ;
 - `build.rs` : embarque dans `lion` les sources et les manifestes des crates du runtime (`FILES`, `HASH`) ;
 - `tests/golden.rs` : le lanceur des tests golden ;
-- `tests/native.rs` : le lanceur des tests du mode compilé.
+- `tests/native.rs` : le lanceur des tests du mode compilé ;
+- `tests/packages.rs` : les tests des paquets, avec des dépôts git temporaires.
 
 ## 5. Fonctionnalités de Lion supportées (mode interprété)
 
@@ -252,6 +255,8 @@ Chaque test golden est un fichier `tests/<suite>/*.lion` accompagné de son `.ex
 | `tests/testing` | 3 | `lion test` |
 | `tests/interactive` | 1 | `lion` seul, le fichier en entrée |
 
+Les paquets ont les leurs (`cargo test --test packages`) : des dépôts git créés dans un dossier temporaire, avec un cache à part, puis `lion new`, `add`, `update`, `remove` et `run`, jusqu'au conflit de versions et au travail hors ligne. Ils se sautent sans git.
+
 Le mode compilé a ses propres tests (`cargo test --test native`, `crates/lion_cli/tests/native.rs`) :
 - `compiled_programs_behave_as_interpreted` : les programmes de `tests/runtime`, `tests/integration` et `tests/programs` sont traduits par `lion debug rust` et compilés ensemble, comme les modules d'un seul exécutable, dans `target/tmp/native-suite`. Chacun est ensuite comparé à son `.expected`, alertes retirées. Les avertissements affichés par `lion debug rust` précèdent la sortie, comme avec `lion run`.
 - `lion_build_makes_an_executable` : lance `lion build` avec un cache dans `target/tmp/lion-build`.
@@ -272,8 +277,15 @@ cargo build --release
 ./target/release/lion test [fichier.lion | dossier]
 ./target/release/lion fmt [--check] [fichier.lion | dossier]
 ./target/release/lion debug tokens|ast|ir|bytecode|rust exemple.lion
+./target/release/lion new carnet             # un projet : lion.toml et main.lion
+./target/release/lion add <adresse git | dossier> [nom]
+./target/release/lion remove nom
+./target/release/lion update [nom]
+./target/release/lion run                    # sans fichier : le main.lion du projet (aussi check, build, test)
 ./target/release/lion                       # mode interactif
 ```
+
+Variables d'environnement : `LION_THREADS` (fils des parties parallèles), `LION_CACHE` (cache de `lion build` et des paquets), `LION_CARGO`, `LION_UI=headless`, `LION_UI_EVENTS`, `LION_UI_SNAPSHOT`, `LION_UI_DEBUG`.
 
 Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 ligne de commande incorrecte, 70 erreur interne.
 
@@ -298,6 +310,11 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
   - X11 seulement (Linux, BSD, Wayland par XWayland), en couleurs vraies sur 24 bits ;
   - pas de touches mortes, de défilement, de styles ni d'images ;
   - une fenêtre X11 n'a pas pu être vérifiée à l'œil pendant la session du 2026-09-27 : KWin masquait toutes les fenêtres X (même `xlogo`). Le protocole est accepté par le serveur, et le rendu est vérifié par les images du mode sans écran.
+- Paquets (C101) :
+  - il faut la commande `git` pour les paquets de git ;
+  - pas de registre central, ni de publication ;
+  - une seule version d'un paquet par programme ;
+  - un paquet de git ne peut pas dépendre d'un dossier local.
 - Mode compilé :
   - `lion build` demande une chaîne Rust sur la machine qui compile ;
   - la première compilation prépare le runtime dans le cache (`LION_CACHE`, `$XDG_CACHE_HOME/lion` ou `~/.cache/lion`), ce qui prend quelques secondes ;
@@ -307,9 +324,11 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
 
 ## 9. Prochaine étape recommandée
 
-Les étapes 2 à 7 de la feuille de route sont atteintes. Reste :
-- **l'étape 8**, le gestionnaire de paquets, avec le fichier de projet et les éditions (§25). Sa conception est à proposer à l'auteur avant de coder, comme pour `ui` ;
-- **vérifier `ui` à l'écran** avec l'auteur (`lion run tests/programs/notes_app/notes_app.lion` depuis ce dossier), puis l'étendre : Windows et macOS, touches mortes, défilement, styles.
+Les huit étapes de la feuille de route sont atteintes. La suite dépend de ce que l'auteur veut privilégier :
+- **vérifier `ui` à l'écran** avec l'auteur (`cd tests/programs/notes_app && lion run notes_app.lion`), puis l'étendre : Windows et macOS, touches mortes, défilement, styles ;
+- **l'outillage des éditeurs** : VS Code et LSP (point 5 ci-dessous) ;
+- **les paquets** : un registre central et la publication, quand il y aura des paquets à partager ;
+- **la spec** : l'étape 1 de la feuille de route demande qu'elle n'ait plus de point ouvert bloquant. Les choix délégués (Dn, Cn) et les décisions de l'auteur de cette session pourraient y entrer.
 
 Questions encore ouvertes pour l'auteur : ce qu'on peut faire d'un type comme valeur (`let t = Int`, §7.1), la lecture des éléments d'un n-uplet (C53), l'écriture de `json`.
 
@@ -329,7 +348,7 @@ Ce qui peut se faire sans nouvelle règle de langage :
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C101**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C102**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README et des notes, puis un commit Conventional Commits. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

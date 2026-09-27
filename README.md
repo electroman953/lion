@@ -4,11 +4,12 @@ Lion est un langage polyvalent, interprété ou compilé, dont l'écriture et la
 
 ## État
 
-Les étapes 2 à 7 de la feuille de route (§28) sont atteintes :
+Les huit étapes de la feuille de route (§28) sont atteintes :
 - les trois programmes du §27 de la spec tournent tels quels (`tests/programs`), dont 27.3, l'application graphique ;
 - le compilateur natif `lion build` donne les mêmes résultats que le mode interprété sur tous les programmes de test ;
 - les parties parallèles utilisent tous les cœurs ;
-- la bibliothèque graphique `ui` ouvre de vraies fenêtres (X11, et Wayland par XWayland), dessinées par Lion lui-même, sans dépendance.
+- la bibliothèque graphique `ui` ouvre de vraies fenêtres (X11, et Wayland par XWayland), dessinées par Lion lui-même, sans dépendance ;
+- `lion add` installe une bibliothèque en une commande, depuis un dépôt git ou un dossier.
 
 Le bilan détaillé, avec les limites connues et les prochaines étapes, est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
 
@@ -54,6 +55,17 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
 
 **Pas encore implémenté** : types comme valeurs, lecture des éléments d'un n-uplet, module `net`, débogueur. La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
+## Projets et paquets
+
+```sh
+lion new carnet                                  # lion.toml et main.lion
+cd carnet
+lion add https://github.com/leo/geometrie        # une bibliothèque, en une commande
+lion run                                         # main.lion, avec ses dépendances
+```
+
+`lion.toml` décrit le projet (nom, version, édition) et ses dépendances ; `lion.lock` fige le commit de chaque paquet venu de git. Dans le code, `use geometrie` atteint le module principal du paquet, et `use geometrie.cercle` un autre de ses modules (C101).
+
 ## Interfaces graphiques
 
 ```lion
@@ -93,6 +105,10 @@ show(z)          // 30
 | `lion build f.lion [-o exécutable]` | compile en code natif (il faut Rust, voir plus bas) |
 | `lion test [f.lion \| dossier]` | lance les blocs `test "nom": ... ;` et leurs `expect` |
 | `lion fmt [--check] [f.lion \| dossier]` | met en page selon le style officiel (4 espaces par bloc) |
+| `lion new nom` | crée un projet : `lion.toml` et `main.lion` |
+| `lion add source [nom]` | ajoute un paquet au projet : une adresse git ou un dossier |
+| `lion remove nom`, `lion update [nom]` | retire un paquet, ou prend les dernières versions permises |
+| `lion run`, `check`, `build`, `test` sans fichier | agissent sur le projet du dossier courant |
 | `lion` | mode interactif : on tape du Lion ligne par ligne |
 | `lion debug tokens\|ast\|ir\|bytecode\|rust f.lion` | montre une étape du compilateur |
 
@@ -129,6 +145,7 @@ cargo test --workspace
 Après un changement voulu de sortie, régénérer avec `LION_BLESS=1 cargo test --test golden`, puis relire le diff.
 
 - **Tests du mode compilé** (`cargo test --test native`) : tous les programmes de `tests/runtime`, `tests/integration` et `tests/programs` sont compilés en natif, puis comparés aux **mêmes** fichiers `.expected`, sans les alertes. C'est la garantie « deux modes, une sémantique » (§22.2). Un second test lance `lion build` lui-même.
+- **Tests des paquets** (`cargo test --test packages`) : des dépôts git créés dans un dossier temporaire, puis `lion new`, `lion add`, `lion update`, `lion remove` et `lion run`, avec un cache à part (sautés sans git).
 
 ## Architecture
 

@@ -1,6 +1,6 @@
 # Proposition : le gestionnaire de paquets (étape 8)
 
-Statut : **proposition, à valider par l'auteur**. Rien n'est implémenté.
+Statut : **implémentée** (C101 dans les [notes](../implementation-notes.md)). L'auteur a choisi les quatre options recommandées le 2026-09-27. Écarts avec le texte ci-dessous : `lion new` n'écrit pas de `.gitignore`, `--git` fait prendre un dépôt local pour un dépôt git, et un paquet de git ne peut pas dépendre d'un dossier local.
 
 La spec prévoit un gestionnaire officiel, dont la conception reste à faire (§20.4, §B.2). Elle fixe deux contraintes :
 - chaque projet déclare son édition, et des projets d'éditions différentes s'utilisent mutuellement (§25, D83) ;

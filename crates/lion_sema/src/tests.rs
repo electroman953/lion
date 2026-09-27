@@ -475,7 +475,12 @@ fn check_files(script: &str, modules: &[(&str, &str)]) -> Result<String, Vec<Str
     }
     let files: Vec<crate::Source> = parsed
         .iter()
-        .map(|(name, module)| crate::Source { name: name.clone(), module, standard: false })
+        .map(|(name, module)| crate::Source {
+            name: name.clone(),
+            module,
+            standard: false,
+            imports: Default::default(),
+        })
         .collect();
     let checked = crate::check_program(&files);
     match checked.program {

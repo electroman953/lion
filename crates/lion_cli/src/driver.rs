@@ -1,5 +1,6 @@
 //! Runs the stages of the toolchain on a file and reports their diagnostics.
 
+use std::collections::HashMap;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 use std::process::ExitCode;
@@ -328,7 +329,20 @@ fn load(path: &str) -> Option<(SourceMap, SourceId)> {
 /// Lexes, parses and checks a script and the modules it uses. Returns the program if
 /// it has no errors, after reporting every diagnostic.
 fn front_end(sources: &mut SourceMap, id: SourceId) -> Option<ir::Program> {
-    let (program, diagnostics) = check_files(sources, id);
+    // A script in a project may use its packages (C101).
+    let folder = Path::new(sources.get(id).name()).parent().map(Path::to_path_buf).unwrap_or_default();
+    let folder = if folder.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { folder };
+    let packages = match crate::project::find_root(&folder) {
+        Some(root) => match crate::project::resolve(&root, None) {
+            Ok(packages) => packages,
+            Err(problem) => {
+                report(&[Diagnostic::error(problem)], sources);
+                return None;
+            }
+        },
+        None => crate::project::Resolution::default(),
+    };
+    let (program, diagnostics) = check_files(sources, id, &packages);
     report(&diagnostics, sources);
     program
 }
@@ -377,7 +391,7 @@ pub fn interactive() -> ExitCode {
         let candidate = format!("{accepted}{input}");
         let mut sources = SourceMap::new();
         let id = sources.add("<interactive>", candidate.clone());
-        let (program, diagnostics) = check_files(&mut sources, id);
+        let (program, diagnostics) = check_files(&mut sources, id, &crate::project::Resolution::default());
         // The earlier inputs were accepted: only what concerns this one is shown.
         let fresh: Vec<Diagnostic> = diagnostics
             .into_iter()
@@ -439,16 +453,29 @@ pub fn interactive() -> ExitCode {
 }
 
 /// Lexes, parses and checks a script and the modules it uses: the program if it has no
-/// errors, and the diagnostics.
-fn check_files(sources: &mut SourceMap, id: SourceId) -> (Option<ir::Program>, Vec<Diagnostic>) {
+/// errors, and the diagnostics. `packages` are those that the script may use (C101).
+fn check_files(
+    sources: &mut SourceMap,
+    id: SourceId,
+    packages: &crate::project::Resolution,
+) -> (Option<ir::Program>, Vec<Diagnostic>) {
     let mut diagnostics = Vec::new();
-    // The files of the program: the script, then each module that a file uses, once.
-    let mut files: Vec<(String, SourceId, bool)> = vec![(String::new(), id, false)];
-    let mut modules = Vec::new();
     let folder = Path::new(sources.get(id).name()).parent().map(Path::to_path_buf).unwrap_or_default();
+    // The files of the program: the script, then each module that a file uses, once, by
+    // its file. Each file is read in the folder of its package, with its packages.
+    let mut files: Vec<File> = vec![File {
+        name: String::new(),
+        key: String::new(),
+        source: id,
+        standard: false,
+        folder,
+        packages: packages.project.clone(),
+        imports: HashMap::new(),
+    }];
+    let mut modules = Vec::new();
     let mut index = 0;
     while index < files.len() {
-        let file = files[index].1;
+        let file = files[index].source;
         let text = sources.get(file).text().to_string();
         let lexed = lion_syntax::lex(file, &text);
         let parsed = lion_syntax::parse(&text, &lexed.tokens);
@@ -458,25 +485,47 @@ fn check_files(sources: &mut SourceMap, id: SourceId) -> (Option<ir::Program>, V
             let ast::StmtKind::Use(path) = &stmt.kind else { continue };
             let parts: Vec<&str> = path.iter().map(|part| part.name.as_str()).collect();
             let name = parts.join(".");
-            if files.iter().any(|(known, ..)| *known == name) {
+            if files[index].imports.contains_key(&name) {
                 continue;
             }
-            match find_module(&folder, &parts) {
-                Ok((file_name, text, standard)) => {
-                    let module = sources.add(file_name, text);
-                    files.push((name, module, standard));
+            match find_module(&files[index].folder, &files[index].packages, &parts) {
+                Ok(found) => {
+                    let known = files.iter().position(|other| other.key == found.key);
+                    let target = match known {
+                        Some(target) => target,
+                        None => {
+                            let source = sources.add(found.file_name, found.text);
+                            let packages = match &found.package {
+                                Some(root) => packages.packages.get(root).cloned().unwrap_or_default(),
+                                None => files[index].packages.clone(),
+                            };
+                            files.push(File {
+                                name: name.clone(),
+                                key: found.key,
+                                source,
+                                standard: found.standard,
+                                folder: found.package.unwrap_or_else(|| files[index].folder.clone()),
+                                packages,
+                                imports: HashMap::new(),
+                            });
+                            files.len() - 1
+                        }
+                    };
+                    files[index].imports.insert(name, target);
                 }
                 Err(looked_at) => {
                     let span = path[0].span.to(path[path.len() - 1].span);
-                    diagnostics.push(
-                        Diagnostic::error(format!("cannot find the module `{name}`"))
-                            .with_primary(span, "")
-                            .with_note(format!("there is no file `{looked_at}`"))
-                            .with_note(format!(
-                                "the modules of the standard library are {}",
-                                lion_std::MODULES.join(", ")
-                            )),
-                    );
+                    let mut error = Diagnostic::error(format!("cannot find the module `{name}`"))
+                        .with_primary(span, "")
+                        .with_note(format!("there is no file `{looked_at}`"))
+                        .with_note(format!(
+                            "the modules of the standard library are {}",
+                            lion_std::MODULES.join(", ")
+                        ));
+                    if files[index].packages.is_empty() {
+                        error = error.with_help("a package is added with `lion add`, in a project (C101)");
+                    }
+                    diagnostics.push(error);
                 }
             }
         }
@@ -490,10 +539,11 @@ fn check_files(sources: &mut SourceMap, id: SourceId) -> (Option<ir::Program>, V
         let files: Vec<lion_sema::Source> = files
             .iter()
             .zip(&modules)
-            .map(|((name, _, standard), module)| lion_sema::Source {
-                name: name.clone(),
+            .map(|(file, module)| lion_sema::Source {
+                name: file.name.clone(),
                 module,
-                standard: *standard,
+                standard: file.standard,
+                imports: file.imports.clone(),
             })
             .collect();
         let checked = lion_sema::check_program(&files);
@@ -510,20 +560,69 @@ fn check_files(sources: &mut SourceMap, id: SourceId) -> (Option<ir::Program>, V
     (program, diagnostics)
 }
 
-/// The module `a.b`: a module of the standard library, or the file `a/b.lion` in the
-/// folder of the script (C61). On failure, the file that was looked for.
-fn find_module(folder: &Path, parts: &[&str]) -> Result<(String, String, bool), String> {
+/// A file of a program, while the driver reads them.
+struct File {
+    /// The path written after the first `use` that reached it; empty for the script.
+    name: String,
+    /// What makes the file unique: its path, or the name of a standard module.
+    key: String,
+    source: SourceId,
+    standard: bool,
+    /// The folder where its own `use` look for files: that of the script, or of its
+    /// package.
+    folder: std::path::PathBuf,
+    /// The packages it may use, by name.
+    packages: HashMap<String, std::path::PathBuf>,
+    /// The file that each of its `use` reaches, by position.
+    imports: HashMap<String, usize>,
+}
+
+/// A module found for a `use`.
+struct Found {
+    file_name: String,
+    text: String,
+    key: String,
+    standard: bool,
+    /// The folder of the package it belongs to, when it comes from a package.
+    package: Option<std::path::PathBuf>,
+}
+
+/// The module `a.b`: a module of the standard library, a module of the package `a`, or
+/// the file `a/b.lion` in the folder of the script (C61, C101). On failure, the file
+/// that was looked for.
+fn find_module(
+    folder: &Path,
+    packages: &HashMap<String, std::path::PathBuf>,
+    parts: &[&str],
+) -> Result<Found, String> {
     let name = parts.join(".");
     if let Some(text) = lion_std::module(&name) {
-        return Ok((format!("<std>/{name}.lion"), text.to_string(), true));
+        let file_name = format!("<std>/{name}.lion");
+        return Ok(Found {
+            key: file_name.clone(),
+            file_name,
+            text: text.to_string(),
+            standard: true,
+            package: None,
+        });
     }
-    let mut path = folder.to_path_buf();
-    for part in parts {
+    // `use geometrie` reaches `geometrie.lion` in the package, `use geometrie.cercle` its
+    // `cercle.lion`.
+    let (base, rest, package) = match packages.get(parts[0]) {
+        Some(root) if parts.len() == 1 => (root.clone(), parts.to_vec(), Some(root.clone())),
+        Some(root) => (root.clone(), parts[1..].to_vec(), Some(root.clone())),
+        None => (folder.to_path_buf(), parts.to_vec(), None),
+    };
+    let mut path = base;
+    for part in &rest {
         path.push(part);
     }
     path.set_extension("lion");
     match std::fs::read_to_string(&path) {
-        Ok(text) => Ok((path.display().to_string(), text, false)),
+        Ok(text) => {
+            let key = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone()).display().to_string();
+            Ok(Found { file_name: path.display().to_string(), text, key, standard: false, package })
+        }
         Err(_) => Err(path.display().to_string()),
     }
 }

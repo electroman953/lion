@@ -21,6 +21,10 @@ pub struct Source<'a> {
     pub module: &'a ast::Module,
     /// A module of the standard library, which may declare `foreign "lion"` functions.
     pub standard: bool,
+    /// The file that each `use` of this one reaches, by the path written after `use`, as
+    /// a position in the files given to the checker. Without it, a `use` reaches the file
+    /// of that name.
+    pub imports: HashMap<String, usize>,
 }
 
 /// The names declared at the top level of a file.
@@ -46,6 +50,8 @@ pub(crate) struct ModuleInfo<'a> {
     /// The modules named by `use`, by the name that reaches them: the last part of
     /// their path (C61).
     pub(crate) imports: HashMap<String, usize>,
+    /// The file that each `use` reaches, as the driver found it (C101).
+    pub(crate) uses: HashMap<String, usize>,
     /// Its names, while another module is being checked.
     pub(crate) tables: Tables<'a>,
     /// The function that gives the globals of the module their values (D81).
@@ -84,7 +90,11 @@ impl<'a> Checker<'a> {
             let ast::StmtKind::Use(path) = &stmt.kind else { continue };
             let full: Vec<&str> = path.iter().map(|name| name.name.as_str()).collect();
             let full = full.join(".");
-            let Some(target) = self.modules.iter().position(|info| info.name == full) else {
+            let found = match self.modules[module].uses.get(&full) {
+                Some(&target) => Some(target),
+                None => self.modules.iter().position(|info| info.name == full),
+            };
+            let Some(target) = found else {
                 // The driver reports the modules it cannot find.
                 continue;
             };
