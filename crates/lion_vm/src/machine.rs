@@ -1,7 +1,7 @@
 //! Execution of bytecode.
 
 use std::collections::HashSet;
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 use std::rc::Rc;
 
 use lion_diagnostics::{Diagnostic, Span};
@@ -21,6 +21,8 @@ pub enum Trap {
     Failure { message: String, span: Option<Span> },
     /// Writing the output failed.
     Io(io::Error),
+    /// `exit(code)` stopped the program (§20.1).
+    Exit(u8),
 }
 
 impl Trap {
@@ -47,6 +49,7 @@ impl Trap {
                 diagnostic.with_note(kind.details()).with_help(kind.help())
             }
             Trap::Io(error) => Diagnostic::error(format!("cannot write the output: {error}")),
+            Trap::Exit(code) => Diagnostic::internal(format!("the program stopped with `exit({code})`")),
             Trap::Failure { message, span } => {
                 let mut diagnostic = Diagnostic::error(message.clone());
                 if let Some(span) = span {
@@ -92,9 +95,15 @@ impl Alert {
     }
 }
 
-/// Runs a program to its end, writing the output of `show` to `out` and reporting
-/// alerts to `on_alert` as they happen; `out` is flushed before each alert.
-pub fn run(program: &Program, out: &mut dyn Write, on_alert: &mut dyn FnMut(Alert)) -> Result<(), Trap> {
+/// Runs a program to its end, writing the output of `show` to `out`, reading the lines
+/// of `ask` from `input`, and reporting alerts to `on_alert` as they happen; `out` is
+/// flushed before each alert.
+pub fn run(
+    program: &Program,
+    out: &mut dyn Write,
+    input: &mut dyn BufRead,
+    on_alert: &mut dyn FnMut(Alert),
+) -> Result<(), Trap> {
     let main = &program.functions[program.main];
     let mut machine = Machine {
         program,
@@ -103,6 +112,7 @@ pub fn run(program: &Program, out: &mut dyn Write, on_alert: &mut dyn FnMut(Aler
         stack: vec![Value::None; main.registers as usize],
         frames: vec![Frame { function: program.main as u32, base: 0, resume: 0, dst: 0, args: 0, call: 0 }],
         out,
+        input,
         on_alert,
         alerted: HashSet::new(),
     };
@@ -138,6 +148,7 @@ struct Machine<'a> {
     stack: Vec<Value>,
     frames: Vec<Frame>,
     out: &'a mut dyn Write,
+    input: &'a mut dyn BufRead,
     on_alert: &'a mut dyn FnMut(Alert),
     /// Instructions (function, index) that already reported an alert.
     alerted: HashSet<(usize, usize)>,
@@ -272,6 +283,42 @@ impl Machine<'_> {
                 Instr::Show { src } => {
                     let text = self.stack[self.base + src as usize].to_text();
                     writeln!(self.out, "{text}").map_err(|error| Box::new(Trap::Io(error)))?;
+                }
+                Instr::Ask { dst, prompt } => {
+                    let line = self.ask(prompt).map_err(|error| Box::new(Trap::Io(error)))?;
+                    self.set(dst, Value::Text(Rc::new(line)));
+                }
+                Instr::Exit { code } => {
+                    let code = self.int(code);
+                    let code =
+                        u8::try_from(code).map_err(|_| self.bug(BugKind::InvalidExitCode { code }, at))?;
+                    return Err(Box::new(Trap::Exit(code)));
+                }
+                Instr::Reverse { dst, a } => {
+                    let reversed = match &self.stack[self.base + a as usize] {
+                        Value::List(elements) => {
+                            Value::List(Rc::new(elements.iter().rev().cloned().collect()))
+                        }
+                        Value::Text(text) => Value::Text(Rc::new(text.chars().rev().collect())),
+                        other => self.mismatch("List or Text", other),
+                    };
+                    self.set(dst, reversed);
+                }
+                Instr::Floor { dst, a } => {
+                    let value = ops::float_floor(self.float(a)).map_err(|kind| self.bug(kind, at))?;
+                    self.set(dst, Value::Int(value));
+                }
+                Instr::Ceil { dst, a } => {
+                    let value = ops::float_ceil(self.float(a)).map_err(|kind| self.bug(kind, at))?;
+                    self.set(dst, Value::Int(value));
+                }
+                Instr::Round { dst, a } => {
+                    let value = ops::float_round(self.float(a)).map_err(|kind| self.bug(kind, at))?;
+                    self.set(dst, Value::Int(value));
+                }
+                Instr::Isqrt { dst, a } => {
+                    let value = ops::isqrt(self.int(a)).map_err(|kind| self.bug(kind, at))?;
+                    self.set(dst, Value::Int(value));
                 }
                 Instr::Call { function, dst, args, count } => {
                     pc = self.call(function as usize, dst, args, count, pc, at)?;
@@ -731,6 +778,25 @@ impl Machine<'_> {
             Value::Set(set) => set,
             other => self.mismatch("Set", other),
         }
+    }
+
+    /// `ask(prompt)`: the prompt, followed by a space, then a line without its end. At the
+    /// end of the input, the line is empty (C59).
+    fn ask(&mut self, prompt: Reg) -> io::Result<String> {
+        let prompt = self.text(prompt).to_string();
+        if !prompt.is_empty() {
+            write!(self.out, "{prompt} ")?;
+        }
+        self.out.flush()?;
+        let mut line = String::new();
+        self.input.read_line(&mut line)?;
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
+        Ok(line)
     }
 
     /// `l[i]` or `t[i]`, from 1.

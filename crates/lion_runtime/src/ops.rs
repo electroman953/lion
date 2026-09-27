@@ -58,6 +58,36 @@ pub fn int_pow(base: i64, exponent: i64) -> Result<i64, BugKind> {
     }
 }
 
+/// `isqrt(n)`: the largest `r` such that `r * r <= n` (§23, C59).
+pub fn isqrt(n: i64) -> Result<i64, BugKind> {
+    if n < 0 {
+        return Err(BugKind::NegativeSquareRoot { value: n });
+    }
+    // The Float estimate is off by at most one either way; the checks correct it.
+    let mut root = (n as f64).sqrt() as i64;
+    while root.checked_mul(root).is_none_or(|square| square > n) {
+        root -= 1;
+    }
+    while (root + 1).checked_mul(root + 1).is_some_and(|square| square <= n) {
+        root += 1;
+    }
+    Ok(root)
+}
+
+/// `floor(x)`, `ceil(x)`, `round(x)` of a Float: an Int, or a bug when there is none
+/// (§23, C59). `round` goes away from zero at the half: `round(2.5)` is 3.
+pub fn float_floor(value: f64) -> Result<i64, BugKind> {
+    float_to_int(value.floor())
+}
+
+pub fn float_ceil(value: f64) -> Result<i64, BugKind> {
+    float_to_int(value.ceil())
+}
+
+pub fn float_round(value: f64) -> Result<i64, BugKind> {
+    float_to_int(value.round())
+}
+
 pub fn float_pow(base: f64, exponent: f64) -> f64 {
     base.powf(exponent)
 }
@@ -209,5 +239,23 @@ mod tests {
         assert!(!int_to_float((1 << 53) + 1).1);
         assert!(!int_to_float(i64::MAX).1);
         assert!(int_to_float(i64::MIN).1);
+    }
+
+    #[test]
+    fn integer_square_roots() {
+        assert_eq!(isqrt(0), Ok(0));
+        assert_eq!(isqrt(15), Ok(3));
+        assert_eq!(isqrt(16), Ok(4));
+        assert_eq!(isqrt(i64::MAX), Ok(3_037_000_499));
+        assert_eq!(isqrt(-4), Err(BugKind::NegativeSquareRoot { value: -4 }));
+    }
+
+    #[test]
+    fn rounding() {
+        assert_eq!(float_floor(-2.5), Ok(-3));
+        assert_eq!(float_ceil(-2.5), Ok(-2));
+        assert_eq!(float_round(2.5), Ok(3));
+        assert_eq!(float_round(-2.5), Ok(-3));
+        assert!(float_round(f64::NAN).is_err());
     }
 }

@@ -37,16 +37,19 @@ pub fn run(path: &str) -> ExitCode {
     let mut report_alert = |alert: lion_vm::Alert| {
         eprintln!("{}", render(&alert.to_diagnostic(), &sources));
     };
-    let result = lion_vm::run(&chunk, &mut out, &mut report_alert);
+    let mut input = io::stdin().lock();
+    let result = lion_vm::run(&chunk, &mut out, &mut input, &mut report_alert);
     // Everything the program wrote appears before the report of a bug.
     let _ = out.flush();
     match result {
         Ok(()) => ExitCode::SUCCESS,
+        Err(lion_vm::Trap::Exit(code)) => ExitCode::from(code),
         Err(trap) => {
             eprintln!("{}", render(&trap.to_diagnostic(), &sources));
             match trap {
                 lion_vm::Trap::Bug { .. } => ExitCode::from(exit::BUG),
                 lion_vm::Trap::Io(_) | lion_vm::Trap::Failure { .. } => ExitCode::from(exit::REFUSED),
+                lion_vm::Trap::Exit(code) => ExitCode::from(code),
             }
         }
     }

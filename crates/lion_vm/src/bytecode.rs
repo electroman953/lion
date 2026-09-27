@@ -169,6 +169,15 @@ pub enum Instr {
     Broken { name: Reg, detail: Reg },
 
     Show { src: Reg },
+    /// Writes the Text in `prompt`, then reads a line into `dst` (§23).
+    Ask { dst: Reg, prompt: Reg },
+    /// Stops the program with the exit code in `code` (§20.1).
+    Exit { code: Reg },
+    Reverse { dst: Reg, a: Reg },
+    Floor { dst: Reg, a: Reg },
+    Ceil { dst: Reg, a: Reg },
+    Round { dst: Reg, a: Reg },
+    Isqrt { dst: Reg, a: Reg },
     Halt,
 }
 

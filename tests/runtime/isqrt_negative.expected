@@ -1,0 +1,13 @@
+exit: 2
+----- stdout
+4
+----- stderr
+bug: square root of a negative number
+  --> tests/runtime/isqrt_negative.lion:3:10
+   |
+ 3 |     show(isqrt(v))
+   |          ^^^^^^^^
+   |
+   = isqrt(-4) has no Int value
+   = help: check that the value is not negative first
+

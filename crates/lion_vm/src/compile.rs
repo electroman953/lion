@@ -550,6 +550,29 @@ impl Compiler<'_> {
                 let a = self.operand(&args[0]);
                 self.emit(Instr::ErrorMessage { dst, a }, span);
             }
+            ExprKind::CallBuiltin {
+                builtin:
+                    builtin @ (Builtin::Ask
+                    | Builtin::Exit
+                    | Builtin::Reverse
+                    | Builtin::Floor
+                    | Builtin::Ceil
+                    | Builtin::Round
+                    | Builtin::Isqrt),
+                args,
+            } => {
+                let a = self.operand(&args[0]);
+                let instr = match builtin {
+                    Builtin::Ask => Instr::Ask { dst, prompt: a },
+                    Builtin::Exit => Instr::Exit { code: a },
+                    Builtin::Reverse => Instr::Reverse { dst, a },
+                    Builtin::Floor => Instr::Floor { dst, a },
+                    Builtin::Ceil => Instr::Ceil { dst, a },
+                    Builtin::Round => Instr::Round { dst, a },
+                    _ => Instr::Isqrt { dst, a },
+                };
+                self.emit(instr, span);
+            }
             ExprKind::CallBuiltin { builtin: Builtin::Broken, args } => {
                 let name = self.operand_before(&args[0], &args[1]);
                 let detail = self.operand(&args[1]);

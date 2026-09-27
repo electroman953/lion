@@ -62,8 +62,8 @@ impl Checker<'_> {
         }
         if elements.is_empty() {
             let (what, example) = match kind {
-                Collection::List => ("list", "var l = [] in List of Int"),
-                Collection::Set => ("set", "var s = {} in Set of Int"),
+                Collection::List => ("list", "var l = [] in List of Int`, or `[] as List of Int"),
+                Collection::Set => ("set", "var s = {} in Set of Int`, or `{} as Set of Int"),
             };
             self.diagnostics.push(
                 Diagnostic::error(format!("the type of this empty {what} is not known"))

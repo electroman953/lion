@@ -1,0 +1,6 @@
+show(isqrt(2.5))
+show(floor("a"))
+show(reverse(3))
+show(round(1, 2))
+exit("no")
+let x = ask(name: "a")

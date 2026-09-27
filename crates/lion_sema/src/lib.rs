@@ -20,6 +20,7 @@ mod methods;
 mod names;
 mod narrowing;
 mod places;
+mod standard;
 mod stmt;
 mod structs;
 mod types;

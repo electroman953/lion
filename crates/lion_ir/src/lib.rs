@@ -394,6 +394,18 @@ pub enum Builtin {
     /// Stops the program with a bug: the structure named by the first argument no
     /// longer satisfies its invariants, as the second one says (§12.3, D40).
     Broken,
+    /// `ask(prompt)`: writes the prompt, reads a line (§23, D29).
+    Ask,
+    /// `exit(code)`: stops the program with this exit code (§20.1, D36).
+    Exit,
+    /// `reverse(l)`: a List or a Text in the opposite order (§23).
+    Reverse,
+    /// `floor(x)`, `ceil(x)`, `round(x)` of a Float, as an Int (§23).
+    Floor,
+    Ceil,
+    Round,
+    /// `isqrt(n)`: the integer square root (§23).
+    Isqrt,
 }
 
 impl BinaryOp {
@@ -474,6 +486,13 @@ impl Builtin {
             Builtin::Error => "error",
             Builtin::Message => "message",
             Builtin::Broken => "broken",
+            Builtin::Ask => "ask",
+            Builtin::Exit => "exit",
+            Builtin::Reverse => "reverse",
+            Builtin::Floor => "floor",
+            Builtin::Ceil => "ceil",
+            Builtin::Round => "round",
+            Builtin::Isqrt => "isqrt",
         }
     }
 }

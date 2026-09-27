@@ -37,7 +37,14 @@ impl Checker<'_> {
                     let ast::ExprKind::Field { object, .. } = &callee.kind else { unreachable!() };
                     self.add_stmt(object, args, expr.span)
                 }
-                _ => self.expr(expr).map(ir::Stmt::Expr),
+                _ => {
+                    let checked = self.expr(expr)?;
+                    // Nothing runs after `exit` (§20.1).
+                    if let ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Exit, .. } = checked.kind {
+                        self.ctx.flow = Flow::unreachable();
+                    }
+                    Some(ir::Stmt::Expr(checked))
+                }
             },
             ast::StmtKind::If { branches, otherwise } => self.if_stmt(branches, otherwise.as_ref()),
             ast::StmtKind::While { cond, body } => self.while_stmt(cond, body),

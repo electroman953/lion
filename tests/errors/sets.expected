@@ -23,7 +23,7 @@ error: the type of this empty set is not known
  5 | let e = {}
    |         ^^
    |
-   = help: write its type: `var s = {} in Set of Int`
+   = help: write its type: `var s = {} in Set of Int`, or `{} as Set of Int`
 
 error: `union` needs two Sets of the same type, not a Set of Int and a List of Int
   --> tests/errors/sets.lion:6:15

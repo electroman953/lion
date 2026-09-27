@@ -24,7 +24,8 @@ L'implémentation est au début de l'étape 2 de la feuille de route (§28). Ell
   - comparaisons enchaînées (`0 <= x <= 20`) ;
   - `and`, `or` (court-circuit), `not` ;
   - conversions `as` entre nombres et vers Text.
-- **Textes** : échappements et interpolation `"x = {x}"`. La fonction `show`.
+- **Textes** : échappements et interpolation `"x = {x}"`.
+- **Bibliothèque standard, noyau** (§23) : `show`, `ask`, `exit`, `error`, `sum`, `reverse`, `floor`, `ceil`, `round`, `isqrt`.
 - **Vérifications à la compilation** : types, noms inconnus (avec suggestions), constantes réaffectées, lecture d'une variable qui peut ne pas avoir de valeur sur un des chemins (§6.1), `;` oublié localisé grâce à l'indentation (§5.3).
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, exposant négatif, conversion Float → Int impossible, récursion sans fin (plus de 100 000 appels imbriqués). Chacun est signalé avec l'emplacement, les appels en cours, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.

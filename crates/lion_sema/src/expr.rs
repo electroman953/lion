@@ -829,6 +829,11 @@ impl Checker<'_> {
             Resolved::Standard("show") => return self.show(args, span),
             Resolved::Standard("sum") => return self.sum(args, span),
             Resolved::Standard("error") => return self.error_value(args, span),
+            Resolved::Standard(
+                standard @ ("ask" | "exit" | "reverse" | "floor" | "ceil" | "round" | "isqrt"),
+            ) => {
+                return self.standard_call(standard, args, span);
+            }
             Resolved::Standard(standard) => {
                 self.not_implemented(callee.span, &format!("the standard function `{standard}`"), "§23");
                 return None;

@@ -76,7 +76,7 @@ impl Builder {
         let chunk = compile(&program);
         let mut out = Vec::new();
         let mut alerts = Vec::new();
-        let result = run(&chunk, &mut out, &mut |alert| alerts.push(alert.kind));
+        let result = run(&chunk, &mut out, &mut std::io::empty(), &mut |alert| alerts.push(alert.kind));
         (String::from_utf8(out).unwrap(), alerts, result)
     }
 }

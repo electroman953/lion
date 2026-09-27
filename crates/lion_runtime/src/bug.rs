@@ -58,6 +58,10 @@ pub enum BugKind {
     EmptyList,
     /// NaN, or a value that holds NaN, added to a Set (§8.2, §16).
     NanInSet,
+    /// `isqrt(n)` with a negative `n` (§23).
+    NegativeSquareRoot { value: i64 },
+    /// `exit(code)` with a code that the system cannot give back (§20.1).
+    InvalidExitCode { code: i64 },
     /// A value of a structure no longer satisfies its invariants after a change (§12.3,
     /// D40). `detail` names the condition and the values of its fields.
     BrokenInvariant { structure: String, detail: String },
@@ -79,6 +83,8 @@ impl BugKind {
             BugKind::SliceOutOfRange { .. } => "extract out of range".to_string(),
             BugKind::EmptyList => "the list is empty".to_string(),
             BugKind::NanInSet => "NaN cannot go in a Set".to_string(),
+            BugKind::NegativeSquareRoot { .. } => "square root of a negative number".to_string(),
+            BugKind::InvalidExitCode { .. } => "invalid exit code".to_string(),
             BugKind::BrokenInvariant { structure, .. } => {
                 format!("this change breaks an invariant of {structure}")
             }
@@ -119,6 +125,8 @@ impl BugKind {
             BugKind::NanInSet => {
                 "NaN is not equal to itself, so a Set could not tell whether it holds it (§8.2)".to_string()
             }
+            BugKind::NegativeSquareRoot { value } => format!("isqrt({value}) has no Int value"),
+            BugKind::InvalidExitCode { code } => format!("{code} is not in 0..255"),
         }
     }
 
@@ -145,6 +153,10 @@ impl BugKind {
             }
             BugKind::EmptyList => "check that `size > 0` first".to_string(),
             BugKind::NanInSet => "check the values first: `x == x` is false only for NaN".to_string(),
+            BugKind::NegativeSquareRoot { .. } => "check that the value is not negative first".to_string(),
+            BugKind::InvalidExitCode { .. } => {
+                "an exit code is between 0 (success) and 255".to_string()
+            }
             BugKind::BrokenInvariant { .. } => {
                 "a value must satisfy its conditions after each change, and when the outermost `var self` method on it returns: check the values before changing them (§12.3)".to_string()
             }

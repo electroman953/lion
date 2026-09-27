@@ -7,10 +7,11 @@ use lion_ir as ir;
 use crate::{Checker, ContextKind, GlobalType};
 
 /// Standard functions available without `use` (spec §23).
-pub(crate) const IMPLEMENTED_FUNCTIONS: &[&str] = &["show", "sum", "error"];
+pub(crate) const IMPLEMENTED_FUNCTIONS: &[&str] =
+    &["show", "sum", "error", "ask", "exit", "reverse", "floor", "ceil", "round", "isqrt"];
 
 /// Standard functions of the spec (§4.4, §23) that this version does not provide yet.
-pub(crate) const PLANNED_FUNCTIONS: &[&str] = &["ask", "exit", "reverse", "floor", "ceil", "round", "isqrt"];
+pub(crate) const PLANNED_FUNCTIONS: &[&str] = &[];
 
 /// What a name designates at some point of the program.
 pub(crate) enum Resolved {

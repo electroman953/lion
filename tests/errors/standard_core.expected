@@ -1,0 +1,42 @@
+exit: 1
+----- stdout
+----- stderr
+error: `isqrt` takes an Int, not a Float
+  --> tests/errors/standard_core.lion:1:12
+   |
+ 1 | show(isqrt(2.5))
+   |            ^^^ this is a Float
+
+error: `floor` takes a number, not a Text
+  --> tests/errors/standard_core.lion:2:12
+   |
+ 2 | show(floor("a"))
+   |            ^^^ this is a Text
+
+error: `reverse` takes a List or a Text, not an Int
+  --> tests/errors/standard_core.lion:3:14
+   |
+ 3 | show(reverse(3))
+   |              ^ this is an Int
+
+error: `round` takes 1 argument, not 2
+  --> tests/errors/standard_core.lion:4:6
+   |
+ 4 | show(round(1, 2))
+   |      ^^^^^^^^^^^
+
+error: `exit` takes an Int, not a Text
+  --> tests/errors/standard_core.lion:5:6
+   |
+ 5 | exit("no")
+   |      ^^^^ this is a Text
+
+error: `ask` does not take named arguments
+  --> tests/errors/standard_core.lion:6:13
+   |
+ 6 | let x = ask(name: "a")
+   |             ^^^^
+   |
+   = Lion 0.1 does not name the parameters of the standard functions
+
+6 errors found

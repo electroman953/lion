@@ -1,0 +1,22 @@
+// The core of the standard library (§23, C59).
+show(isqrt(0))
+show(isqrt(17))
+show(isqrt(9223372036854775807))
+show(floor(-2.5))
+show(ceil(2.1))
+show(round(2.5))
+show(round(-2.5))
+show(round(7))
+show(reverse([1, 2, 3]))
+show(reverse("Lion"))
+show(reverse([] as List of Int))
+// Without input, `ask` gives an empty line.
+let name = ask("Ton nom ?")
+show("[{name}]")
+fun check(n in Int):
+    if n < 0: exit(4) ;
+    show(n)
+;
+check(1)
+check(-1)
+show("not reached")

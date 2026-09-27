@@ -436,3 +436,15 @@ fn sets_and_tuples() {
         ["with several generators, a comprehension starts with its result"]
     );
 }
+
+#[test]
+fn core_standard_functions() {
+    assert_eq!(body("show(isqrt(10))"), "(show (isqrt 10))");
+    // An Int is already whole: `floor` gives it back.
+    assert_eq!(body("show(floor(3))"), "(show 3)");
+    assert_eq!(body("show(round(2.5))"), "(show (round 2.5))");
+    assert_eq!(body("show(reverse(\"ab\"))"), "(show (reverse \"ab\"))");
+    assert_eq!(errors("show(isqrt(2.5))"), ["`isqrt` takes an Int, not a Float"]);
+    // Nothing runs after `exit`: `x` has a value wherever it is read.
+    assert!(check_text("let x in Int\nif true:\n    x = 1\nelse:\n    exit(1)\n;\nshow(x)").is_ok());
+}
