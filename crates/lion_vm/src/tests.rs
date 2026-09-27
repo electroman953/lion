@@ -77,6 +77,7 @@ impl Builder {
             module_inits: vec![None],
             tests: Vec::new(),
             declarations: Vec::new(),
+            foreign: Vec::new(),
             main: ir::FunctionId(0),
         };
         let chunk = compile(&program);

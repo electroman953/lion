@@ -48,6 +48,7 @@ pub fn print_stmt(stmt: &Stmt) -> String {
             out + ")"
         }
         StmtKind::While { cond, body } => format!("(while {} {})", print_expr(cond), print_block(body)),
+        StmtKind::Unsafe(body) => format!("(unsafe {})", print_block(body)),
         StmtKind::For { parallel, var, iterable, body } => {
             let keyword = if parallel.is_some() { "parallel-for" } else { "for" };
             format!("({keyword} {} {} {})", var.name, print_expr(iterable), print_block(body))
@@ -124,8 +125,9 @@ fn print_fun(decl: &FunDecl) -> String {
     if decl.private.is_some() {
         out.push_str("private ");
     }
-    if let Some((abi, _)) = &decl.foreign {
-        out.push_str(&format!("foreign {abi:?} "));
+    if let Some(foreign) = &decl.foreign {
+        let pure = if foreign.pure { "pure " } else { "" };
+        out.push_str(&format!("foreign {:?} {pure}", foreign.library));
     }
     out.push_str(if decl.infix { "infix-fun " } else { "fun " });
     if let Some(receiver) = &decl.receiver {

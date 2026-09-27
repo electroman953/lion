@@ -15,7 +15,7 @@ impl Checker<'_> {
     }
 
     /// A block has its own scope: its declarations end with it.
-    fn block(&mut self, block: &ast::Block) -> Vec<ir::Stmt> {
+    pub(crate) fn block(&mut self, block: &ast::Block) -> Vec<ir::Stmt> {
         self.ctx.scopes.push(Scope::default());
         let stmts = self.stmts(&block.stmts);
         self.close_scope();
@@ -88,6 +88,7 @@ impl Checker<'_> {
                 None
             }
             ast::StmtKind::Expect(condition) => self.expect_stmt(condition, stmt.span),
+            ast::StmtKind::Unsafe(body) => self.unsafe_block(body),
             // `use` is resolved beforehand, from the top level only (§20.2).
             ast::StmtKind::Use(_) if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 => {
                 None
@@ -520,9 +521,9 @@ impl Checker<'_> {
                         found.extend(self.assigned_in(&otherwise.stmts));
                     }
                 }
-                ast::StmtKind::While { body, .. } | ast::StmtKind::For { body, .. } => {
-                    found.extend(self.assigned_in(&body.stmts))
-                }
+                ast::StmtKind::While { body, .. }
+                | ast::StmtKind::For { body, .. }
+                | ast::StmtKind::Unsafe(body) => found.extend(self.assigned_in(&body.stmts)),
                 ast::StmtKind::Match { cases, .. } => {
                     for (_, body) in cases {
                         found.extend(self.assigned_in(&body.stmts));

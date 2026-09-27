@@ -1,0 +1,13 @@
+foreign "libm" pure fun cos(x in Float) in Float
+foreign "libc" fun puts(t in Text) in Int
+foreign "libc" fun bad(l in List of Int) in Int
+foreign "libc" fun worse(x in Int) in List of Int
+show(cos(1.0))
+let f = cos
+fun shout(n in Int) in Int:
+    unsafe:
+        return puts("x")
+    ;
+;
+let all = parallel [shout(n), n in 1..3]
+let later = compile shout(1)

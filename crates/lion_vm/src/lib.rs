@@ -8,6 +8,7 @@
 mod bytecode;
 mod compile;
 mod constants;
+mod ffi;
 mod machine;
 mod map;
 mod natives;

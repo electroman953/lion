@@ -83,6 +83,7 @@ pub fn compile(program: &ir::Program) -> Program {
     let custom_equality = layouts.iter().any(|layout| layout.equals.is_some());
     Program {
         custom_equality,
+        foreign: program.foreign.clone(),
         functions,
         layouts,
         enums,
@@ -794,6 +795,17 @@ impl Compiler<'_> {
                 }
                 let count = args.len() as u32;
                 self.emit(Instr::Native { dst, native: *native, start, count }, span);
+            }
+            ExprKind::CallBuiltin { builtin: Builtin::Foreign { index, .. }, args } => {
+                let start = self.next_temp;
+                for _ in args {
+                    self.temp();
+                }
+                for (offset, arg) in args.iter().enumerate() {
+                    self.expr_into(arg, start + offset as u32);
+                }
+                let count = args.len() as u32;
+                self.emit(Instr::CallForeign { dst, index: *index, start, count }, span);
             }
             ExprKind::CallBuiltin { builtin: Builtin::Broken, args } => {
                 let name = self.operand_before(&args[0], &args[1]);

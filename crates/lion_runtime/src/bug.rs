@@ -62,6 +62,12 @@ pub enum BugKind {
     NegativeSquareRoot { value: i64 },
     /// `exit(code)` with a code that the system cannot give back (§20.1).
     InvalidExitCode { code: i64 },
+    /// A C function that cannot be called: its library or itself is not found (§21.2).
+    ForeignUnavailable { reason: String },
+    /// A Text given to C that holds a zero character, which ends a C text (C80).
+    ForeignText,
+    /// A C function declared to give a Text gave none (C80).
+    ForeignNoText,
     /// `m[k]` when the Map has no key `k` (C79).
     MissingKey { key: String },
     /// A key of a Map that holds NaN, which is not equal to itself (§8.2, C79).
@@ -97,6 +103,9 @@ impl BugKind {
             BugKind::InvalidExitCode { .. } => "invalid exit code".to_string(),
             BugKind::RationalDivisionByZero => "a Rational with a zero denominator".to_string(),
             BugKind::MissingKey { .. } => "missing key".to_string(),
+            BugKind::ForeignUnavailable { .. } => "C function not found".to_string(),
+            BugKind::ForeignText => "a Text that C cannot receive".to_string(),
+            BugKind::ForeignNoText => "C gave no text".to_string(),
             BugKind::NanKey => "NaN as a key of a Map".to_string(),
             BugKind::RationalOverflow => "Rational overflow".to_string(),
             BugKind::InvalidArgument { message, .. } => message.clone(),
@@ -144,6 +153,11 @@ impl BugKind {
             BugKind::InvalidExitCode { code } => format!("{code} is not in 0..255"),
             BugKind::RationalDivisionByZero => "a fraction over 0 has no value".to_string(),
             BugKind::MissingKey { ref key } => format!("the Map has no key {key}"),
+            BugKind::ForeignUnavailable { ref reason } => reason.clone(),
+            BugKind::ForeignText => {
+                "a C text ends at its first zero character, and this one holds one".to_string()
+            }
+            BugKind::ForeignNoText => "the function gave a null pointer".to_string(),
             BugKind::NanKey => "NaN is not equal to itself, so it could never be found again".to_string(),
             BugKind::RationalOverflow => {
                 "the numerator or the denominator exceeds the capacity of an Int (64 bits)".to_string()
@@ -182,6 +196,9 @@ impl BugKind {
             BugKind::InvalidArgument { .. } => "check the value before the call".to_string(),
             BugKind::RationalDivisionByZero => "check that the denominator is not zero first".to_string(),
             BugKind::MissingKey { .. } => "test it first with `k in m`, or use `m.get(k)`, which gives `none`".to_string(),
+            BugKind::ForeignUnavailable { .. } => "check the name of the library and of the function".to_string(),
+            BugKind::ForeignText => "remove the zero characters before giving the text to C".to_string(),
+            BugKind::ForeignNoText => "declare the value `maybe Text` if the function may give none".to_string(),
             BugKind::NanKey => "check the value before using it as a key".to_string(),
             BugKind::RationalOverflow => "use a Float when the exact fraction does not matter".to_string(),
             BugKind::BrokenInvariant { .. } => {

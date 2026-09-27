@@ -38,6 +38,9 @@ pub(crate) struct FunctionInfo {
     pub(crate) var_self: bool,
     /// A function of the standard library that the implementation provides (§23).
     native: Option<ir::Native>,
+    /// A C function: its position in `Checker::foreign`, and whether it is `pure`
+    /// (§21.2, D48).
+    pub(crate) foreign: Option<(u32, bool)>,
     /// A function declared inside a body: the variables it captures (§11.5).
     pub(crate) closure: Option<ClosureInfo>,
     /// For an anonymous function, the function type expected where it is written.
@@ -336,6 +339,7 @@ impl<'a> Checker<'a> {
             implicit_self: false,
             var_self: false,
             native: None,
+            foreign: None,
             closure: Some(ClosureInfo { captures }),
             expected,
             type_params: Vec::new(),
@@ -366,6 +370,7 @@ impl<'a> Checker<'a> {
             implicit_self: false,
             var_self: false,
             native: None,
+            foreign: None,
             closure: None,
             expected: None,
             type_params: Vec::new(),
@@ -413,6 +418,7 @@ impl<'a> Checker<'a> {
             implicit_self: false,
             var_self: false,
             native: None,
+            foreign: None,
             closure: None,
             expected: None,
             type_params: Vec::new(),
@@ -578,8 +584,8 @@ impl<'a> Checker<'a> {
             type_params.push((var, constraint, name.span));
             self.type_vars.push((name.name.clone(), Type::Var(var)));
         }
-        if let Some((abi, span)) = &decl.foreign {
-            supported &= self.foreign_function(index, abi, *span);
+        if let Some(foreign) = &decl.foreign {
+            supported &= self.foreign_function(index, foreign);
         }
         let mut params = Vec::new();
         // `self` is the first parameter of a method: written `var self` when the method
@@ -924,14 +930,19 @@ impl<'a> Checker<'a> {
             ast::FunBody::Required => unreachable!("a required method of a trait has no instance"),
             // The implementation computes the value from the parameters.
             ast::FunBody::Foreign => {
-                let native = self.functions[function].native.expect("a checked foreign function is native");
+                let builtin = match self.functions[function].foreign {
+                    Some((index, pure)) => ir::Builtin::Foreign { index, pure },
+                    None => ir::Builtin::Native(
+                        self.functions[function].native.expect("a checked foreign function is native"),
+                    ),
+                };
                 let args = ids
                     .iter()
                     .zip(&param_types)
                     .map(|(id, ty)| typed(ir::ExprKind::Local(*id), *ty, decl.name.span))
                     .collect();
                 let ret = self.declared_return(instance).unwrap_or(Type::None);
-                let kind = ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Native(native), args };
+                let kind = ir::ExprKind::CallBuiltin { builtin, args };
                 self.ctx.flow = crate::flow::Flow::unreachable();
                 vec![ir::Stmt::Return(Some(typed(kind, ret, decl.name.span)))]
             }
@@ -1104,6 +1115,12 @@ impl<'a> Checker<'a> {
         args: &[ast::Arg],
         span: Span,
     ) -> Option<ir::Expr> {
+        if !self.check_c_call(index, callee) {
+            for arg in args {
+                self.expr(&arg.value);
+            }
+            return None;
+        }
         self.call_with(index, None, Vec::new(), callee, args, span)
     }
 
@@ -1457,13 +1474,12 @@ impl<'a> Checker<'a> {
 
     /// `foreign "lion" fun`: a function of the standard library that the implementation
     /// provides. Other foreign functions call C code (§21.2).
-    fn foreign_function(&mut self, index: usize, abi: &str, span: Span) -> bool {
+    fn foreign_function(&mut self, index: usize, foreign: &ast::Foreign) -> bool {
         let function = &self.functions[index];
         let decl = function.decl.clone();
         let module = &self.modules[function.module];
-        if abi != "lion" {
-            self.not_implemented(span, "calling C code", "§21.2");
-            return false;
+        if foreign.library != "lion" {
+            return self.c_function(index, foreign);
         }
         let native = ir::Native::find(&module.name, &decl.name.name).filter(|_| module.standard);
         let Some(native) = native.filter(|_| decl.receiver.is_none()) else {

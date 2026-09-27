@@ -8,3 +8,6 @@ let fast = compile f(1)
 let t = ("Léa", 12)
 let w = try f()
 let ok = 1
+trait Container of T, T in Type:
+    fun size() in Int
+;

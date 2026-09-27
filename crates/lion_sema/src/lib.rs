@@ -17,6 +17,7 @@ mod domains;
 mod enums;
 mod equality;
 mod expr;
+mod ffi;
 mod flow;
 mod functions;
 mod generic_structs;
@@ -177,6 +178,8 @@ struct Context {
     parallel: Option<crate::parallel::Parallel>,
     /// The expression computed at compile time around the code being checked (§21.1).
     compile: Option<crate::compile_time::CompileRegion>,
+    /// The `unsafe` blocks around the code being checked, which may call C (§21.2).
+    unsafe_depth: u32,
     /// The globals read and the functions called, for the check of the calls made by
     /// the script (C3).
     reads: Vec<ir::LocalId>,
@@ -197,6 +200,7 @@ impl Context {
             in_try: 0,
             parallel: None,
             compile: None,
+            unsafe_depth: 0,
             reads: Vec::new(),
             calls: Vec::new(),
             body: Vec::new(),
@@ -279,6 +283,8 @@ struct Checker<'a> {
     shared_reported: std::collections::HashSet<Span>,
     /// The expressions computed at compile time, checked once every function is (§21.1).
     compile_checks: Vec<crate::compile_time::CompileCheck>,
+    /// The C functions that the program declares (§21.2).
+    foreign: Vec<ir::ForeignFunction>,
 }
 
 impl<'a> Checker<'a> {
@@ -324,6 +330,7 @@ impl<'a> Checker<'a> {
             synced_used: std::collections::HashSet::new(),
             shared_reported: std::collections::HashSet::new(),
             compile_checks: Vec::new(),
+            foreign: Vec::new(),
         };
         checker.register_program();
         checker
@@ -482,7 +489,16 @@ impl<'a> Checker<'a> {
             self.modules.iter().map(|module| module.init.map(|init| ir::FunctionId(init as u32))).collect();
         let declarations = self.declarations;
         Checked {
-            program: Some(ir::Program { functions, structs, enums, module_inits, tests, declarations, main }),
+            program: Some(ir::Program {
+                functions,
+                structs,
+                enums,
+                module_inits,
+                tests,
+                declarations,
+                foreign: self.foreign,
+                main,
+            }),
             diagnostics,
         }
     }

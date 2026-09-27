@@ -87,13 +87,11 @@ impl<'t> Parser<'t> {
 
     fn statement(&mut self) -> PResult<Stmt> {
         let start = self.span();
-        if let Some((what, section)) = self.unsupported_statement() {
-            return Err(self.not_implemented(start, what, section));
-        }
         match self.peek() {
             TokenKind::Keyword(Keyword::Let | Keyword::Var) => self.let_statement(),
             TokenKind::Keyword(Keyword::If) => self.if_statement(),
             TokenKind::Keyword(Keyword::While) => self.while_statement(),
+            TokenKind::Keyword(Keyword::Unsafe) => self.unsafe_statement(),
             TokenKind::Keyword(Keyword::Test) => self.test_statement(),
             TokenKind::Keyword(Keyword::Expect) => {
                 let start = self.bump().span;
@@ -139,14 +137,6 @@ impl<'t> Parser<'t> {
             )),
             _ => self.expr_statement(),
         }
-    }
-
-    fn unsupported_statement(&self) -> Option<(&'static str, &'static str)> {
-        let TokenKind::Keyword(keyword) = self.peek() else { return None };
-        Some(match keyword {
-            Keyword::Unsafe => ("calling C code", "§21.2"),
-            _ => return None,
-        })
     }
 
     /// `use geometry`, `use shapes.circle` (§20.2).
@@ -312,6 +302,16 @@ impl<'t> Parser<'t> {
         Ok(Stmt { kind: StmtKind::Test { name, decl: Box::new(decl) }, span: start.to(end) })
     }
 
+    /// `unsafe: ... ;`: the block that may call C functions (§21.2).
+    fn unsafe_statement(&mut self) -> PResult<Stmt> {
+        let index = self.pos;
+        let start = self.bump().span;
+        let opener = Opener { keyword: "unsafe", index, branch: index };
+        let body = self.block(opener)?;
+        let end = self.close_block(opener)?;
+        Ok(Stmt { kind: StmtKind::Unsafe(body), span: start.to(end) })
+    }
+
     fn while_statement(&mut self) -> PResult<Stmt> {
         let index = self.pos;
         let start = self.bump().span;
@@ -341,8 +341,8 @@ impl<'t> Parser<'t> {
             };
             let name = name.clone();
             // `pure` says the function changes no state (D48).
-            self.eat_keyword(Keyword::Pure);
-            Some((name, keyword.to(text.span)))
+            let pure = self.eat_keyword(Keyword::Pure);
+            Some(Foreign { library: name, span: keyword.to(text.span), pure })
         } else {
             None
         };
@@ -378,7 +378,7 @@ impl<'t> Parser<'t> {
     fn fun_rest(
         &mut self,
         index: usize,
-        foreign: Option<(String, Span)>,
+        foreign: Option<Foreign>,
         infix: bool,
         receiver: Option<Ident>,
         name: Ident,

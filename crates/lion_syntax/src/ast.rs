@@ -76,6 +76,8 @@ pub enum StmtKind {
     },
     /// `expect condition`, in a test (§24.1, D72); with the text of the condition.
     Expect(Condition),
+    /// `unsafe: ... ;`: a block that may call C functions (§21.2).
+    Unsafe(Block),
 }
 
 /// A trait: the methods and the fields that a type needs to satisfy it (§14).
@@ -165,7 +167,7 @@ pub struct FunDecl {
     pub private: Option<Span>,
     /// `foreign "lion" fun`: provided by the implementation, in the standard library
     /// (§21.2). The text is the one after `foreign`.
-    pub foreign: Option<(String, Span)>,
+    pub foreign: Option<Foreign>,
     /// `infix fun` (§9.5).
     pub infix: bool,
     /// The type of `self` in `fun Student.passes()` (§12.4).
@@ -179,6 +181,16 @@ pub struct FunDecl {
     /// The outer variables the function modifies directly (§11.5).
     pub modifies: Vec<Ident>,
     pub body: FunBody,
+}
+
+/// `foreign "libm" pure`: where a foreign function comes from (§21.2).
+#[derive(Clone, Debug)]
+pub struct Foreign {
+    /// The text after `foreign`: the library, or `lion` for the standard library.
+    pub library: String,
+    pub span: Span,
+    /// `pure`: the function changes no state (D48).
+    pub pure: bool,
 }
 
 #[derive(Clone, Debug)]

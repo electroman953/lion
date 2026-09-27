@@ -30,6 +30,8 @@ pub struct Program {
     /// For each statement of the script: whether it declares a global with a value.
     /// Before a test, only these run (C68).
     pub declarations: Vec<bool>,
+    /// The C functions that the program declares with `foreign` (§21.2).
+    pub foreign: Vec<ForeignFunction>,
     /// The top-level statements of the file that is run (§20.1). The locals declared
     /// at its top level are the globals, which other functions reach with `Global`.
     pub main: FunctionId,
@@ -52,6 +54,15 @@ pub struct StructDef {
     pub fields: Vec<(String, Type)>,
     /// Its `equals` method, which gives its equality (§12.5).
     pub equals: Option<FunctionId>,
+}
+
+/// A C function: its library, its name, and the types it takes and gives (§21.2).
+#[derive(Clone, Debug)]
+pub struct ForeignFunction {
+    pub library: String,
+    pub name: String,
+    pub params: Vec<Type>,
+    pub ret: Type,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -499,6 +510,11 @@ pub enum Builtin {
     Isqrt,
     /// `m.get(k)`: the value of the key, or `none` (C79).
     MapGet,
+    /// A C function of `Program::foreign` (§21.2).
+    Foreign {
+        index: u32,
+        pure: bool,
+    },
     /// A function of the standard library provided by the implementation, declared
     /// `foreign "lion"` (§23).
     Native(Native),
@@ -551,6 +567,7 @@ impl Builtin {
             Builtin::Native(Native::FilesRead | Native::FilesExists) => Some("reads files"),
             Builtin::Native(Native::FilesWrite) => Some("writes a file"),
             Builtin::Native(Native::RandomSeed) => Some("reads the clock"),
+            Builtin::Foreign { pure: false, .. } => Some("calls C code that may change a global state"),
             _ => None,
         }
     }
@@ -713,6 +730,7 @@ impl Builtin {
             Builtin::Round => "round",
             Builtin::Isqrt => "isqrt",
             Builtin::MapGet => "map_get",
+            Builtin::Foreign { .. } => "foreign",
             Builtin::Native(_) => "native",
         }
     }

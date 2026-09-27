@@ -1,0 +1,4 @@
+foreign "libnothing" fun nothing() in Int
+unsafe:
+    show(nothing())
+;

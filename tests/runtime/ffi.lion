@@ -1,0 +1,23 @@
+// Calling C (§21.2, C80): `foreign` functions, called in `unsafe` blocks.
+foreign "libm" pure fun cos(x in Float) in Float
+foreign "libm" pure fun pow(x in Float, y in Float) in Float
+foreign "libc" fun getenv(name in Text) in maybe Text
+foreign "libc" pure fun strlen(t in Text) in Int
+foreign "libc" pure fun labs(n in Int) in Int
+foreign "libm" pure fun ldexp(x in Float, e in Int) in Float
+
+fun cosine(x in Float) in Float:
+    unsafe:
+        return cos(x)
+    ;
+;
+show(cosine(0.0))
+unsafe:
+    show(pow(2.0, 10.0))
+    show(getenv("LION_SURELY_UNSET_VARIABLE"))
+    show(strlen("Léa"))
+    show(labs(-42))
+    show(ldexp(1.5, 3))
+;
+let n = compile cosine(0.0) * 2.0
+show(n)

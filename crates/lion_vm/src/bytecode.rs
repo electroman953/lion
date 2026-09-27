@@ -124,6 +124,9 @@ pub enum Instr {
     InMap { dst: Reg, a: Reg, b: Reg },
     /// The value of the key in `key`, or `none` (C79).
     MapGet { dst: Reg, map: Reg, key: Reg },
+    /// Calls the C function `index` of `Program::foreign` with the `count` values of the
+    /// registers from `start` (§21.2).
+    CallForeign { dst: Reg, index: u32, start: Reg, count: u32 },
     /// Removes the key in `src` from the Map reached from `target`, if it is there.
     RemoveElement { target: Target, indices: Reg, depth: u32, src: Reg },
     /// Whether the value in `a` is an element of the Set in `b`.
@@ -288,6 +291,8 @@ pub struct Program {
     pub declarations: Option<Chunk>,
     /// Whether a structure defines its equality: then comparing values may call it.
     pub custom_equality: bool,
+    /// The C functions of the program (§21.2).
+    pub foreign: Vec<lion_ir::ForeignFunction>,
 }
 
 /// What a value of a structure needs to be shown and compared (§12).

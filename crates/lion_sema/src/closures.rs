@@ -260,6 +260,15 @@ impl Checker<'_> {
             );
             return None;
         }
+        if self.functions[index].foreign.is_some() {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`{name}` is a C function: it cannot be used as a value"))
+                    .with_primary(span, "")
+                    .with_note("a C function is called only in an `unsafe` block (§21.2, C80)")
+                    .with_help("wrap it in a Lion function that calls it in `unsafe`, and use that one"),
+            );
+            return None;
+        }
         if params.iter().any(|param| param.by_reference) {
             self.diagnostics.push(
                 Diagnostic::error(format!("`{name}` has `var` parameters: it cannot be used as a value"))
@@ -520,6 +529,7 @@ fn names_in_stmts(stmts: &[ast::Stmt], names: &mut Vec<(String, Span)>) {
             | ast::StmtKind::Test { .. }
             | ast::StmtKind::Use(_) => {}
             ast::StmtKind::Expect(condition) => names_in_expr(&condition.expr, names),
+            ast::StmtKind::Unsafe(body) => names_in_stmts(&body.stmts, names),
         }
     }
 }

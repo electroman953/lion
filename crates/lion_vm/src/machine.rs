@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::ffi::CString;
 use std::io::{self, BufRead, Write};
 use std::rc::Rc;
 
@@ -11,6 +12,7 @@ use lion_runtime::ops::RationalOp;
 use lion_runtime::{BugKind, MAX_CALL_DEPTH, ops};
 
 use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
+use crate::ffi::{self, CResult, CValue};
 use crate::map::MapValue;
 use crate::set::{SetValue, holds_nan};
 use crate::value::{Closure, Record, Value};
@@ -273,6 +275,8 @@ struct Machine<'a> {
     /// A function that the machine calls itself, as `equals`, runs until the number of
     /// frames goes below this.
     stop_depth: usize,
+    /// The C functions found so far, by their position in `Program::foreign` (§21.2).
+    foreign_functions: Vec<Option<*mut std::ffi::c_void>>,
 }
 
 impl<'a> Machine<'a> {
@@ -303,6 +307,7 @@ impl<'a> Machine<'a> {
             initialized: vec![false; program.module_inits.len()],
             failures: Vec::new(),
             stop_depth: 0,
+            foreign_functions: vec![None; program.foreign.len()],
         }
     }
 
@@ -795,6 +800,10 @@ impl<'a> Machine<'a> {
                         removed.map_err(|kind| self.bug(kind, at))?;
                     }
                 }
+                Instr::CallForeign { dst, index, start, count: _ } => {
+                    let value = self.call_foreign(index as usize, start, at)?;
+                    self.set(dst, value);
+                }
                 Instr::MakeMap { dst, start, count } => {
                     let first = self.base + start as usize;
                     let values = self.stack[first..first + 2 * count as usize].to_vec();
@@ -1138,6 +1147,46 @@ impl<'a> Machine<'a> {
         self.chunk = callee;
         self.base = base;
         Ok(0)
+    }
+
+    /// Calls the C function `index` with the values of the registers from `start` (§21.2).
+    fn call_foreign(&mut self, index: usize, start: Reg, at: usize) -> Result<Value, Fault> {
+        let program = self.program;
+        let signature = &program.foreign[index];
+        let function = match self.foreign_functions[index] {
+            Some(function) => function,
+            None => {
+                let found = ffi::find(&signature.library, &signature.name)
+                    .map_err(|reason| self.bug(BugKind::ForeignUnavailable { reason }, at))?;
+                self.foreign_functions[index] = Some(found);
+                found
+            }
+        };
+        let mut args = Vec::new();
+        for offset in 0..signature.params.len() {
+            let arg = match &self.stack[self.base + start as usize + offset] {
+                Value::Int(value) => CValue::Int(*value),
+                Value::Bool(value) => CValue::Int(i64::from(*value)),
+                Value::Float(value) => CValue::Float(*value),
+                Value::Text(text) => match CString::new(text.as_str()) {
+                    Ok(text) => CValue::Text(text),
+                    Err(_) => return Err(self.bug(BugKind::ForeignText, at)),
+                },
+                other => self.mismatch("Int, Float, Bool or Text", other),
+            };
+            args.push(arg);
+        }
+        Ok(match ffi::call(function, signature, &args) {
+            CResult::Int(value) => Value::Int(value),
+            CResult::Float(value) => Value::Float(value),
+            CResult::Bool(value) => Value::Bool(value),
+            CResult::None => Value::None,
+            CResult::Text(Some(text)) => Value::Text(Rc::new(text)),
+            CResult::Text(None) if signature.ret == lion_ir::Type::Text => {
+                return Err(self.bug(BugKind::ForeignNoText, at));
+            }
+            CResult::Text(None) => Value::None,
+        })
     }
 
     /// Calls a function of the program from an instruction, as `equals`, and gives its
