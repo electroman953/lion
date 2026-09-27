@@ -9,12 +9,11 @@
 //! A compiled program runs on a thread with a large stack, since each call of the
 //! program is a call of the machine; it stops with the same exit codes as `lion run`.
 
-use std::cell::RefCell;
 use std::ffi::c_void;
 use std::io::{self, BufWriter, Write};
 use std::panic;
 use std::process::ExitCode;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use lion_diagnostics::{SourceMap, render};
 
@@ -25,7 +24,7 @@ pub use lion_runtime::ops::{self, RationalOp};
 pub use lion_runtime::{BugKind, MAX_CALL_DEPTH};
 pub use lion_vm::natives;
 pub use lion_vm::shared::{self, Comparer, Stop};
-pub use lion_vm::{Closure, EnumLayout, Layout, MapValue, Record, SetValue, Trap, Value, kinds};
+pub use lion_vm::{Closure, EnumLayout, Layout, MapValue, Record, SetValue, Trap, Value, kinds, lock};
 
 /// A trap, boxed so that the results stay small on the path where nothing fails.
 pub type Fault = Box<Trap>;
@@ -174,10 +173,10 @@ pub struct Rt {
     depth: usize,
     /// For each file, whether its globals have their values, or are getting them (D81).
     initialized: Vec<bool>,
-    layouts: Vec<Rc<Layout>>,
-    enums: Vec<Rc<EnumLayout>>,
-    texts: Vec<Rc<String>>,
-    names: Vec<Rc<str>>,
+    layouts: Vec<Arc<Layout>>,
+    enums: Vec<Arc<EnumLayout>>,
+    texts: Vec<Arc<String>>,
+    names: Vec<Arc<str>>,
     dynamic: &'static [Option<Dynamic>],
     custom_equality: bool,
     foreign: Vec<ForeignFunction>,
@@ -189,12 +188,12 @@ pub struct Rt {
 
 impl Rt {
     fn new(program: &'static Program) -> Rt {
-        let layouts: Vec<Rc<Layout>> = program
+        let layouts: Vec<Arc<Layout>> = program
             .structs
             .iter()
             .enumerate()
             .map(|(index, structure)| {
-                Rc::new(Layout {
+                Arc::new(Layout {
                     index: index as u32,
                     name: structure.name.to_string(),
                     fields: structure.fields.iter().map(|field| field.to_string()).collect(),
@@ -208,7 +207,7 @@ impl Rt {
             .iter()
             .enumerate()
             .map(|(index, enumeration)| {
-                Rc::new(EnumLayout {
+                Arc::new(EnumLayout {
                     index: (program.structs.len() + index) as u32,
                     name: enumeration.name.to_string(),
                     values: enumeration.values.iter().map(|value| value.to_string()).collect(),
@@ -233,8 +232,8 @@ impl Rt {
             custom_equality: layouts.iter().any(|layout| layout.equals.is_some()),
             layouts,
             enums,
-            texts: program.texts.iter().map(|text| Rc::new(text.to_string())).collect(),
-            names: program.names.iter().map(|&name| Rc::from(name)).collect(),
+            texts: program.texts.iter().map(|text| Arc::new(text.to_string())).collect(),
+            names: program.names.iter().map(|&name| Arc::from(name)).collect(),
             dynamic: program.dynamic,
             foreign,
             found: vec![None; program.foreign.len()],
@@ -300,7 +299,7 @@ impl Rt {
     /// `ask(prompt)` (§23, C59).
     pub fn ask(&mut self, prompt: &Value) -> R<Value> {
         match shared::ask(&mut self.out, &mut self.input, text(prompt)) {
-            Ok(line) => Ok(Value::Text(Rc::new(line))),
+            Ok(line) => Ok(Value::Text(Arc::new(line))),
             Err(error) => Err(Box::new(Trap::Io(error))),
         }
     }
@@ -313,29 +312,29 @@ impl Rt {
     /// The text `index` of the program.
     #[inline]
     pub fn text(&self, index: usize) -> Value {
-        Value::Text(Rc::clone(&self.texts[index]))
+        Value::Text(Arc::clone(&self.texts[index]))
     }
 
     /// A value of the structure `layout`, from the values of its fields (§12.2).
     pub fn record(&self, layout: usize, fields: Vec<Value>) -> Value {
-        Value::Struct(Rc::new(Record { layout: Rc::clone(&self.layouts[layout]), fields }))
+        Value::Struct(Arc::new(Record { layout: Arc::clone(&self.layouts[layout]), fields }))
     }
 
     /// The value at `position` of the enumeration `enumeration` (§13.1).
     pub fn enumeration(&self, enumeration: usize, position: u32) -> Value {
-        Value::Enum(Rc::clone(&self.enums[enumeration]), position)
+        Value::Enum(Arc::clone(&self.enums[enumeration]), position)
     }
 
     /// The function `function` as a value, with the values it captures (§11.5).
     pub fn closure(&self, function: u32, captures: Vec<Value>) -> Value {
-        let name = Rc::clone(&self.names[function as usize]);
-        Value::Function(Rc::new(Closure { function, name, bound: Vec::new(), captures }))
+        let name = Arc::clone(&self.names[function as usize]);
+        Value::Function(Arc::new(Closure { function, name, bound: Vec::new(), captures }))
     }
 
     /// A call of a function value, made at `span` (§11).
     pub fn call_value(&mut self, callee: &Value, args: Vec<Value>, span: Option<Span>) -> R<Value> {
         let closure = match callee {
-            Value::Function(closure) => Rc::clone(closure),
+            Value::Function(closure) => Arc::clone(closure),
             other => mismatch("function", other),
         };
         // The arguments given before come first (§11.3).
@@ -518,36 +517,36 @@ pub fn enum_position(value: &Value) -> i64 {
 }
 
 pub fn new_text(text: String) -> Value {
-    Value::Text(Rc::new(text))
+    Value::Text(Arc::new(text))
 }
 
 pub fn new_rational(value: [i64; 2]) -> Value {
-    Value::Rational(Rc::new(value))
+    Value::Rational(Arc::new(value))
 }
 
 pub fn new_list(elements: Vec<Value>) -> Value {
-    Value::List(Rc::new(elements))
+    Value::List(Arc::new(elements))
 }
 
 pub fn new_tuple(elements: Vec<Value>) -> Value {
-    Value::Tuple(Rc::new(elements))
+    Value::Tuple(Arc::new(elements))
 }
 
 pub fn new_range(start: i64, end: i64) -> Value {
-    Value::Range(Rc::new([start, end]))
+    Value::Range(Arc::new([start, end]))
 }
 
 pub fn new_set(set: SetValue) -> Value {
-    Value::Set(Rc::new(set))
+    Value::Set(Arc::new(set))
 }
 
 pub fn new_map(map: MapValue) -> Value {
-    Value::Map(Rc::new(map))
+    Value::Map(Arc::new(map))
 }
 
 /// `error(message)` (§18.2, D65).
 pub fn new_error(message: &Value) -> Value {
-    Value::Error(Rc::new(text(message).to_string()))
+    Value::Error(Arc::new(text(message).to_string()))
 }
 
 /// Joins texts, in order (interpolation, §4.5).
@@ -561,7 +560,7 @@ pub fn concat(parts: &[&Value]) -> Value {
 
 /// `task value`: this version computes it at once (C71).
 pub fn new_task(result: Value) -> Value {
-    Value::Task(Rc::new(result))
+    Value::Task(Arc::new(result))
 }
 
 /// `wait t` (§19.1).
@@ -580,17 +579,17 @@ pub fn bind(callee: &Value, args: Vec<Value>) -> Value {
     };
     let mut bound = closure.bound.clone();
     bound.extend(args);
-    let name = Rc::clone(&closure.name);
+    let name = Arc::clone(&closure.name);
     let captures = closure.captures.clone();
-    Value::Function(Rc::new(Closure { function: closure.function, name, bound, captures }))
+    Value::Function(Arc::new(Closure { function: closure.function, name, bound, captures }))
 }
 
 /// A new variable shared by a function and the code around it (§11.5).
 pub fn new_cell() -> Value {
-    Value::Cell(Rc::new(RefCell::new(Value::None)))
+    Value::Cell(Arc::new(Mutex::new(Value::None)))
 }
 
-fn cell(value: &Value) -> &RefCell<Value> {
+fn cell(value: &Value) -> &Mutex<Value> {
     match value {
         Value::Cell(cell) => cell,
         other => mismatch("cell", other),
@@ -598,16 +597,16 @@ fn cell(value: &Value) -> &RefCell<Value> {
 }
 
 pub fn cell_get(value: &Value) -> Value {
-    cell(value).borrow().clone()
+    lock(cell(value)).clone()
 }
 
 pub fn cell_set(value: &Value, content: Value) {
-    *cell(value).borrow_mut() = content;
+    *lock(cell(value)) = content;
 }
 
 /// Moves the value out of the cell, to change it in place and store it back.
 pub fn cell_take(value: &Value) -> Value {
-    std::mem::take(&mut *cell(value).borrow_mut())
+    std::mem::take(&mut *lock(cell(value)))
 }
 
 #[cfg(test)]
@@ -640,9 +639,9 @@ mod tests {
 
     #[test]
     fn a_function_value_keeps_the_arguments_given_first() {
-        let closure = Value::Function(Rc::new(Closure {
+        let closure = Value::Function(Arc::new(Closure {
             function: 3,
-            name: Rc::from("f"),
+            name: Arc::from("f"),
             bound: vec![Value::Int(1)],
             captures: vec![Value::Bool(true)],
         }));

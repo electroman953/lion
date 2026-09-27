@@ -1,5 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::atomic::{Ordering, fence};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use lion_runtime::format::{format_float, format_rational, quote_text};
 
@@ -16,30 +16,30 @@ pub enum Value {
     Int(i64),
     Float(f64),
     /// An exact fraction, simplified (§8.3); boxed, so that a value stays small.
-    Rational(Rc<[i64; 2]>),
-    Text(Rc<String>),
+    Rational(Arc<[i64; 2]>),
+    Text(Arc<String>),
     /// An Error made by `error(...)` or by a failed conversion: its message (§18).
-    Error(Rc<String>),
+    Error(Arc<String>),
     /// A List, copied only when it is changed while shared (§17.1).
-    List(Rc<Vec<Value>>),
+    List(Arc<Vec<Value>>),
     /// `start..end`: only the bounds are stored (§16.3, D46).
-    Range(Rc<[i64; 2]>),
+    Range(Arc<[i64; 2]>),
     /// A value of a structure, copied only when it is changed while shared (§12, §17.1).
-    Struct(Rc<Record>),
+    Struct(Arc<Record>),
     /// A value of an enumeration, by its position (§13.1).
-    Enum(Rc<EnumLayout>, u32),
+    Enum(Arc<EnumLayout>, u32),
     /// A Set, copied only when it is changed while shared (§16.1).
-    Set(Rc<SetValue>),
+    Set(Arc<SetValue>),
     /// A Map, copied only when it is changed while shared (C79).
-    Map(Rc<MapValue>),
+    Map(Arc<MapValue>),
     /// A tuple (§4.5).
-    Tuple(Rc<Vec<Value>>),
+    Tuple(Arc<Vec<Value>>),
     /// A task and its result (§19.1).
-    Task(Rc<Value>),
+    Task(Arc<Value>),
     /// A function value, with the values it captured (§11).
-    Function(Rc<Closure>),
+    Function(Arc<Closure>),
     /// A variable shared by a function and the code around it (§11.5).
-    Cell(Rc<RefCell<Value>>),
+    Cell(Arc<Mutex<Value>>),
     /// A reference to a register of the stack, held by a `var` parameter (§11.2).
     Ref(u32),
 }
@@ -48,7 +48,7 @@ pub enum Value {
 #[derive(Debug)]
 pub struct Closure {
     pub function: u32,
-    pub name: Rc<str>,
+    pub name: Arc<str>,
     /// The first arguments, given by a partial application (§11.3).
     pub bound: Vec<Value>,
     pub captures: Vec<Value>,
@@ -57,7 +57,7 @@ pub struct Closure {
 /// The fields of a value of a structure.
 #[derive(Clone, Debug)]
 pub struct Record {
-    pub layout: Rc<Layout>,
+    pub layout: Arc<Layout>,
     pub fields: Vec<Value>,
 }
 
@@ -112,7 +112,7 @@ impl Value {
             }
             Value::Function(closure) => format!("<fun {}>", closure.name),
             Value::Task(result) => format!("<task: {}>", result.literal()),
-            Value::Cell(cell) => cell.borrow().to_text(),
+            Value::Cell(cell) => lock(cell).to_text(),
             Value::Ref(_) => "<reference>".to_string(),
         }
     }
@@ -243,4 +243,26 @@ pub mod kinds {
     pub const TASK: u16 = 1 << 13;
     pub const RATIONAL: u16 = 1 << 14;
     pub const MAP: u16 = 1 << 15;
+}
+
+/// The value of a cell. A thread that panicked while holding it has already stopped the
+/// program: the value is still read.
+pub fn lock(cell: &Mutex<Value>) -> MutexGuard<'_, Value> {
+    cell.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The value that `shared` points to, ready to be changed: first copied if another value
+/// shares it (§17.1). The program never makes `Weak` pointers, so a count of one means
+/// that nothing else holds the value: a load tells it, without the atomic exchange of
+/// `Arc::make_mut`.
+#[inline]
+pub fn make_mut<T: Clone>(shared: &mut Arc<T>) -> &mut T {
+    if Arc::strong_count(shared) == 1 {
+        // What other threads did before they dropped their copies comes before the change.
+        fence(Ordering::Acquire);
+        // SAFETY: no other `Arc`, and no `Weak`, points to the value, and `shared` is
+        // borrowed mutably: nothing else can reach the value while it changes.
+        return unsafe { &mut *(Arc::as_ptr(shared) as *mut T) };
+    }
+    Arc::make_mut(shared)
 }

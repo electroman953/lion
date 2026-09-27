@@ -7,7 +7,7 @@
 
 use std::ffi::{CString, c_void};
 use std::io::{self, BufRead, Write};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use lion_ir::{ForeignFunction, Type};
 use lion_runtime::BugKind;
@@ -17,7 +17,7 @@ use crate::ffi::{self, CResult, CValue};
 use crate::machine::Trap;
 use crate::map::MapValue;
 use crate::set::{SetValue, holds_nan};
-use crate::value::Value;
+use crate::value::{Value, make_mut};
 
 /// Why an operation stopped: a bug of the program, or a trap met by a function of the
 /// program that it called.
@@ -64,7 +64,7 @@ pub fn equal(c: &mut dyn Comparer, a: &Value, b: &Value) -> Result<bool, Box<Tra
                 other => panic!("`equals` gave {} instead of a Bool", other.type_name()),
             },
             None => {
-                let (x, y) = (Rc::clone(x), Rc::clone(y));
+                let (x, y) = (Arc::clone(x), Arc::clone(y));
                 for (first, second) in x.fields.iter().zip(&y.fields) {
                     if !equal(c, first, second)? {
                         return Ok(false);
@@ -77,7 +77,7 @@ pub fn equal(c: &mut dyn Comparer, a: &Value, b: &Value) -> Result<bool, Box<Tra
             if x.len() != y.len() {
                 return Ok(false);
             }
-            let (x, y) = (Rc::clone(x), Rc::clone(y));
+            let (x, y) = (Arc::clone(x), Arc::clone(y));
             for (first, second) in x.iter().zip(y.iter()) {
                 if !equal(c, first, second)? {
                     return Ok(false);
@@ -86,11 +86,11 @@ pub fn equal(c: &mut dyn Comparer, a: &Value, b: &Value) -> Result<bool, Box<Tra
             true
         }
         (Value::Set(x), Value::Set(y)) => {
-            let (x, y) = (Rc::clone(x), Rc::clone(y));
+            let (x, y) = (Arc::clone(x), Arc::clone(y));
             x.len() == y.len() && set_subset(c, &x, &y)?
         }
         (Value::Map(x), Value::Map(y)) => {
-            let (x, y) = (Rc::clone(x), Rc::clone(y));
+            let (x, y) = (Arc::clone(x), Arc::clone(y));
             if x.len() != y.len() {
                 return Ok(false);
             }
@@ -277,13 +277,13 @@ pub fn add_element(
 ) -> Result<(), Stop> {
     let keys = key_positions(c, root, steps)?;
     match element_mut(root, steps, keys.as_deref(), false)? {
-        Value::List(elements) => Rc::make_mut(elements).push(value),
+        Value::List(elements) => make_mut(elements).push(value),
         Value::Set(set) => {
             if holds_nan(&value) {
                 return Err(Stop::Bug(BugKind::NanInSet));
             }
             if !set_contains(c, set, &value)? {
-                Rc::make_mut(set).push_new(value);
+                make_mut(set).push_new(value);
             }
         }
         other => panic!("expected a List or a Set but found {}", other.type_name()),
@@ -303,7 +303,7 @@ pub fn remove_element(
     match element_mut(root, steps, keys.as_deref(), false)? {
         Value::Map(map) => {
             if let Some(position) = map_position(c, map, key)? {
-                Rc::make_mut(map).remove_at(position);
+                make_mut(map).remove_at(position);
             }
         }
         other => panic!("expected a Map but found {}", other.type_name()),
@@ -327,13 +327,13 @@ pub fn element_mut<'v>(
     for (number, step) in steps.iter().enumerate() {
         slot = match (slot, step) {
             (Value::List(elements), Value::Int(step)) => {
-                let elements = Rc::make_mut(elements);
+                let elements = make_mut(elements);
                 let position = position(*step, elements.len())?;
                 &mut elements[position]
             }
-            (Value::Struct(record), Value::Int(step)) => &mut Rc::make_mut(record).fields[*step as usize],
+            (Value::Struct(record), Value::Int(step)) => &mut make_mut(record).fields[*step as usize],
             (Value::Map(map), key) => {
-                let map = Rc::make_mut(map);
+                let map = make_mut(map);
                 let found = match keys {
                     Some(keys) => keys[number],
                     None => map.position(key),
@@ -382,7 +382,7 @@ pub fn key_positions(
                 record.fields.get(*field as usize).cloned()
             }
             (Value::Map(map), key) => {
-                let map = Rc::clone(map);
+                let map = Arc::clone(map);
                 let found = map_position(c, &map, key)?;
                 positions.push(found);
                 found.map(|found| map.value_at(found).clone())
@@ -409,7 +409,7 @@ pub fn get_index(object: &Value, index: i64) -> Result<Value, BugKind> {
             let size = text.chars().count();
             let position = position(index, size)?;
             let character = text.chars().nth(position).expect("the position is inside the text");
-            Ok(Value::Text(Rc::new(character.to_string())))
+            Ok(Value::Text(Arc::new(character.to_string())))
         }
         other => panic!("expected a List or a Text but found {}", other.type_name()),
     }
@@ -431,8 +431,8 @@ pub fn get_slice(object: &Value, [start, end]: [i64; 2]) -> Result<Value, BugKin
         (start as usize - 1, end as usize)
     };
     Ok(match object {
-        Value::List(elements) => Value::List(Rc::new(elements[from..to].to_vec())),
-        Value::Text(text) => Value::Text(Rc::new(text.chars().skip(from).take(to - from).collect())),
+        Value::List(elements) => Value::List(Arc::new(elements[from..to].to_vec())),
+        Value::Text(text) => Value::Text(Arc::new(text.chars().skip(from).take(to - from).collect())),
         _ => unreachable!("checked above"),
     })
 }
@@ -491,8 +491,8 @@ pub fn sequence_at(value: &Value, position: usize) -> Value {
 /// `reverse(l)`: a List or a Text in the opposite order (C59).
 pub fn reverse(value: &Value) -> Value {
     match value {
-        Value::List(elements) => Value::List(Rc::new(elements.iter().rev().cloned().collect())),
-        Value::Text(text) => Value::Text(Rc::new(text.chars().rev().collect())),
+        Value::List(elements) => Value::List(Arc::new(elements.iter().rev().cloned().collect())),
+        Value::Text(text) => Value::Text(Arc::new(text.chars().rev().collect())),
         other => panic!("expected a List or a Text but found {}", other.type_name()),
     }
 }
@@ -563,7 +563,7 @@ pub fn failure_message(value: &Value) -> String {
 /// `e.message()` of an Error of the standard library (§18.2).
 pub fn error_message(value: &Value) -> Value {
     match value {
-        Value::Error(message) => Value::Text(Rc::new(message.to_string())),
+        Value::Error(message) => Value::Text(Arc::new(message.to_string())),
         other => panic!("expected an Error but found {}", other.type_name()),
     }
 }
@@ -572,7 +572,7 @@ pub fn error_message(value: &Value) -> Value {
 pub fn text_to_int(text: &str) -> Value {
     match ops::parse_int(text) {
         Ok(value) => Value::Int(value),
-        Err(message) => Value::Error(Rc::new(message)),
+        Err(message) => Value::Error(Arc::new(message)),
     }
 }
 
@@ -580,7 +580,7 @@ pub fn text_to_int(text: &str) -> Value {
 pub fn text_to_float(text: &str) -> Value {
     match ops::parse_float(text) {
         Ok(value) => Value::Float(value),
-        Err(message) => Value::Error(Rc::new(message)),
+        Err(message) => Value::Error(Arc::new(message)),
     }
 }
 
@@ -641,7 +641,7 @@ pub fn call_foreign(
         CResult::Float(value) => Value::Float(value),
         CResult::Bool(value) => Value::Bool(value),
         CResult::None => Value::None,
-        CResult::Text(Some(text)) => Value::Text(Rc::new(text)),
+        CResult::Text(Some(text)) => Value::Text(Arc::new(text)),
         CResult::Text(None) if signature.ret == Type::Text => return Err(BugKind::ForeignNoText),
         CResult::Text(None) => Value::None,
     })

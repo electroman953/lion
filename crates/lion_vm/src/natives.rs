@@ -2,7 +2,7 @@
 //! computations come from `lion_runtime`; this file turns values into arguments and
 //! results.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use lion_ir::Native;
 use lion_runtime::BugKind;
@@ -30,8 +30,8 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             panic!("the native function {} expected a Float but found {}", native.name(), other.type_name())
         }
     };
-    let texts = |values: Vec<String>| Value::List(Rc::new(values.into_iter().map(new_text).collect()));
-    let error = |message: String| Value::Error(Rc::new(message));
+    let texts = |values: Vec<String>| Value::List(Arc::new(values.into_iter().map(new_text).collect()));
+    let error = |message: String| Value::Error(Arc::new(message));
     Ok(match native {
         Native::FilesRead => match std::fs::read_to_string(text(0)) {
             Ok(content) => new_text(content),
@@ -103,7 +103,7 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             Value::Int(nanos ^ i64::from(std::process::id()))
         }
         Native::CsvParse => match stdlib::csv_parse(text(0)) {
-            Ok(rows) => Value::List(Rc::new(rows.into_iter().map(texts).collect())),
+            Ok(rows) => Value::List(Arc::new(rows.into_iter().map(texts).collect())),
             Err(message) => error(message),
         },
     })
@@ -132,7 +132,7 @@ pub fn made_special_float(native: Native, args: &[Value], result: &Value) -> Opt
 }
 
 fn new_text(text: String) -> Value {
-    Value::Text(Rc::new(text))
+    Value::Text(Arc::new(text))
 }
 
 /// The reason of a failed file operation, in words.

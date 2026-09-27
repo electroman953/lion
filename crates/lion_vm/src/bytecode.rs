@@ -1,5 +1,5 @@
 use std::fmt::Write;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use lion_diagnostics::Span;
 
@@ -275,9 +275,9 @@ pub enum Target {
 pub struct Program {
     pub functions: Vec<Chunk>,
     /// The structures, by layout index.
-    pub layouts: Vec<Rc<Layout>>,
+    pub layouts: Vec<Arc<Layout>>,
     /// The enumerations; their type numbers follow those of the structures.
-    pub enums: Vec<Rc<EnumLayout>>,
+    pub enums: Vec<Arc<EnumLayout>>,
     /// Sets of type numbers, for the type tests that tell structures and enumerations
     /// apart.
     pub type_sets: Vec<Vec<u32>>,
@@ -322,13 +322,13 @@ pub struct Chunk {
     /// Where each statement of the body starts.
     pub starts: Vec<u32>,
     /// The name, shared by the function values of this function.
-    pub label: Rc<str>,
+    pub label: Arc<str>,
     /// The number of its parameters; the variables it captures come after them.
     pub params: u32,
     pub code: Vec<Instr>,
     /// The source span of each instruction, for bug and alert reports.
     pub spans: Vec<Option<Span>>,
-    pub texts: Vec<Rc<String>>,
+    pub texts: Vec<Arc<String>>,
     /// The number of registers the frame needs.
     pub registers: u32,
 }

@@ -1,9 +1,8 @@
 //! Execution of bytecode.
 
-use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{self, BufRead, Write};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use lion_diagnostics::{Diagnostic, Span};
 use lion_runtime::format::format_float;
@@ -14,7 +13,7 @@ use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
 use crate::map::MapValue;
 use crate::set::SetValue;
 use crate::shared::{self, Comparer, Stop};
-use crate::value::{Closure, Record, Value};
+use crate::value::{Closure, Record, Value, lock};
 
 /// Why execution stopped before the end of the program.
 #[derive(Debug)]
@@ -361,7 +360,7 @@ impl<'a> Machine<'a> {
                 }
                 Instr::MakeRational { dst, a, b } => {
                     let value = ops::rational(self.int(a), self.int(b)).map_err(|kind| self.bug(kind, at))?;
-                    self.set(dst, Value::Rational(Rc::new(value)));
+                    self.set(dst, Value::Rational(Arc::new(value)));
                 }
                 Instr::AddRational { dst, a, b } => self.rational_op(dst, a, b, at, RationalOp::Add)?,
                 Instr::SubRational { dst, a, b } => self.rational_op(dst, a, b, at, RationalOp::Subtract)?,
@@ -370,12 +369,12 @@ impl<'a> Machine<'a> {
                 Instr::PowRational { dst, a, b } => {
                     let value = ops::rational_pow(self.rational(a), self.int(b))
                         .map_err(|kind| self.bug(kind, at))?;
-                    self.set(dst, Value::Rational(Rc::new(value)));
+                    self.set(dst, Value::Rational(Arc::new(value)));
                 }
                 Instr::NegRational { dst, a } => {
                     let value = ops::rational_op(RationalOp::Subtract, [0, 1], self.rational(a))
                         .map_err(|kind| self.bug(kind, at))?;
-                    self.set(dst, Value::Rational(Rc::new(value)));
+                    self.set(dst, Value::Rational(Arc::new(value)));
                 }
                 Instr::CmpRational { dst, cmp, a, b } => {
                     let ordering = ops::rational_compare(self.rational(a), self.rational(b));
@@ -429,7 +428,7 @@ impl<'a> Machine<'a> {
                 }
                 Instr::IntToRational { dst, a } => {
                     let value = self.int(a);
-                    self.set(dst, Value::Rational(Rc::new([value, 1])));
+                    self.set(dst, Value::Rational(Arc::new([value, 1])));
                 }
                 Instr::RationalToFloat { dst, a } => {
                     let value = ops::rational_to_float(self.rational(a));
@@ -437,14 +436,14 @@ impl<'a> Machine<'a> {
                 }
                 Instr::ToText { dst, a } => {
                     let text = self.stack[self.base + a as usize].to_text();
-                    self.set(dst, Value::Text(Rc::new(text)));
+                    self.set(dst, Value::Text(Arc::new(text)));
                 }
                 Instr::Concat { dst, start, count } => {
                     let mut joined = String::new();
                     for reg in start..start + count {
                         joined.push_str(self.text(reg));
                     }
-                    self.set(dst, Value::Text(Rc::new(joined)));
+                    self.set(dst, Value::Text(Arc::new(joined)));
                 }
 
                 Instr::Jump { target } => pc = target as usize,
@@ -481,7 +480,7 @@ impl<'a> Machine<'a> {
                     let prompt = self.text(prompt).to_string();
                     let line = shared::ask(self.out, self.input, &prompt)
                         .map_err(|error| Box::new(Trap::Io(error)))?;
-                    self.set(dst, Value::Text(Rc::new(line)));
+                    self.set(dst, Value::Text(Arc::new(line)));
                 }
                 Instr::Exit { code } => {
                     let code = shared::exit_code(self.int(code)).map_err(|kind| self.bug(kind, at))?;
@@ -515,26 +514,26 @@ impl<'a> Machine<'a> {
                 Instr::MakeClosure { dst, function, start, count } => {
                     let first = self.base + start as usize;
                     let captures = self.stack[first..first + count as usize].to_vec();
-                    let name = Rc::clone(&self.program.functions[function as usize].label);
+                    let name = Arc::clone(&self.program.functions[function as usize].label);
                     let closure = Closure { function, name, bound: Vec::new(), captures };
-                    self.set(dst, Value::Function(Rc::new(closure)));
+                    self.set(dst, Value::Function(Arc::new(closure)));
                 }
                 Instr::Bind { dst, callee, start, count } => {
                     let closure = match &self.stack[self.base + callee as usize] {
-                        Value::Function(closure) => Rc::clone(closure),
+                        Value::Function(closure) => Arc::clone(closure),
                         other => self.mismatch("function", other),
                     };
                     let first = self.base + start as usize;
                     let mut bound = closure.bound.clone();
                     bound.extend_from_slice(&self.stack[first..first + count as usize]);
-                    let name = Rc::clone(&closure.name);
+                    let name = Arc::clone(&closure.name);
                     let captures = closure.captures.clone();
                     let bound = Closure { function: closure.function, name, bound, captures };
-                    self.set(dst, Value::Function(Rc::new(bound)));
+                    self.set(dst, Value::Function(Arc::new(bound)));
                 }
                 Instr::CallValue { dst, callee, args, count } => {
                     let closure = match &self.stack[self.base + callee as usize] {
-                        Value::Function(closure) => Rc::clone(closure),
+                        Value::Function(closure) => Arc::clone(closure),
                         other => self.mismatch("function", other),
                     };
                     // The arguments given before come first (§11.3); the captured values
@@ -565,7 +564,7 @@ impl<'a> Machine<'a> {
                 }
                 Instr::MakeTask { dst, src } => {
                     let result = self.stack[self.base + src as usize].clone();
-                    self.set(dst, Value::Task(Rc::new(result)));
+                    self.set(dst, Value::Task(Arc::new(result)));
                 }
                 Instr::Wait { dst, src } => {
                     let result = match &self.stack[self.base + src as usize] {
@@ -575,18 +574,18 @@ impl<'a> Machine<'a> {
                     self.set(dst, result);
                 }
                 Instr::NewCell { dst } => {
-                    self.set(dst, Value::Cell(Rc::new(RefCell::new(Value::None))));
+                    self.set(dst, Value::Cell(Arc::new(Mutex::new(Value::None))));
                 }
                 Instr::LoadCell { dst, cell } => {
-                    let value = self.cell(cell).borrow().clone();
+                    let value = lock(self.cell(cell)).clone();
                     self.set(dst, value);
                 }
                 Instr::StoreCell { cell, src } => {
                     let value = self.stack[self.base + src as usize].clone();
-                    *self.cell(cell).borrow_mut() = value;
+                    *lock(self.cell(cell)) = value;
                 }
                 Instr::TakeCell { dst, cell } => {
-                    let value = std::mem::take(&mut *self.cell(cell).borrow_mut());
+                    let value = std::mem::take(&mut *lock(self.cell(cell)));
                     self.set(dst, value);
                 }
                 Instr::InitModule { module, dst } => {
@@ -647,7 +646,7 @@ impl<'a> Machine<'a> {
                 }
                 Instr::MakeRange { dst, a, b } => {
                     let bounds = [self.int(a), self.int(b)];
-                    self.set(dst, Value::Range(Rc::new(bounds)));
+                    self.set(dst, Value::Range(Arc::new(bounds)));
                 }
                 Instr::InRange { dst, a, b } => {
                     let value = self.int(a);
@@ -673,7 +672,7 @@ impl<'a> Machine<'a> {
                 Instr::MakeList { dst, start, count } => {
                     let first = self.base + start as usize;
                     let elements = self.stack[first..first + count as usize].to_vec();
-                    self.set(dst, Value::List(Rc::new(elements)));
+                    self.set(dst, Value::List(Arc::new(elements)));
                 }
                 Instr::GetIndex { dst, object, index }
                     if matches!(self.stack[self.base + object as usize], Value::Map(_)) =>
@@ -772,7 +771,7 @@ impl<'a> Machine<'a> {
                     let pairs = values.chunks(2).map(|pair| (pair[0].clone(), pair[1].clone())).collect();
                     let result = shared::make_map(&mut self.comparer(at), pairs);
                     let map = result.map_err(|stop| self.stop(stop, at))?;
-                    self.set(dst, Value::Map(Rc::new(map)));
+                    self.set(dst, Value::Map(Arc::new(map)));
                 }
                 Instr::InMap { dst, a, b } => {
                     let key = self.stack[self.base + a as usize].clone();
@@ -796,12 +795,12 @@ impl<'a> Machine<'a> {
                     let values = self.stack[first..first + count as usize].to_vec();
                     let result = shared::make_set(&mut self.comparer(at), values);
                     let set = result.map_err(|stop| self.stop(stop, at))?;
-                    self.set(dst, Value::Set(Rc::new(set)));
+                    self.set(dst, Value::Set(Arc::new(set)));
                 }
                 Instr::MakeTuple { dst, start, count } => {
                     let first = self.base + start as usize;
                     let elements = self.stack[first..first + count as usize].to_vec();
-                    self.set(dst, Value::Tuple(Rc::new(elements)));
+                    self.set(dst, Value::Tuple(Arc::new(elements)));
                 }
                 Instr::InSet { dst, a, b } => {
                     let value = self.stack[self.base + a as usize].clone();
@@ -812,13 +811,13 @@ impl<'a> Machine<'a> {
                 Instr::SetUnion { dst, a, b } => {
                     let (first, second) = (self.set_rc(a), self.set_rc(b));
                     let result = shared::set_union(&mut self.comparer(at), &first, &second)?;
-                    self.set(dst, Value::Set(Rc::new(result)));
+                    self.set(dst, Value::Set(Arc::new(result)));
                 }
                 Instr::SetInter { dst, a, b } | Instr::SetMinus { dst, a, b } => {
                     let (first, second) = (self.set_rc(a), self.set_rc(b));
                     let keep_common = matches!(code[at], Instr::SetInter { .. });
                     let result = shared::set_filter(&mut self.comparer(at), &first, &second, keep_common)?;
-                    self.set(dst, Value::Set(Rc::new(result)));
+                    self.set(dst, Value::Set(Arc::new(result)));
                 }
                 Instr::Subset { dst, a, b } => {
                     let (first, second) = (self.set_rc(a), self.set_rc(b));
@@ -840,7 +839,7 @@ impl<'a> Machine<'a> {
                 Instr::SumRational { dst, values } => {
                     let total = shared::sum_rational(&self.stack[self.base + values as usize])
                         .map_err(|kind| self.bug(kind, at))?;
-                    self.set(dst, Value::Rational(Rc::new(total)));
+                    self.set(dst, Value::Rational(Arc::new(total)));
                 }
                 Instr::TypeTest { dst, src, kinds } => {
                     let kind = self.stack[self.base + src as usize].kind();
@@ -852,7 +851,7 @@ impl<'a> Machine<'a> {
                     self.set(dst, Value::Bool(result));
                 }
                 Instr::LoadEnum { dst, enumeration, value } => {
-                    let enumeration = Rc::clone(&self.program.enums[enumeration as usize]);
+                    let enumeration = Arc::clone(&self.program.enums[enumeration as usize]);
                     self.set(dst, Value::Enum(enumeration, value));
                 }
                 Instr::EnumPosition { dst, a } => {
@@ -865,8 +864,8 @@ impl<'a> Machine<'a> {
                 Instr::MakeStruct { dst, layout, start, count } => {
                     let first = self.base + start as usize;
                     let fields = self.stack[first..first + count as usize].to_vec();
-                    let layout = Rc::clone(&self.program.layouts[layout as usize]);
-                    self.set(dst, Value::Struct(Rc::new(Record { layout, fields })));
+                    let layout = Arc::clone(&self.program.layouts[layout as usize]);
+                    self.set(dst, Value::Struct(Arc::new(Record { layout, fields })));
                 }
                 Instr::GetField { dst, object, field } => {
                     let value = match &self.stack[self.base + object as usize] {
@@ -877,7 +876,7 @@ impl<'a> Machine<'a> {
                 }
                 Instr::Literal { dst, a } => {
                     let text = self.stack[self.base + a as usize].literal();
-                    self.set(dst, Value::Text(Rc::new(text)));
+                    self.set(dst, Value::Text(Arc::new(text)));
                 }
                 Instr::Broken { name, detail } => {
                     let kind = BugKind::BrokenInvariant {
@@ -911,7 +910,7 @@ impl<'a> Machine<'a> {
                 }
                 Instr::NewError { dst, a } => {
                     let message = self.text(a).to_string();
-                    self.set(dst, Value::Error(Rc::new(message)));
+                    self.set(dst, Value::Error(Arc::new(message)));
                 }
                 Instr::ErrorMessage { dst, a } => {
                     let message = shared::error_message(&self.stack[self.base + a as usize]);
@@ -1011,9 +1010,9 @@ impl<'a> Machine<'a> {
         self.stack[first..first + depth as usize].to_vec()
     }
 
-    fn set_rc(&self, reg: Reg) -> Rc<SetValue> {
+    fn set_rc(&self, reg: Reg) -> Arc<SetValue> {
         match &self.stack[self.base + reg as usize] {
-            Value::Set(set) => Rc::clone(set),
+            Value::Set(set) => Arc::clone(set),
             other => self.mismatch("Set", other),
         }
     }
@@ -1085,7 +1084,7 @@ impl<'a> Machine<'a> {
     fn rational_op(&mut self, dst: Reg, a: Reg, b: Reg, at: usize, op: RationalOp) -> Result<(), Fault> {
         let value =
             ops::rational_op(op, self.rational(a), self.rational(b)).map_err(|kind| self.bug(kind, at))?;
-        self.set(dst, Value::Rational(Rc::new(value)));
+        self.set(dst, Value::Rational(Arc::new(value)));
         Ok(())
     }
 
@@ -1141,7 +1140,7 @@ impl<'a> Machine<'a> {
         }
     }
 
-    fn cell(&self, reg: Reg) -> &RefCell<Value> {
+    fn cell(&self, reg: Reg) -> &Mutex<Value> {
         match &self.stack[self.base + reg as usize] {
             Value::Cell(cell) => cell,
             other => self.mismatch("cell", other),
@@ -1156,9 +1155,9 @@ impl<'a> Machine<'a> {
         }
     }
 
-    fn map_rc(&self, reg: Reg) -> Rc<MapValue> {
+    fn map_rc(&self, reg: Reg) -> Arc<MapValue> {
         match &self.stack[self.base + reg as usize] {
-            Value::Map(map) => Rc::clone(map),
+            Value::Map(map) => Arc::clone(map),
             other => self.mismatch("Map", other),
         }
     }

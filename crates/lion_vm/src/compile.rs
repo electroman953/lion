@@ -6,7 +6,7 @@
 //! of the stack.
 
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use lion_diagnostics::Span;
 use lion_ir::{self as ir, BinaryOp, Builtin, Conversion, ExprKind, UnaryOp};
@@ -14,12 +14,12 @@ use lion_ir::{self as ir, BinaryOp, Builtin, Conversion, ExprKind, UnaryOp};
 use crate::bytecode::{Chunk, Cmp, EnumLayout, Instr, Layout, Program, Reg, Target};
 
 pub fn compile(program: &ir::Program) -> Program {
-    let layouts: Vec<Rc<Layout>> = program
+    let layouts: Vec<Arc<Layout>> = program
         .structs
         .iter()
         .enumerate()
         .map(|(index, def)| {
-            Rc::new(Layout {
+            Arc::new(Layout {
                 index: index as u32,
                 name: def.name.clone(),
                 fields: def.fields.iter().map(|(name, _)| name.clone()).collect(),
@@ -28,12 +28,12 @@ pub fn compile(program: &ir::Program) -> Program {
         })
         .collect();
     let first_enum = program.structs.len();
-    let enums: Vec<Rc<EnumLayout>> = program
+    let enums: Vec<Arc<EnumLayout>> = program
         .enums
         .iter()
         .enumerate()
         .map(|(index, enumeration)| {
-            Rc::new(EnumLayout {
+            Arc::new(EnumLayout {
                 index: (first_enum + index) as u32,
                 name: enumeration.name(),
                 values: enumeration.values(),
@@ -136,7 +136,7 @@ fn compile_function(function: &ir::Function, is_script: bool, shared: &mut Share
     compiler.emit(if is_script { Instr::Halt } else { Instr::ReturnNone }, None);
     Chunk {
         starts,
-        label: Rc::from(function.name.as_str()),
+        label: Arc::from(function.name.as_str()),
         params: function.params,
         name: function.name.clone(),
         code: compiler.code,
@@ -152,7 +152,7 @@ struct Compiler<'f> {
     is_script: bool,
     code: Vec<Instr>,
     spans: Vec<Option<Span>>,
-    texts: Vec<Rc<String>>,
+    texts: Vec<Arc<String>>,
     text_indices: HashMap<String, u32>,
     /// The first free temporary register.
     next_temp: Reg,
@@ -938,7 +938,7 @@ impl Compiler<'_> {
             return index;
         }
         let index = self.texts.len() as u32;
-        self.texts.push(Rc::new(text.to_string()));
+        self.texts.push(Arc::new(text.to_string()));
         self.text_indices.insert(text.to_string(), index);
         index
     }
