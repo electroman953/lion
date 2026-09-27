@@ -1,0 +1,39 @@
+// Mistakes in the declarations of structures and methods (§12).
+var limit = 20
+struct Int:
+    x in Int
+;
+struct A:
+    x in Int
+    x in Text
+    y in Unknown
+;
+struct B:
+    n in Int = limit
+    k in Int, k + 1
+    j in Int, j < limit
+    t in Text, try t as Int
+;
+struct B:
+    z in Int
+;
+struct C:
+    v in Float = 1 + zero()
+;
+fun zero() in Int = 0
+if true:
+    struct D:
+        x in Int
+    ;
+;
+fun C.f(self) = 1
+fun C.g(n, var self) = 1
+fun C.h(var self in C) = 1
+fun Nope.h() = 1
+fun List.h() = 1
+show(self)
+fun C.v() = 1
+fun C.plus(other in C) = 1
+fun C.i() = 1
+fun C.i() = 2
+fun Text.size() = 0

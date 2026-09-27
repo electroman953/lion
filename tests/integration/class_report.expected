@@ -1,0 +1,10 @@
+exit: 0
+----- stdout
+line 3 ignored: invalid Student: grade = 25.0 does not satisfy 0 <= grade <= 20
+line 4 ignored: invalid Student: name = "" does not satisfy name != ""
+line 5 ignored: "abc" is not a Float: it is not a number
+Admitted: ["Léa"]
+Average: 12.75
+Léa: 16.0 very good
+Tom: 9.5 -
+----- stderr

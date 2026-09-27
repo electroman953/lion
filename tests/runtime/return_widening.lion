@@ -1,0 +1,18 @@
+// An Int returned where the function returns a Float becomes a Float, wherever the
+// `return` is: in a loop, in a `match` (§8.5).
+fun first_big(values in List of Int):
+    for x in values:
+        if x > 10: return x ;
+    ;
+    return 0.5
+;
+fun pick(values in List of Int):
+    match values.size:
+        0: return 0.5 ;
+        otherwise: return values[1] ;
+    ;
+;
+show(first_big([1, 20]))
+show(first_big([1]))
+show(pick([3]))
+show(pick([]) + 1)

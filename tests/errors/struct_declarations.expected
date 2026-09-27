@@ -1,0 +1,164 @@
+exit: 1
+----- stdout
+----- stderr
+error: `Int` is already a type of Lion
+  --> tests/errors/struct_declarations.lion:3:8
+   |
+ 3 | struct Int:
+   |        ^^^
+   |
+   = help: give the structure another name
+
+error: the field `x` is declared twice
+  --> tests/errors/struct_declarations.lion:8:5
+   |
+ 7 |     x in Int
+   |     - first declared here
+ 8 |     x in Text
+   |     ^
+
+error: cannot find the type `Unknown`
+  --> tests/errors/struct_declarations.lion:9:10
+   |
+ 9 |     y in Unknown
+   |          ^^^^^^^ unknown type
+
+error: a structure cannot read the variable `limit`
+   --> tests/errors/struct_declarations.lion:12:16
+    |
+ 12 |     n in Int = limit
+    |                ^^^^^
+    |
+    = the default values and the conditions of a structure read only its fields, constants and functions (C48)
+
+error: a condition of a structure must be a Bool
+   --> tests/errors/struct_declarations.lion:13:15
+    |
+ 13 |     k in Int, k + 1
+    |               ^^^^^ this is an Int
+
+error: a structure cannot read the variable `limit`
+   --> tests/errors/struct_declarations.lion:14:19
+    |
+ 14 |     j in Int, j < limit
+    |                   ^^^^^
+    |
+    = the default values and the conditions of a structure read only its fields, constants and functions (C48)
+
+error: `try` has no function to leave in the conditions of a structure
+   --> tests/errors/struct_declarations.lion:15:16
+    |
+ 15 |     t in Text, try t as Int
+    |                ^^^^^^^^^^^^
+    |
+    = help: handle the error with `if x in Error`, or `match` (§18.3)
+
+error: the structure `B` is already declared
+   --> tests/errors/struct_declarations.lion:17:8
+    |
+ 11 | struct B:
+    |        - first declared here
+   ...
+ 17 | struct B:
+    |        ^ declared again here
+
+error: the default value of a field is a constant
+   --> tests/errors/struct_declarations.lion:21:18
+    |
+ 21 |     v in Float = 1 + zero()
+    |                  ^^^^^^^^^^ this is computed while the program runs
+    |
+    = a default value is written with literals, lists and structures built from constants (C48)
+
+error: a structure is declared at the top level of the file
+   --> tests/errors/struct_declarations.lion:25:12
+    |
+ 25 |     struct D:
+    |            ^
+    |
+    = help: move this declaration out of the block
+
+error: `self` is written in the parameters only as `var self`, for a method that changes its object
+   --> tests/errors/struct_declarations.lion:29:9
+    |
+ 29 | fun C.f(self) = 1
+    |         ^^^^
+    |
+    = a method reads its object as `self`; it changes it only when declared `fun Type.name(var self, ...)` (§12.4)
+
+error: `var self` is the first parameter
+   --> tests/errors/struct_declarations.lion:30:16
+    |
+ 30 | fun C.g(n, var self) = 1
+    |                ^^^^
+    |
+    = a method reads its object as `self`; it changes it only when declared `fun Type.name(var self, ...)` (§12.4)
+
+error: `var self` has the type of the method, and no default value
+   --> tests/errors/struct_declarations.lion:31:13
+    |
+ 31 | fun C.h(var self in C) = 1
+    |             ^^^^
+    |
+    = a method reads its object as `self`; it changes it only when declared `fun Type.name(var self, ...)` (§12.4)
+
+error: cannot find the type `Nope`
+   --> tests/errors/struct_declarations.lion:32:5
+    |
+ 32 | fun Nope.h() = 1
+    |     ^^^^ unknown type
+    |
+    = help: a similar type exists: `None`
+
+error: not implemented yet: methods of generic types
+   --> tests/errors/struct_declarations.lion:33:5
+    |
+ 33 | fun List.h() = 1
+    |     ^^^^
+    |
+    = this part of Lion (spec §12.4, §15) is not supported by this version of the implementation
+
+error: `self` exists only in methods
+   --> tests/errors/struct_declarations.lion:34:6
+    |
+ 34 | show(self)
+    |      ^^^^
+    |
+    = a method is declared `fun Type.name(...)`, and reads its object as `self` (§12.4)
+
+error: `C` already has a field `v`
+   --> tests/errors/struct_declarations.lion:35:7
+    |
+ 21 |     v in Float = 1 + zero()
+    |     - field declared here
+   ...
+ 35 | fun C.v() = 1
+    |       ^
+    |
+    = help: give the method another name
+
+error: not implemented yet: operators defined by methods
+   --> tests/errors/struct_declarations.lion:36:7
+    |
+ 36 | fun C.plus(other in C) = 1
+    |       ^^^^
+    |
+    = this part of Lion (spec §9.5) is not supported by this version of the implementation
+
+error: the method `C.i` is already declared
+   --> tests/errors/struct_declarations.lion:38:7
+    |
+ 37 | fun C.i() = 1
+    |       - first declared here
+ 38 | fun C.i() = 2
+    |       ^ declared again here
+
+error: `Text` already has `size`
+   --> tests/errors/struct_declarations.lion:39:10
+    |
+ 39 | fun Text.size() = 0
+    |          ^^^^
+    |
+    = help: give the method another name
+
+20 errors found

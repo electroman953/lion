@@ -9,7 +9,7 @@ use lion_runtime::format::format_float;
 use lion_runtime::{BugKind, MAX_CALL_DEPTH, ops};
 
 use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
-use crate::value::Value;
+use crate::value::{Record, Value};
 
 /// Why execution stopped before the end of the program.
 #[derive(Debug)]
@@ -447,6 +447,37 @@ impl Machine<'_> {
                     let kind = self.stack[self.base + src as usize].kind();
                     self.set(dst, Value::Bool(kind & kinds != 0));
                 }
+                Instr::TypeTestStruct { dst, src, kinds, set } => {
+                    let value = &self.stack[self.base + src as usize];
+                    let result = value.kind() & kinds != 0
+                        || matches!(value, Value::Struct(record)
+                            if self.program.layout_sets[set as usize].contains(&record.layout.index));
+                    self.set(dst, Value::Bool(result));
+                }
+                Instr::MakeStruct { dst, layout, start, count } => {
+                    let first = self.base + start as usize;
+                    let fields = self.stack[first..first + count as usize].to_vec();
+                    let layout = Rc::clone(&self.program.layouts[layout as usize]);
+                    self.set(dst, Value::Struct(Rc::new(Record { layout, fields })));
+                }
+                Instr::GetField { dst, object, field } => {
+                    let value = match &self.stack[self.base + object as usize] {
+                        Value::Struct(record) => record.fields[field as usize].clone(),
+                        other => self.mismatch("structure", other),
+                    };
+                    self.set(dst, value);
+                }
+                Instr::Literal { dst, a } => {
+                    let text = self.stack[self.base + a as usize].literal();
+                    self.set(dst, Value::Text(Rc::new(text)));
+                }
+                Instr::Broken { name, detail } => {
+                    let kind = BugKind::BrokenInvariant {
+                        structure: self.text(name).to_string(),
+                        detail: self.text(detail).to_string(),
+                    };
+                    return Err(self.bug(kind, at));
+                }
                 Instr::Try { dst, src } => {
                     let value = self.stack[self.base + src as usize].clone();
                     if let Value::Error(message) = &value {
@@ -689,15 +720,22 @@ impl Machine<'_> {
             Target::Global(global) => global as usize,
             Target::Reference(reg) => self.reference(reg),
         };
-        let indices: Vec<i64> = (0..depth).map(|offset| self.int(indices + offset)).collect();
+        let steps: Vec<i64> = (0..depth).map(|offset| self.int(indices + offset)).collect();
         let mut slot = &mut self.stack[root];
-        for index in indices {
-            let Value::List(elements) = slot else {
-                panic!("the virtual machine expected a List but found {}", slot.type_name())
+        for step in steps {
+            slot = match slot {
+                Value::List(elements) => {
+                    let elements = Rc::make_mut(elements);
+                    let position = position(step, elements.len())?;
+                    &mut elements[position]
+                }
+                // The position of a field, from 0.
+                Value::Struct(record) => &mut Rc::make_mut(record).fields[step as usize],
+                other => panic!(
+                    "the virtual machine expected a List or a structure but found {}",
+                    other.type_name()
+                ),
             };
-            let elements = Rc::make_mut(elements);
-            let position = position(index, elements.len())?;
-            slot = &mut elements[position];
         }
         Ok(slot)
     }

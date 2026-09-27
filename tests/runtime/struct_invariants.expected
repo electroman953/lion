@@ -1,0 +1,20 @@
+exit: 2
+----- stdout
+Léa: 14.0
+refused: invalid Student: grade = 25.0 does not satisfy 0 <= grade <= 20
+refused: invalid Student: name = "" does not satisfy name != ""
+refused: "abc" is not a Float: it is not a number
+false
+true
+true
+Student(name: "Léa", grade: 20.0)
+----- stderr
+bug: this change breaks an invariant of Student
+   --> tests/runtime/struct_invariants.lion:43:1
+    |
+ 43 | lea.grade = 21
+    | ^^^^^^^^^
+    |
+    = grade = 21.0 does not satisfy 0 <= grade <= 20
+    = help: a value must satisfy its conditions after each change, and when the outermost `var self` method on it returns: check the values before changing them (§12.3)
+

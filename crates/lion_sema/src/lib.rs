@@ -10,13 +10,17 @@
 //! other body afterwards.
 
 mod collections;
+mod consteval;
 mod expr;
 mod flow;
 mod functions;
 mod matching;
+mod methods;
 mod names;
 mod narrowing;
+mod places;
 mod stmt;
+mod structs;
 mod types;
 
 use std::collections::HashMap;
@@ -27,6 +31,7 @@ use lion_syntax::ast;
 
 use crate::flow::{Assigned, Flow};
 use crate::functions::{FunctionInfo, Instance, ScriptCall};
+use crate::structs::StructInfo;
 
 pub struct Checked {
     /// Present only when there are no errors.
@@ -98,6 +103,8 @@ enum ContextKind {
     Script,
     /// The body of an instance of a top-level function, by index.
     Function(usize),
+    /// The default values and the conditions of a structure, by index (§12.1).
+    Structure(usize),
 }
 
 /// The state of the function being checked.
@@ -171,6 +178,10 @@ struct Checker<'a> {
     global_names: HashMap<ir::LocalId, String>,
     functions: Vec<FunctionInfo<'a>>,
     function_names: HashMap<String, usize>,
+    /// The methods, by the type of `self` and their name (§12.4).
+    methods: HashMap<(Type, String), usize>,
+    structs: Vec<StructInfo<'a>>,
+    struct_names: HashMap<String, usize>,
     /// The checked versions of the functions: one per function, or one per set of
     /// argument types for a generic function (C1).
     instances: Vec<Instance>,
@@ -189,6 +200,9 @@ impl<'a> Checker<'a> {
             global_names: HashMap::new(),
             functions: Vec::new(),
             function_names: HashMap::new(),
+            methods: HashMap::new(),
+            structs: Vec::new(),
+            struct_names: HashMap::new(),
             instances: Vec::new(),
             script_calls: Vec::new(),
             demands: Vec::new(),
@@ -318,12 +332,25 @@ impl<'a> Checker<'a> {
             body: script.body,
             span: None,
         };
+        let structs = self
+            .structs
+            .iter()
+            .map(|info| ir::StructDef {
+                id: info.id,
+                name: info.decl.name.name.clone(),
+                fields: info
+                    .fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.ty.expect("a valid field has a type")))
+                    .collect(),
+            })
+            .collect();
         let functions = self.functions;
         let mut functions: Vec<ir::Function> =
             self.instances.into_iter().map(|instance| instance.into_ir(&functions)).collect();
         functions.push(main);
         let main = ir::FunctionId(functions.len() as u32 - 1);
-        Checked { program: Some(ir::Program { functions, main }), diagnostics }
+        Checked { program: Some(ir::Program { functions, structs, main }), diagnostics }
     }
 }
 
@@ -354,6 +381,11 @@ fn article(ty: Type) -> String {
         Type::Union(_) => format!("a value of type `{ty}`"),
         other => format!("a {other}"),
     }
+}
+
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
 }
 
 #[cfg(test)]

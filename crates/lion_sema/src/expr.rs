@@ -8,6 +8,7 @@ use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
 use crate::names::{IMPLEMENTED_FUNCTIONS, PLANNED_FUNCTIONS, Resolved};
+use crate::structs::Given;
 use crate::{Checker, ContextKind, GlobalType, article, typed};
 
 /// A comparison between two operands, specialised to their types.
@@ -45,6 +46,10 @@ impl Checker<'_> {
             ast::ExprKind::TypeTest { value, ty } => self.type_test(value, ty, span),
             ast::ExprKind::Try(value) => self.try_expr(value, span),
             ast::ExprKind::Match { scrutinee, cases } => self.match_expr(scrutinee, cases, span),
+            ast::ExprKind::Tuple(_) => {
+                self.not_implemented(span, "tuples as values", "§16");
+                None
+            }
         }
     }
 
@@ -141,8 +146,12 @@ impl Checker<'_> {
     }
 
     fn name(&mut self, name: &str, span: Span) -> Option<ir::Expr> {
-        if name == "self" {
-            self.not_implemented(span, "methods and `self`", "§12.4");
+        if name == "self" && self.lookup(name).is_none() {
+            self.diagnostics.push(
+                Diagnostic::error("`self` exists only in methods").with_primary(span, "").with_note(
+                    "a method is declared `fun Type.name(...)`, and reads its object as `self` (§12.4)",
+                ),
+            );
             return None;
         }
         match self.resolve(name, span) {
@@ -283,6 +292,15 @@ impl Checker<'_> {
 
     /// `x in T`: whether the value belongs to the type (§7.1).
     fn type_test(&mut self, value: &ast::Expr, ty: &ast::TypeExpr, span: Span) -> Option<ir::Expr> {
+        // `(...) in Student`: whether these values build a valid Student (§12.3).
+        if let ast::ExprKind::Tuple(elements) = &value.kind {
+            let Type::Struct(structure) = self.resolve_type(ty)? else {
+                self.not_implemented(value.span, "tuples as values", "§16");
+                return None;
+            };
+            let index = self.struct_index(structure);
+            return self.construction_test(index, &Given::elements(elements), span);
+        }
         let value = self.expr(value);
         let target = self.resolve_type(ty);
         let (value, target) = (value?, target?);
@@ -340,7 +358,18 @@ impl Checker<'_> {
     /// `try` is allowed where an Error can leave: in a function whose return type may be
     /// an Error, or in the script, which stops (§18.3, D80).
     fn try_allowed(&mut self, span: Span) -> bool {
-        let ContextKind::Function(instance) = self.ctx.kind else { return true };
+        let instance = match self.ctx.kind {
+            ContextKind::Script => return true,
+            ContextKind::Function(instance) => instance,
+            ContextKind::Structure(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error("`try` has no function to leave in the conditions of a structure")
+                        .with_primary(span, "")
+                        .with_help("handle the error with `if x in Error`, or `match` (§18.3)"),
+                );
+                return false;
+            }
+        };
         match self.declared_return(instance) {
             Some(ret) if !ret.members().contains(&Type::Error) => {
                 self.diagnostics.push(
@@ -527,8 +556,8 @@ impl Checker<'_> {
             (Type::None, Type::None) if equality => {
                 Comparison { op: equality_op(B::EqNone, B::NeNone), on_floats: false }
             }
-            // Collections compare their content (§9.4).
-            (Type::List(_) | Type::Range | Type::Union(_), _) if equality && lty == rty => {
+            // Collections compare their content, structures their fields (§9.4, §12.5).
+            (Type::List(_) | Type::Range | Type::Union(_) | Type::Struct(_), _) if equality && lty == rty => {
                 Comparison { op: equality_op(B::EqValue, B::NeValue), on_floats: false }
             }
             // A value of a union compares with a value of one of its members, as in
@@ -615,6 +644,15 @@ impl Checker<'_> {
     /// `x as T` (§8.5).
     fn convert(&mut self, value: &ast::Expr, ty: &ast::TypeExpr, span: Span) -> Option<ir::Expr> {
         let target = self.resolve_type(ty);
+        // `(...) as Student` builds a Student (§12.2).
+        if let ast::ExprKind::Tuple(elements) = &value.kind {
+            let Type::Struct(structure) = target? else {
+                self.not_implemented(value.span, "tuples as values", "§16");
+                return None;
+            };
+            let index = self.struct_index(structure);
+            return self.construct(index, &Given::elements(elements), span);
+        }
         let value = match target {
             Some(target) => self.expr_expecting(value, target),
             None => self.expr(value),
@@ -637,11 +675,13 @@ impl Checker<'_> {
                 return Some(ir::Expr { span, ..convert(ir::Conversion::TextToFloat, value, ty) });
             }
             (from, to) => {
-                self.diagnostics.push(
-                    Diagnostic::error(format!("cannot convert {} to {to} with `as`", article(from)))
-                        .with_primary(span, "")
-                        .with_note("Lion 0.1 defines `as` between Int and Float, from Text to a number, and from a number to Text (§8.5)"),
-                );
+                let mut error = Diagnostic::error(format!("cannot convert {} to {to} with `as`", article(from)))
+                    .with_primary(span, "")
+                    .with_note("Lion 0.1 defines `as` between Int and Float, from Text to a number, and from a number to Text (§8.5)");
+                if let Type::Struct(_) = to {
+                    error = error.with_help(format!("a {to} is built from the values of its fields: `{to}(...)` or `(...) as {to}` (§12.2)"));
+                }
+                self.diagnostics.push(error);
                 return None;
             }
         };
@@ -651,7 +691,7 @@ impl Checker<'_> {
     fn call(&mut self, callee: &ast::Expr, args: &[ast::Arg], span: Span) -> Option<ir::Expr> {
         let ast::ExprKind::Name(name) = &callee.kind else {
             let (what, section) = match callee.kind {
-                ast::ExprKind::TypeName(_) => ("building structures", "§12.2"),
+                ast::ExprKind::TypeName(ref name) => return self.type_call(name, callee.span, args, span),
                 ast::ExprKind::Field { ref name, .. } if name.name == "add" => {
                     self.diagnostics.push(
                         Diagnostic::error("`add` is called on its own line: `l.add(value)`")
@@ -663,7 +703,9 @@ impl Checker<'_> {
                 ast::ExprKind::Field { ref object, ref name } if name.name == "message" => {
                     return self.message(object, args, span);
                 }
-                ast::ExprKind::Field { .. } => ("methods", "§12.4"),
+                ast::ExprKind::Field { ref object, ref name } => {
+                    return self.method_call(object, name, args, span);
+                }
                 _ => ("calling a computed function", "§11.3"),
             };
             self.not_implemented(callee.span, what, section);
@@ -697,6 +739,30 @@ impl Checker<'_> {
             .with_secondary(decl_span, "declared here");
         if IMPLEMENTED_FUNCTIONS.contains(&name.as_str()) || PLANNED_FUNCTIONS.contains(&name.as_str()) {
             error = error.with_note(format!("this declaration hides the standard function `{name}`"));
+        }
+        self.diagnostics.push(error);
+        None
+    }
+
+    /// `Student(...)`: builds a structure (§12.2).
+    fn type_call(&mut self, name: &str, callee: Span, args: &[ast::Arg], span: Span) -> Option<ir::Expr> {
+        if let Some(&index) = self.struct_names.get(name) {
+            return self.construct(index, &Given::args(args), span);
+        }
+        let ty = ast::TypeExpr {
+            kind: ast::TypeExprKind::Named {
+                module: Vec::new(),
+                name: ast::Ident { name: name.to_string(), span: callee },
+                args: Vec::new(),
+            },
+            span: callee,
+        };
+        let ty = self.resolve_type(&ty)?;
+        let mut error = Diagnostic::error(format!("`{name}` is not a structure"))
+            .with_primary(callee, "")
+            .with_note("`Type(...)` builds a structure (§12.2)");
+        if matches!(ty, Type::Int | Type::Float | Type::Text) {
+            error = error.with_help(format!("to convert a value, write `x as {name}` (§8.5)"));
         }
         self.diagnostics.push(error);
         None

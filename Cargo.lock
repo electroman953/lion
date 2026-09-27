@@ -36,6 +36,7 @@ version = "0.1.0"
 dependencies = [
  "lion_diagnostics",
  "lion_ir",
+ "lion_runtime",
  "lion_syntax",
 ]
 

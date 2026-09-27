@@ -21,6 +21,8 @@ pub enum Type {
     Error,
     /// `A or B` (§7.3): at least two members, none of them a union, in a fixed order.
     Union(UnionRef),
+    /// A structure declared by the program (§12).
+    Struct(StructRef),
 }
 
 impl Type {
@@ -107,6 +109,7 @@ impl fmt::Display for Type {
                 element => write!(f, "List of {element}"),
             },
             Type::Error => f.write_str("Error"),
+            Type::Struct(structure) => f.write_str(&structure.name()),
             Type::Union(union) => {
                 let members = union.members();
                 // `maybe T` reads better than `T or None` (§7.3).
@@ -118,6 +121,33 @@ impl fmt::Display for Type {
                 f.write_str(&names.join(" or "))
             }
         }
+    }
+}
+
+/// A structure declared by a program: each declaration gets its own reference.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StructRef(u32);
+
+impl StructRef {
+    pub fn new(name: &str) -> StructRef {
+        let mut interner = interner().lock().expect("the type interner is never poisoned");
+        interner.structs.push(name.to_string());
+        StructRef(interner.structs.len() as u32 - 1)
+    }
+
+    pub fn name(self) -> String {
+        interner().lock().expect("the type interner is never poisoned").structs[self.0 as usize].clone()
+    }
+
+    /// A number that identifies the structure while the program runs.
+    pub fn id(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Debug for StructRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.name())
     }
 }
 
@@ -159,6 +189,7 @@ struct Interner {
     ids: HashMap<Type, u32>,
     unions: Vec<Vec<Type>>,
     union_ids: HashMap<Vec<Type>, u32>,
+    structs: Vec<String>,
 }
 
 fn interner() -> &'static Mutex<Interner> {

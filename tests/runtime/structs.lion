@@ -1,0 +1,74 @@
+// Values of structures: construction, display, fields, equality, methods (§12).
+struct Point:
+    x in Int = 0
+    y in Int = 0
+;
+struct Segment:
+    start in Point
+    end in Point = Point()
+;
+struct Node:
+    value in Int
+    next in maybe Node = none
+;
+
+fun Point.norm1() in Int = abs(self.x) + abs(self.y)
+fun abs(n in Int) in Int = if n < 0 then -n else n
+fun Point.shift(var self, dx in Int, dy in Int = 0):
+    self.x += dx
+    self.y += dy
+;
+fun Segment.length1() in Int = abs(self.end.x - self.start.x) + abs(self.end.y - self.start.y)
+fun Int.twice() in Int = self * 2
+fun Text.shout() in Text = "{self}!"
+
+let origin = Point()
+let a = Point(3, -4)
+show(origin)
+show(a)
+show("a is at {a.x}, {a.y}, at distance {a.norm1()}")
+show([origin, a])
+show(Segment(a))
+show(Node(1, Node(2)))
+
+// Equality compares the fields (§12.5).
+show(a == Point(3, -4))
+show(a != origin)
+show(a in [origin, Point(3, -4)])
+
+// Values: a copy changes on its own (§17.1).
+var b = a
+b.shift(1)
+b.y = 0
+show(a)
+show(b)
+
+// Methods on parts of variables.
+var segments = [Segment(origin), Segment(a, Point(5, 5))]
+segments[2].end.shift(-5, -5)
+segments[1].end.x = 10
+show([s.length1(), s in segments])
+
+// A `var` parameter changes a part of a variable, stored back after the call.
+fun reset(var p in Point):
+    p.x = 0
+    p.y = 0
+;
+reset(segments[2].start)
+show(segments[2])
+
+// Methods of basic types.
+show(21.twice())
+show("hey".shout())
+
+// A structure in a union, told apart by `in`.
+fun describe(v in Point or Segment or None) in Text:
+    return match v:
+        in Point p then "a point at {p.x}"
+        in Segment s then "a segment of length {s.length1()}"
+        in None then "nothing"
+    ;
+;
+show(describe(a))
+show(describe(segments[1]))
+show(describe(none))

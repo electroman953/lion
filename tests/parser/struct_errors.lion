@@ -1,0 +1,10 @@
+struct point:
+    x in Int
+;
+struct Pair of A:
+    first in A
+;
+struct Line: start in Int ;
+struct Open:
+    x in Int
+let after = 1

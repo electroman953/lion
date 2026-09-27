@@ -1,0 +1,17 @@
+// The invariants are checked when the outermost `var self` call returns (§12.3, D9).
+struct Account:
+    balance in Int, balance >= 0
+;
+fun Account.withdraw(var self, amount in Int):
+    self.balance -= amount
+;
+fun pay_all(var accounts in List of Account, amount in Int):
+    for i in 1..accounts.size:
+        accounts[i].withdraw(amount)
+    ;
+;
+var accounts = [Account(50), Account(20)]
+pay_all(accounts, 10)
+show(accounts)
+pay_all(accounts, 15)
+show("not reached")

@@ -48,6 +48,7 @@ impl Checker<'_> {
             ast::StmtKind::Return(value) => match self.ctx.kind {
                 ContextKind::Function(index) => self.return_in_function(index, value.as_ref(), stmt.span),
                 ContextKind::Script => self.return_stmt(value.as_ref()),
+                ContextKind::Structure(_) => unreachable!("a structure has no statements"),
             },
             // Top-level functions are registered beforehand and checked on their own.
             ast::StmtKind::Fun(_) if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 => {
@@ -61,12 +62,35 @@ impl Checker<'_> {
                 );
                 None
             }
+            // Structures are registered beforehand, from the top level only.
+            ast::StmtKind::Struct(_)
+                if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 =>
+            {
+                None
+            }
+            ast::StmtKind::Struct(decl) => {
+                self.diagnostics.push(
+                    Diagnostic::error("a structure is declared at the top level of the file")
+                        .with_primary(decl.name.span, "")
+                        .with_help("move this declaration out of the block"),
+                );
+                None
+            }
         }
     }
 
     /// `let x = value in T` and its variants (§6.1, §6.2).
     fn let_stmt(&mut self, decl: &ast::LetStmt) -> Option<ir::Stmt> {
         let annotation = decl.annotation.as_ref().map(|ty| (self.resolve_type(ty), ty.span));
+        // `let s = ("Léa", 12) in Student` builds a Student, as `Student("Léa", 12)` (§6.2, §12.2).
+        if let (Some((Some(Type::Struct(structure)), _)), Some(value)) = (annotation, &decl.value)
+            && let ast::ExprKind::Tuple(elements) = &value.kind
+        {
+            let index = self.struct_index(structure);
+            let built = self.construct(index, &crate::structs::Given::elements(elements), value.span);
+            let local = self.declare(&decl.name, built.as_ref().map(|value| value.ty), decl.mutable, true);
+            return built.map(|value| ir::Stmt::Assign { place: ir::Place::Local(local), value });
+        }
         let mut ty = annotation.and_then(|(ty, _)| ty);
         let mut value = None;
         // The value is checked before the name is declared: in `let x = x + 1`, the
@@ -114,8 +138,10 @@ impl Checker<'_> {
                 };
             }
             ast::ExprKind::Field { .. } => {
-                self.not_implemented(target.span, "assigning to a field", "§6.3, §12");
-                return None;
+                return match compound_operator(op) {
+                    None => self.change_in_place(target, value, false),
+                    Some(op) => self.compound_element(target, op, value, span),
+                };
             }
             _ => {
                 self.diagnostics.push(

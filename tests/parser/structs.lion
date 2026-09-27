@@ -1,0 +1,29 @@
+// Structures, their methods and tuples (§12).
+struct Exam:
+    student in Text
+    score in Float = 0, 0 <= score       // a default value, then a condition
+    max in Float = 20
+    score <= max                         // an invariant on several fields
+    private note in Text = ""
+    grade in Int, grade in 1..5
+;
+
+struct Marker:
+;
+
+fun Exam.passes() in Bool = self.score >= self.max / 2
+fun Exam.add(var self, points):
+    self.score += points
+;
+
+let a = Exam("Léa", 12)
+let b = Exam(student: "Léa", score: 12)
+let c = ("Léa", 12) as Exam
+let d = ("Léa", 12) in Exam
+let ok = (("Léa", 12) in Exam)
+let one = (1,)
+let none_at_all = ()
+let named = (student: "Léa", score: 12)
+let inner = (1 + 2) * 3
+a.score = 3
+a.add(2)

@@ -47,14 +47,14 @@ pub fn int_pow(base: i64, exponent: i64) -> Result<i64, BugKind> {
     let (mut result, mut square, mut remaining) = (1i64, base, exponent);
     loop {
         if remaining & 1 == 1 {
-            result = result.checked_mul(square).ok_or(fail)?;
+            result = result.checked_mul(square).ok_or_else(|| fail.clone())?;
         }
         remaining >>= 1;
         if remaining == 0 {
             return Ok(result);
         }
         // With |base| >= 2, a square that overflows would make the result overflow too.
-        square = square.checked_mul(square).ok_or(fail)?;
+        square = square.checked_mul(square).ok_or_else(|| fail.clone())?;
     }
 }
 

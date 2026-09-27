@@ -1,0 +1,109 @@
+//! Calls of methods (spec §12.4): `object.name(args)`, where `object` becomes `self`.
+//!
+//! A method declared with `var self` changes its object: the object is then a place,
+//! a `var` variable or a part of one, like the argument of a `var` parameter (§11.2).
+//! Once the outermost call on an object returns, its invariants are checked (§12.3,
+//! D9): inside a `var self` method, a call on `self` itself is not checked.
+
+use lion_diagnostics::{Diagnostic, Span};
+use lion_ir::Type;
+use lion_syntax::ast;
+
+use crate::functions::Pending;
+use crate::{Checker, GlobalType, article, capitalize};
+
+impl Checker<'_> {
+    /// `object.name(args)` (§12.4).
+    pub(crate) fn method_call(
+        &mut self,
+        object: &ast::Expr,
+        name: &ast::Ident,
+        args: &[ast::Arg],
+        span: Span,
+    ) -> Option<lion_ir::Expr> {
+        if let Some(ty) = self.place_type(object)
+            && let Some(&method) = self.methods.get(&(ty, name.name.clone()))
+            && self.functions[method].var_self
+        {
+            let reported = self.diagnostics.len();
+            let Some(path) = self.place_path(object) else {
+                // Say why the object must be changeable.
+                if let Some(error) = self.diagnostics.get_mut(reported) {
+                    error.notes.insert(
+                        0,
+                        format!("`{}` changes its object: it is declared with `var self` (§12.4)", name.name),
+                    );
+                }
+                return None;
+            };
+            let (setup, path) = self.stabilize(path);
+            let after = self.check_invariants(&path, true);
+            let receiver = if path.steps.is_empty() {
+                Pending::Place(path.root, path.ty())
+            } else {
+                Pending::Element(path, setup)
+            };
+            return self.call_with(method, Some(receiver), after, name.span, args, span);
+        }
+        let value = self.expr(object)?;
+        let value = self.within_try(value);
+        let Some(&method) = self.methods.get(&(value.ty, name.name.clone())) else {
+            self.no_method(value.ty, name, value.span);
+            return None;
+        };
+        // A method that changes a temporary value: the change is lost (§11.2).
+        let receiver =
+            if self.functions[method].var_self { Pending::Temporary(value) } else { Pending::Value(value) };
+        self.call_with(method, Some(receiver), Vec::new(), name.span, args, span)
+    }
+
+    fn no_method(&mut self, ty: Type, name: &ast::Ident, object: Span) {
+        let mut error =
+            Diagnostic::error(format!("{} has no method `{}`", capitalize(&article(ty)), name.name))
+                .with_primary(name.span, "")
+                .with_secondary(object, format!("this is {}", article(ty)));
+        let members = ty.members();
+        if members.len() > 1
+            && members.iter().any(|member| self.methods.contains_key(&(*member, name.name.clone())))
+            && let Some(help) = crate::expr::union_help(ty)
+        {
+            error = error.with_help(help);
+        } else if let Type::Struct(structure) = ty
+            && self.field_names(structure).contains(&name.name)
+        {
+            error =
+                error.with_note(format!("`{0}` is a field: write `.{0}`, without parentheses", name.name));
+        } else {
+            error = error.with_note(format!("a method is declared `fun {ty}.{}(...)` (§12.4)", name.name));
+        }
+        self.diagnostics.push(error);
+    }
+
+    /// The type of `expr` when it is a variable or a part of one, found without checking
+    /// anything or reporting; `None` otherwise.
+    fn place_type(&self, expr: &ast::Expr) -> Option<Type> {
+        match &expr.kind {
+            ast::ExprKind::Name(name) => match self.lookup(name) {
+                Some(local) => self.local_type(local),
+                None if self.ctx.kind != crate::ContextKind::Script => match self.globals.get(name)?.ty {
+                    GlobalType::Known(ty) => ty,
+                    GlobalType::Unknown => None,
+                },
+                None => None,
+            },
+            ast::ExprKind::Paren(inner) => self.place_type(inner),
+            ast::ExprKind::Index { object, .. } => match self.place_type(object)? {
+                Type::List(element) => Some(element.get()),
+                _ => None,
+            },
+            ast::ExprKind::Field { object, name } => match self.place_type(object)? {
+                Type::Struct(structure) => {
+                    let info = &self.structs[self.struct_index(structure)];
+                    info.fields.iter().find(|field| field.name == name.name)?.ty
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}

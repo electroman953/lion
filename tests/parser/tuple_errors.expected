@@ -1,0 +1,24 @@
+exit: 1
+----- stdout
+----- stderr
+error: a tuple of one element ends with a comma
+  --> tests/parser/tuple_errors.lion:1:21
+   |
+ 1 | let a = (name: "Léa")
+   |                     ^
+   |
+   = help: write `(name: value,)` (D56)
+
+error: expected `,` or `)`, found a number
+  --> tests/parser/tuple_errors.lion:2:12
+   |
+ 2 | let b = (1 2)
+   |            ^
+
+error: expected `,` or `)`, found end of file
+  --> tests/parser/tuple_errors.lion:4:1
+   |
+ 4 |
+   | ^
+
+3 errors found

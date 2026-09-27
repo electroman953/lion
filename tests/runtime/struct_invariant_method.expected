@@ -1,0 +1,16 @@
+exit: 2
+----- stdout
+[Account(balance: 40), Account(balance: 10)]
+----- stderr
+bug: this change breaks an invariant of Account
+   --> tests/runtime/struct_invariant_method.lion:10:9
+    |
+ 10 |         accounts[i].withdraw(amount)
+    |         ^^^^^^^^^^^
+   ...
+ 16 | pay_all(accounts, 15)
+    | --------------------- in the call made here
+    |
+    = balance = -5 does not satisfy balance >= 0
+    = help: a value must satisfy its conditions after each change, and when the outermost `var self` method on it returns: check the values before changing them (§12.3)
+

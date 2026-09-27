@@ -1,0 +1,41 @@
+// A class report: students read from text, checked by the invariant of `Student`,
+// then summed up with methods and comprehensions (§3, §12).
+struct Student:
+    name in Text, name != ""
+    grade in Float, 0 <= grade <= 20
+;
+
+fun Student.passes() in Bool = self.grade >= 10
+fun Student.mention() in Text:
+    return if self.grade >= 16 then "very good" elif self.grade >= 14 then "good" else "-"
+;
+fun Student.curve(var self, points in Float):
+    self.grade += points
+    if self.grade > 20: self.grade = 20 ;
+;
+
+fun read(line in Text, grade in Text) in Student or Error:
+    let value = try grade as Float
+    return Student(line, value)
+;
+
+let names = ["Léa", "Tom", "Zoé", "", "Ana"]
+let grades = ["14.5", "8", "25", "12", "abc"]
+var class = [] in List of Student
+for i in 1..names.size:
+    match read(names[i], grades[i]):
+        in Student s: class.add(s) ;
+        in Error e: show("line {i} ignored: {e.message()}") ;
+    ;
+;
+
+for i in 1..class.size:
+    class[i].curve(1.5)
+;
+let admitted = [s.name, s in class, s.passes()]
+let average = sum([s.grade, s in class]) / class.size
+show("Admitted: {admitted}")
+show("Average: {average}")
+for s in class:
+    show("{s.name}: {s.grade} {s.mention()}")
+;

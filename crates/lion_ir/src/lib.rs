@@ -10,13 +10,15 @@ mod print;
 mod types;
 
 pub use print::print_program;
-pub use types::{Type, TypeRef, UnionRef};
+pub use types::{StructRef, Type, TypeRef, UnionRef};
 
 use lion_diagnostics::Span;
 
 /// A checked program: its functions, one of which is the script itself.
 pub struct Program {
     pub functions: Vec<Function>,
+    /// The structures, for the names of their fields.
+    pub structs: Vec<StructDef>,
     /// The top-level statements of the file that is run (§20.1). The locals declared
     /// at its top level are the globals, which other functions reach with `Global`.
     pub main: FunctionId,
@@ -26,6 +28,17 @@ impl Program {
     pub fn function(&self, id: FunctionId) -> &Function {
         &self.functions[id.index()]
     }
+
+    pub fn structure(&self, id: StructRef) -> &StructDef {
+        self.structs.iter().find(|def| def.id == id).expect("every structure of a program is described")
+    }
+}
+
+/// A structure (§12): its fields, in order.
+pub struct StructDef {
+    pub id: StructRef,
+    pub name: String,
+    pub fields: Vec<(String, Type)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -80,6 +93,15 @@ pub struct Local {
     pub span: Span,
 }
 
+/// One step from a value to a part of it.
+#[derive(Clone)]
+pub enum Step {
+    /// An element of a List, from 1 (§16.2).
+    Index(Expr),
+    /// A field of a structure, by its position.
+    Field(u32),
+}
+
 /// Where an assignment stores its value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
@@ -108,17 +130,17 @@ pub enum Stmt {
     },
     /// Statements in order, without a block of their own.
     Seq(Vec<Stmt>),
-    /// `l[i] = value`, `l[i][j] = value`: replaces an element inside the variable `root`,
-    /// following the indices (§6.3).
+    /// `l[i] = value`, `s.grade = value`, `l[i].name = value`: replaces a part of the
+    /// variable `root`, found by following the path (§6.3).
     AssignElement {
         root: Place,
-        indices: Vec<Expr>,
+        path: Vec<Step>,
         value: Expr,
     },
-    /// `l.add(value)`, `l[i].add(value)`: adds at the end of a list inside `root`.
+    /// `l.add(value)`, `s.notes.add(value)`: adds at the end of a list inside `root`.
     Add {
         root: Place,
-        indices: Vec<Expr>,
+        path: Vec<Step>,
         value: Expr,
     },
     /// Goes through the elements of `iterable`, evaluated once, in `var` (§10.2).
@@ -233,6 +255,17 @@ pub enum ExprKind {
         builtin: Builtin,
         args: Vec<Expr>,
     },
+    /// A value of a structure, from the values of its fields in order (§12.2). The
+    /// invariants are not checked here: the front end checks them before.
+    Struct {
+        structure: StructRef,
+        fields: Vec<Expr>,
+    },
+    /// A field of a structure, by its position (§12.1).
+    Field {
+        object: Box<Expr>,
+        field: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -322,6 +355,9 @@ pub enum Conversion {
     TextToInt,
     /// `"2.5" as Float`: a Float, or an Error that says why (§8.5, D14).
     TextToFloat,
+    /// The text of any value as a literal: a Text is written between quotes, as in a
+    /// shown collection (C24). For the messages about invariants.
+    Literal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -334,6 +370,9 @@ pub enum Builtin {
     Error,
     /// `e.message()`: the text of an Error (§18.2, D66).
     Message,
+    /// Stops the program with a bug: the structure named by the first argument no
+    /// longer satisfies its invariants, as the second one says (§12.3, D40).
+    Broken,
 }
 
 impl BinaryOp {
@@ -395,6 +434,7 @@ impl Conversion {
             Conversion::ToText => "to_text",
             Conversion::TextToInt => "text_to_int",
             Conversion::TextToFloat => "text_to_float",
+            Conversion::Literal => "literal",
         }
     }
 }
@@ -406,6 +446,7 @@ impl Builtin {
             Builtin::Sum => "sum",
             Builtin::Error => "error",
             Builtin::Message => "message",
+            Builtin::Broken => "broken",
         }
     }
 }

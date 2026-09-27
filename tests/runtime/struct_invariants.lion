@@ -1,0 +1,44 @@
+// Invariants (§12.3): a construction from values known only at run time gives a
+// `T or Error`; a test `(...) in T` is false without a bug; a `var self` method may
+// leave its object invalid until the outermost call on it returns (D9).
+struct Student:
+    name in Text, name != ""
+    grade in Float, 0 <= grade <= 20
+;
+
+fun Student.add_bonus(var self, n in Float):
+    self.grade += n                  // may go over 20 for a while
+    self.clamp()                     // a call on `self`: not checked yet
+;
+fun Student.clamp(var self):
+    if self.grade > 20: self.grade = 20 ;
+;
+
+fun parse(name in Text, text in Text) in Student or Error:
+    let grade = try text as Float
+    return Student(name, grade)
+;
+
+let names = ["Léa", "Tom", "", "Zoé"]
+let texts = ["14", "25", "12", "abc"]
+for i in 1..names.size:
+    match parse(names[i], texts[i]):
+        in Student s: show("{s.name}: {s.grade}") ;
+        in Error e: show("refused: {e.message()}") ;
+    ;
+;
+
+// A test is false, without an Error or a bug.
+let g = 25.0
+show(("Léa", g) in Student)
+show(("Léa", g - 10) in Student)
+show(("Léa", 12) in Student)
+
+// Inside `var self` methods, the object may be invalid for a while.
+var lea = Student("Léa", 18)
+lea.add_bonus(5)
+show(lea)
+
+// A change outside of a method is checked at once (D40).
+lea.grade = 21
+show("not reached")

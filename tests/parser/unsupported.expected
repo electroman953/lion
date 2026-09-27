@@ -3,16 +3,17 @@ exit: 1
 (fun square ((x)) = (* x x))
 (for i (.. 1 3) [(call show i)])
 (let l (list 1 2 3))
+(let t (tuple "Léa" 12))
 (let w (try (call f)))
 (let ok 1)
 ----- stderr
-error: not implemented yet: structures
+error: not implemented yet: traits
   --> tests/parser/unsupported.lion:3:1
    |
- 3 | struct Student:
-   | ^^^^^^
+ 3 | trait Shape:
+   | ^^^^^
    |
-   = this part of Lion (spec §12) is not supported by this version of the implementation
+   = this part of Lion (spec §14) is not supported by this version of the implementation
 
 error: not implemented yet: type definitions (enumerations and named unions)
   --> tests/parser/unsupported.lion:5:1
@@ -30,12 +31,4 @@ error: not implemented yet: sets and comprehensions
    |
    = this part of Lion (spec §16) is not supported by this version of the implementation
 
-error: not implemented yet: tuples
-  --> tests/parser/unsupported.lion:8:9
-   |
- 8 | let t = ("Léa", 12)
-   |         ^^^^^^^
-   |
-   = this part of Lion (spec §16) is not supported by this version of the implementation
-
-4 errors found
+3 errors found

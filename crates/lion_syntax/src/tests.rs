@@ -8,7 +8,7 @@ fn parse_text(text: &str) -> (String, Vec<String>) {
     let mut map = SourceMap::new();
     let id = map.add("t.lion", text);
     let lexed = lex(id, text);
-    let parsed = parse(&lexed.tokens);
+    let parsed = parse(text, &lexed.tokens);
     let errors = lexed.diagnostics.iter().chain(&parsed.diagnostics).map(|d| d.message.clone()).collect();
     (print_module(&parsed.module), errors)
 }
@@ -160,13 +160,13 @@ fn errors_recover_at_the_next_line() {
 
 #[test]
 fn recovery_skips_the_blocks_of_a_failed_statement() {
-    let text = "struct S(a: 1):\n    let inner = 1\n    if a: x = 1 ;\n;\nlet after = 2\n";
+    let text = "trait S(a: 1):\n    let inner = 1\n    if a: x = 1 ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
-    assert_eq!(errors, ["not implemented yet: structures"]);
+    assert_eq!(errors, ["not implemented yet: traits"]);
     assert_eq!(tree, "(let after 2)\n");
-    let text = "struct S:\n    if a:\n        b = 1\n    elif c:\n        d = 2\n    else:\n        e = 3\n    ;\n;\nlet after = 2\n";
+    let text = "trait S:\n    if a:\n        b = 1\n    elif c:\n        d = 2\n    else:\n        e = 3\n    ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
-    assert_eq!(errors, ["not implemented yet: structures"]);
+    assert_eq!(errors, ["not implemented yet: traits"]);
     assert_eq!(tree, "(let after 2)\n");
 }
 
@@ -174,10 +174,9 @@ fn recovery_skips_the_blocks_of_a_failed_statement() {
 fn unsupported_constructions_are_reported() {
     let cases = [
         ("parallel for f in files: show(f) ;", "not implemented yet: parallelism"),
-        ("struct S:\n;", "not implemented yet: structures"),
+        ("trait S:\n;", "not implemented yet: traits"),
         ("Color = {red, green}", "not implemented yet: type definitions (enumerations and named unions)"),
         ("let s = {1, 2}", "not implemented yet: sets and comprehensions"),
-        ("let t = (1, 2)", "not implemented yet: tuples"),
     ];
     for (text, message) in cases {
         assert_eq!(first_error(text), message, "for {text:?}");
@@ -256,7 +255,7 @@ fn a_forgotten_semicolon_is_located_with_indentation() {
         let mut map = SourceMap::new();
         let id = map.add("t.lion", text);
         let lexed = lex(id, text);
-        let mut diagnostics = parse(&lexed.tokens).diagnostics;
+        let mut diagnostics = parse(text, &lexed.tokens).diagnostics;
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         let diagnostic = diagnostics.remove(0);
         let lines: Vec<usize> =
@@ -415,4 +414,38 @@ fn match_statements_and_expressions() {
         first_error("let v = match x:\n    1: 2\n;"),
         "expected `then` and the value of the case, found `:`"
     );
+}
+
+#[test]
+fn structures() {
+    assert_eq!(
+        ast(
+            "struct Exam:\n    student in Text\n    score in Float = 0, 0 <= score\n    score <= 20\n    private note in Text = \"\"\n;"
+        ),
+        "(struct Exam (student : Text) (score : Float = 0, (<= 0 score)) (invariant (<= score 20)) (private note : Text = \"\"))"
+    );
+    assert_eq!(ast("struct Marker:\n;"), "(struct Marker)");
+    // `x in 1..5` is a condition, not a field: `1..5` is not a type.
+    assert_eq!(
+        ast("struct A:\n    x in Int\n    x in 1..5\n;"),
+        "(struct A (x : Int) (invariant (in x (.. 1 5))))"
+    );
+    assert_eq!(first_error("struct Line: start in Int ;"), "the fields of a structure go on their own lines");
+    assert_eq!(
+        first_error("struct point:\n    x in Int\n;"),
+        "the structure `point` needs an uppercase name"
+    );
+    assert_eq!(first_error("struct Open:\n    x in Int\nlet y = 1"), "the `struct` block is never closed");
+}
+
+#[test]
+fn methods_and_tuples() {
+    assert_eq!(ast("fun Student.add(var self, n) = 1"), "(fun Student.add ((var self) (n)) = 1)");
+    assert_eq!(ast("let t = (\"Léa\", 12)"), "(let t (tuple \"Léa\" 12))");
+    assert_eq!(ast("let t = (1,)"), "(let t (tuple 1))");
+    assert_eq!(ast("let t = ()"), "(let t (tuple))");
+    assert_eq!(ast("let t = (name: \"a\", grade: 2)"), "(let t (tuple name: \"a\" grade: 2))");
+    assert_eq!(ast("let t = (1)"), "(let t (paren 1))");
+    assert_eq!(ast("let s = (\"a\", 1) in Student"), "(let s (tuple \"a\" 1) : Student)");
+    assert_eq!(first_error("let t = (name: 1)"), "a tuple of one element ends with a comma");
 }

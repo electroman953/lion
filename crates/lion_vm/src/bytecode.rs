@@ -121,8 +121,9 @@ pub enum Instr {
     ElementAt { dst: Reg, list: Reg, counter: Reg },
     /// Jumps back to `target` with the next position, unless it was the last.
     NextList { list: Reg, counter: Reg, target: u32 },
-    /// Replaces the element reached from `target` through the `depth` indices in
-    /// registers `indices ..`.
+    /// Replaces the part reached from `target` through the `depth` steps in registers
+    /// `indices ..`: an Int is an index from 1 in a List, or the position of a field,
+    /// from 0, in a structure.
     StoreElement { target: Target, indices: Reg, depth: u32, src: Reg },
     /// Adds at the end of the list reached from `target` through the indices.
     AddElement { target: Target, indices: Reg, depth: u32, src: Reg },
@@ -131,6 +132,9 @@ pub enum Instr {
 
     /// Whether the kind of the value in `src` is one of the bits of `kinds`.
     TypeTest { dst: Reg, src: Reg, kinds: u16 },
+    /// Whether the kind of the value in `src` is one of the bits of `kinds`, or the value
+    /// is a structure of one of the layouts in `Program::layout_sets[set]`.
+    TypeTestStruct { dst: Reg, src: Reg, kinds: u16, set: u32 },
     /// The value in `src`, unless it is an Error: then the function returns it, or the
     /// script stops (§18.3).
     Try { dst: Reg, src: Reg },
@@ -138,6 +142,17 @@ pub enum Instr {
     ErrorMessage { dst: Reg, a: Reg },
     TextToInt { dst: Reg, a: Reg },
     TextToFloat { dst: Reg, a: Reg },
+
+    /// A value of the structure `layout`, from the values of its fields in the `count`
+    /// registers from `start` (§12.2).
+    MakeStruct { dst: Reg, layout: u32, start: Reg, count: u32 },
+    /// A field of a structure, by position.
+    GetField { dst: Reg, object: Reg, field: u32 },
+    /// The text of any value as a literal: a Text between quotes (C24).
+    Literal { dst: Reg, a: Reg },
+    /// Stops with a bug: the structure named by the Text in `name` breaks one of its
+    /// invariants, as the Text in `detail` says (§12.3, D40).
+    Broken { name: Reg, detail: Reg },
 
     Show { src: Reg },
     Halt,
@@ -180,8 +195,20 @@ pub enum Target {
 /// A compiled program: one chunk per function.
 pub struct Program {
     pub functions: Vec<Chunk>,
+    /// The structures, by layout index.
+    pub layouts: Vec<Rc<Layout>>,
+    /// Sets of layout indices, for the type tests that tell structures apart.
+    pub layout_sets: Vec<Vec<u32>>,
     /// The script, which runs first.
     pub main: usize,
+}
+
+/// What a value of a structure needs to be shown and compared (§12).
+#[derive(Debug)]
+pub struct Layout {
+    pub index: u32,
+    pub name: String,
+    pub fields: Vec<String>,
 }
 
 /// Compiled code for one function.

@@ -72,7 +72,7 @@ pub fn debug(stage: &str, path: &str) -> ExitCode {
             return exit_code(&lexed.diagnostics);
         }
         "ast" => {
-            let parsed = lion_syntax::parse(&lexed.tokens);
+            let parsed = lion_syntax::parse(file.text(), &lexed.tokens);
             let diagnostics: Vec<Diagnostic> =
                 lexed.diagnostics.into_iter().chain(parsed.diagnostics).collect();
             report(&diagnostics, &sources);
@@ -133,8 +133,9 @@ fn load(path: &str) -> Option<(SourceMap, SourceId)> {
 /// Lexes, parses and checks a file. Returns the program if it has no errors, after
 /// reporting every diagnostic.
 fn front_end(sources: &SourceMap, id: SourceId) -> Option<ir::Program> {
-    let lexed = lion_syntax::lex(id, sources.get(id).text());
-    let parsed = lion_syntax::parse(&lexed.tokens);
+    let text = sources.get(id).text();
+    let lexed = lion_syntax::lex(id, text);
+    let parsed = lion_syntax::parse(text, &lexed.tokens);
     let mut diagnostics: Vec<Diagnostic> = lexed.diagnostics.into_iter().chain(parsed.diagnostics).collect();
     // Checking a tree with syntax errors would only add confusing messages.
     let program = if diagnostics.iter().any(Diagnostic::is_fatal) {

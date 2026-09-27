@@ -1,0 +1,71 @@
+exit: 0
+----- stdout
+struct Student(name in Text, grade in Float)
+struct Point(x in Int, y in Int)
+script
+  locals
+    lea#0 let Student
+    origin#1 let Point
+    g#2 let Float
+    tom#3 let Error or Student
+    class#4 var List of Student
+    p#5 var Point
+    %t#6 temp maybe Text
+    %t#7 temp maybe Text
+    %t#8 temp Student
+    %t#9 temp Float
+    %t#10 temp None
+  body
+    lea#0 = (struct Student "Léa" (int_to_float 14))
+    origin#1 = (struct Point 0 0)
+    g#2 = 12.5
+    tom#3 = (call Student "Tom" g#2)
+    class#4 = (list lea#0)
+    class#4[1].grade = (int_to_float 11)
+    %t#6 = (call Student.check (index class#4 1))
+    if (in_type %t#6 Text)
+      (broken "Student" %t#6)
+    end
+    (block [%t#8 = (index class#4 1); %t#9 = (int_to_float 2)] (let %t#10 (call Student.add_bonus &%t#8 %t#9) (block [class#4[1] = %t#8; %t#7 = (call Student.check (index class#4 1)); if (in_type %t#7 Text); (broken "Student" %t#7); end] %t#10)))
+    p#5 = (struct Point 1 0)
+    p#5.y = 3
+    (show (call Student.passes lea#0))
+    (show (in_type (call Student.check (struct Student "Zoé" g#2)) None))
+fun Student.passes in Bool
+  locals
+    self#0 param Student
+  body
+    return (ge_float (field grade self#0) (int_to_float 10))
+fun Student.add_bonus in None
+  locals
+    self#0 var param Student
+    n#1 param Float
+  body
+    self#0.grade = (add_float (field grade self#0) n#1)
+fun Student.check in maybe Text
+  locals
+    self#0 param Student
+    name#1 let Text
+    grade#2 let Float
+    %t#3 temp Float
+  body
+    name#1 = (field name self#0)
+    grade#2 = (field grade self#0)
+    if (not (let %t#3 grade#2 (and (le_float (int_to_float 0) %t#3) (le_float %t#3 (int_to_float 20)))))
+      return (concat "grade = " (literal grade#2) " does not satisfy 0 <= grade <= 20")
+    end
+    return none
+fun Student in Error or Student
+  locals
+    name#0 param Text
+    grade#1 param Float
+    %t#2 temp Student
+    %t#3 temp maybe Text
+  body
+    %t#2 = (struct Student name#0 grade#1)
+    %t#3 = (call Student.check %t#2)
+    if (in_type %t#3 Text)
+      return (error (concat "invalid Student: " %t#3))
+    end
+    return %t#2
+----- stderr

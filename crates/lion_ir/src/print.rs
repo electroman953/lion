@@ -3,10 +3,14 @@
 
 use lion_runtime::format::format_float;
 
-use crate::{Arg, Expr, ExprKind, Function, Place, Program, Stmt};
+use crate::{Arg, Expr, ExprKind, Function, Place, Program, Step, Stmt, Type};
 
 pub fn print_program(program: &Program) -> String {
     let mut out = String::new();
+    for def in &program.structs {
+        let fields: Vec<String> = def.fields.iter().map(|(name, ty)| format!("{name} in {ty}")).collect();
+        out.push_str(&format!("struct {}({})\n", def.name, fields.join(", ")));
+    }
     let main = program.function(program.main);
     out.push_str("script\n");
     print_function(program, main, &mut out);
@@ -74,19 +78,19 @@ impl Printer<'_> {
                     out.push_str(&format!("{indent}end\n"));
                 }
                 Stmt::Seq(stmts) => self.block(stmts, depth, out),
-                Stmt::AssignElement { root, indices, value } => {
+                Stmt::AssignElement { root, path, value } => {
                     out.push_str(&format!(
                         "{indent}{}{} = {}\n",
                         self.place(*root),
-                        self.indices(indices),
+                        self.path(*root, path),
                         self.expr(value)
                     ));
                 }
-                Stmt::Add { root, indices, value } => {
+                Stmt::Add { root, path, value } => {
                     out.push_str(&format!(
                         "{indent}{}{}.add({})\n",
                         self.place(*root),
-                        self.indices(indices),
+                        self.path(*root, path),
                         self.expr(value)
                     ));
                 }
@@ -163,11 +167,45 @@ impl Printer<'_> {
                 let args: Vec<String> = args.iter().map(print).collect();
                 format!("({} {})", builtin.name(), args.join(" "))
             }
+            ExprKind::Struct { structure, fields } => {
+                let fields: Vec<String> = fields.iter().map(print).collect();
+                format!("(struct {} {})", structure.name(), fields.join(" "))
+            }
+            ExprKind::Field { object, field } => {
+                format!("(field {} {})", self.field_name(object.ty, *field), print(object))
+            }
         }
     }
 
-    fn indices(&self, indices: &[Expr]) -> String {
-        indices.iter().map(|index| format!("[{}]", self.expr(index))).collect()
+    /// The steps from `root`, written as in Lion: `[i]` and `.name`.
+    fn path(&self, root: Place, path: &[Step]) -> String {
+        let mut ty = match root {
+            Place::Local(local) => self.function.locals[local.index()].ty,
+            Place::Global(local) => self.program.function(self.program.main).locals[local.index()].ty,
+        };
+        let mut out = String::new();
+        for step in path {
+            match step {
+                Step::Index(index) => {
+                    out.push_str(&format!("[{}]", self.expr(index)));
+                    ty = ty.element().unwrap_or(ty);
+                }
+                Step::Field(field) => {
+                    out.push_str(&format!(".{}", self.field_name(ty, *field)));
+                    if let Type::Struct(structure) = ty {
+                        ty = self.program.structure(structure).fields[*field as usize].1;
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn field_name(&self, ty: Type, field: u32) -> String {
+        match ty {
+            Type::Struct(structure) => self.program.structure(structure).fields[field as usize].0.clone(),
+            _ => format!("#{field}"),
+        }
     }
 
     fn place(&self, place: Place) -> String {

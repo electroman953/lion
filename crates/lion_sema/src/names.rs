@@ -34,6 +34,16 @@ impl Checker<'_> {
         if let Some(local) = self.lookup(name) {
             return Resolved::Local(local);
         }
+        if let ContextKind::Structure(_) = self.ctx.kind
+            && self.globals.contains_key(name)
+        {
+            self.diagnostics.push(
+                Diagnostic::error(format!("a structure cannot read the variable `{name}`"))
+                    .with_primary(span, "")
+                    .with_note("the default values and the conditions of a structure read only its fields, constants and functions (C48)"),
+            );
+            return Resolved::Nothing;
+        }
         if self.ctx.kind != ContextKind::Script && self.globals.contains_key(name) {
             return match self.global(name, span) {
                 Some(local) => Resolved::Global(local),

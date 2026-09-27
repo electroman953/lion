@@ -67,7 +67,7 @@ impl Builder {
             body,
             span: None,
         };
-        let program = ir::Program { functions: vec![script], main: ir::FunctionId(0) };
+        let program = ir::Program { functions: vec![script], structs: Vec::new(), main: ir::FunctionId(0) };
         let chunk = compile(&program);
         let mut out = Vec::new();
         let mut alerts = Vec::new();

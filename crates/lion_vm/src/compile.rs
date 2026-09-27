@@ -11,22 +11,46 @@ use std::rc::Rc;
 use lion_diagnostics::Span;
 use lion_ir::{self as ir, BinaryOp, Builtin, Conversion, ExprKind, UnaryOp};
 
-use crate::bytecode::{Chunk, Cmp, Instr, Program, Reg, Target};
+use crate::bytecode::{Chunk, Cmp, Instr, Layout, Program, Reg, Target};
 
 pub fn compile(program: &ir::Program) -> Program {
+    let layouts: Vec<Rc<Layout>> = program
+        .structs
+        .iter()
+        .enumerate()
+        .map(|(index, def)| {
+            Rc::new(Layout {
+                index: index as u32,
+                name: def.name.clone(),
+                fields: def.fields.iter().map(|(name, _)| name.clone()).collect(),
+            })
+        })
+        .collect();
+    let mut shared = Shared {
+        layouts: program.structs.iter().enumerate().map(|(index, def)| (def.id, index as u32)).collect(),
+        layout_sets: Vec::new(),
+    };
     let functions = program
         .functions
         .iter()
         .enumerate()
-        .map(|(index, function)| compile_function(function, index == program.main.index()))
+        .map(|(index, function)| compile_function(function, index == program.main.index(), &mut shared))
         .collect();
-    Program { functions, main: program.main.index() }
+    Program { functions, layouts, layout_sets: shared.layout_sets, main: program.main.index() }
 }
 
-fn compile_function(function: &ir::Function, is_script: bool) -> Chunk {
+/// What the functions of a program share while they are compiled.
+struct Shared {
+    /// The layout index of each structure.
+    layouts: HashMap<ir::StructRef, u32>,
+    layout_sets: Vec<Vec<u32>>,
+}
+
+fn compile_function(function: &ir::Function, is_script: bool, shared: &mut Shared) -> Chunk {
     let locals = function.locals.len() as u32;
     let mut compiler = Compiler {
         function,
+        shared,
         is_script,
         code: Vec::new(),
         spans: Vec::new(),
@@ -56,6 +80,7 @@ fn compile_function(function: &ir::Function, is_script: bool) -> Chunk {
 
 struct Compiler<'f> {
     function: &'f ir::Function,
+    shared: &'f mut Shared,
     is_script: bool,
     code: Vec<Instr>,
     spans: Vec<Option<Span>>,
@@ -114,13 +139,13 @@ impl Compiler<'_> {
                 _ => self.for_list(*var, iterable, body),
             },
             ir::Stmt::Seq(stmts) => self.block(stmts),
-            ir::Stmt::AssignElement { root, indices, value } => {
-                let (target, start, depth) = self.path(*root, indices);
+            ir::Stmt::AssignElement { root, path, value } => {
+                let (target, start, depth) = self.path(*root, path);
                 let src = self.operand(value);
                 self.emit(Instr::StoreElement { target, indices: start, depth, src }, Some(value.span));
             }
-            ir::Stmt::Add { root, indices, value } => {
-                let (target, start, depth) = self.path(*root, indices);
+            ir::Stmt::Add { root, path, value } => {
+                let (target, start, depth) = self.path(*root, path);
                 let src = self.operand(value);
                 self.emit(Instr::AddElement { target, indices: start, depth, src }, Some(value.span));
             }
@@ -229,22 +254,28 @@ impl Compiler<'_> {
         }
     }
 
-    /// The variable of a change in place, and its indices evaluated into consecutive
-    /// registers.
-    fn path(&mut self, root: ir::Place, indices: &[ir::Expr]) -> (Target, Reg, u32) {
+    /// The variable of a change in place, and its steps evaluated into consecutive
+    /// registers: the indices, and the positions of the fields.
+    fn path(&mut self, root: ir::Place, path: &[ir::Step]) -> (Target, Reg, u32) {
         let target = match root {
             ir::Place::Local(local) if self.by_reference(local) => Target::Reference(register(local)),
             ir::Place::Local(local) => Target::Register(register(local)),
             ir::Place::Global(global) => Target::Global(global.0),
         };
         let start = self.next_temp;
-        for _ in indices {
+        for _ in path {
             self.temp();
         }
-        for (offset, index) in indices.iter().enumerate() {
-            self.expr_into(index, start + offset as u32);
+        for (offset, step) in path.iter().enumerate() {
+            let dst = start + offset as u32;
+            match step {
+                ir::Step::Index(index) => self.expr_into(index, dst),
+                ir::Step::Field(field) => {
+                    self.emit(Instr::LoadInt { dst, value: i64::from(*field) }, None);
+                }
+            }
         }
-        (target, start, indices.len() as u32)
+        (target, start, path.len() as u32)
     }
 
     fn block(&mut self, stmts: &[ir::Stmt]) {
@@ -397,6 +428,7 @@ impl Compiler<'_> {
                     Conversion::ToText => Instr::ToText { dst, a },
                     Conversion::TextToInt => Instr::TextToInt { dst, a },
                     Conversion::TextToFloat => Instr::TextToFloat { dst, a },
+                    Conversion::Literal => Instr::Literal { dst, a },
                 };
                 self.emit(instr, span);
             }
@@ -444,7 +476,8 @@ impl Compiler<'_> {
             }
             ExprKind::TypeTest { value, ty } => {
                 let src = self.operand(value);
-                self.emit(Instr::TypeTest { dst, src, kinds: kinds_of(*ty) }, span);
+                let instr = self.type_test(value.ty, *ty, dst, src);
+                self.emit(instr, span);
             }
             ExprKind::Try(value) => {
                 let src = self.operand(value);
@@ -477,6 +510,27 @@ impl Compiler<'_> {
                 let a = self.operand(&args[0]);
                 self.emit(Instr::ErrorMessage { dst, a }, span);
             }
+            ExprKind::CallBuiltin { builtin: Builtin::Broken, args } => {
+                let name = self.operand_before(&args[0], &args[1]);
+                let detail = self.operand(&args[1]);
+                self.emit(Instr::Broken { name, detail }, span);
+                self.emit(Instr::LoadNone { dst }, span);
+            }
+            ExprKind::Struct { structure, fields } => {
+                let start = self.next_temp;
+                for _ in fields {
+                    self.temp();
+                }
+                for (offset, field) in fields.iter().enumerate() {
+                    self.expr_into(field, start + offset as u32);
+                }
+                let layout = self.shared.layouts[structure];
+                self.emit(Instr::MakeStruct { dst, layout, start, count: fields.len() as u32 }, span);
+            }
+            ExprKind::Field { object, field } => {
+                let object = self.operand(object);
+                self.emit(Instr::GetField { dst, object, field: *field }, span);
+            }
             ExprKind::CallBuiltin { builtin: Builtin::Sum, args } => {
                 let values = self.operand(&args[0]);
                 let instr = if expr.ty == ir::Type::Float {
@@ -488,6 +542,35 @@ impl Compiler<'_> {
             }
         }
         self.next_temp = mark;
+    }
+
+    /// The test that a value of type `whole` is of type `part`. A value carries its kind;
+    /// a structure carries its layout, needed when `whole` has other structures (§7.1).
+    fn type_test(&mut self, whole: ir::Type, part: ir::Type, dst: Reg, src: Reg) -> Instr {
+        let structures = |ty: ir::Type| -> Vec<ir::StructRef> {
+            ty.members()
+                .into_iter()
+                .filter_map(|member| match member {
+                    ir::Type::Struct(structure) => Some(structure),
+                    _ => None,
+                })
+                .collect()
+        };
+        let tested = structures(part);
+        let kinds = kinds_of(part);
+        if tested.is_empty() || tested.len() == structures(whole).len() {
+            return Instr::TypeTest { dst, src, kinds };
+        }
+        let mut set: Vec<u32> = tested.iter().map(|structure| self.shared.layouts[structure]).collect();
+        set.sort_unstable();
+        let set = match self.shared.layout_sets.iter().position(|known| *known == set) {
+            Some(index) => index,
+            None => {
+                self.shared.layout_sets.push(set);
+                self.shared.layout_sets.len() - 1
+            }
+        };
+        Instr::TypeTestStruct { dst, src, kinds: kinds & !crate::value::kinds::STRUCT, set: set as u32 }
     }
 
     /// A register holding the value of `expr`: the register of a local, or a new
@@ -608,6 +691,8 @@ fn calls_function(expr: &ir::Expr) -> bool {
         ExprKind::TypeTest { value, .. } | ExprKind::Try(value) => calls_function(value),
         ExprKind::Concat(parts) => parts.iter().any(calls_function),
         ExprKind::CallBuiltin { args, .. } => args.iter().any(calls_function),
+        ExprKind::Struct { fields, .. } => fields.iter().any(calls_function),
+        ExprKind::Field { object, .. } => calls_function(object),
     }
 }
 
@@ -625,6 +710,7 @@ fn kinds_of(ty: ir::Type) -> u16 {
             ir::Type::Range => kinds::RANGE,
             ir::Type::List(_) => kinds::LIST,
             ir::Type::Error => kinds::ERROR,
+            ir::Type::Struct(_) => kinds::STRUCT,
             ir::Type::Union(_) => unreachable!("the members of a union are not unions"),
         })
         .fold(0, |all, kind| all | kind)

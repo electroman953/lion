@@ -59,6 +59,41 @@ pub enum StmtKind {
         scrutinee: Expr,
         cases: Vec<(Case, Block)>,
     },
+    /// `struct Name: fields and invariants ;` (§12.1).
+    Struct(StructDecl),
+}
+
+#[derive(Clone, Debug)]
+pub struct StructDecl {
+    pub name: Ident,
+    /// The fields and the invariants, in the order of the file.
+    pub lines: Vec<StructLine>,
+}
+
+#[derive(Clone, Debug)]
+pub enum StructLine {
+    Field(FieldDecl),
+    /// A condition on several fields (§12.1).
+    Invariant(Condition),
+}
+
+/// `[private] name in Type [= default] {, condition}` (§12.1).
+#[derive(Clone, Debug)]
+pub struct FieldDecl {
+    /// `private`: visible only in this file (D10).
+    pub private: Option<Span>,
+    pub name: Ident,
+    pub ty: TypeExpr,
+    pub default: Option<Expr>,
+    pub conditions: Vec<Condition>,
+}
+
+/// A condition that the fields of a structure satisfy, and its text as written, for
+/// the messages that report it broken.
+#[derive(Clone, Debug)]
+pub struct Condition {
+    pub expr: Expr,
+    pub text: String,
 }
 
 /// A case of `match`: a pattern, then conditions that all hold (§10.3).
@@ -227,6 +262,15 @@ pub enum ExprKind {
         branches: Vec<(Expr, Expr)>,
         otherwise: Option<Box<Expr>>,
     },
+    /// `("Léa", 12)`, `(x,)`, `(name: "Léa", grade: 12)` (§4.5, §12.2).
+    Tuple(Vec<Element>),
+}
+
+/// An element of a tuple, named or not (§26: `element`).
+#[derive(Clone, Debug)]
+pub struct Element {
+    pub name: Option<Ident>,
+    pub value: Expr,
 }
 
 #[derive(Clone, Debug)]

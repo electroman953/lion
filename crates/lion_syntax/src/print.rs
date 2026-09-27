@@ -61,7 +61,31 @@ pub fn print_stmt(stmt: &Stmt) -> String {
                 .collect();
             format!("(match {} {})", print_expr(scrutinee), cases.join(" "))
         }
+        StmtKind::Struct(decl) => print_struct(decl),
     }
+}
+
+fn print_struct(decl: &StructDecl) -> String {
+    let mut out = format!("(struct {}", decl.name.name);
+    for line in &decl.lines {
+        match line {
+            StructLine::Field(field) => {
+                let private = if field.private.is_some() { "private " } else { "" };
+                out.push_str(&format!(" ({private}{} : {}", field.name.name, print_type(&field.ty)));
+                if let Some(default) = &field.default {
+                    out.push_str(&format!(" = {}", print_expr(default)));
+                }
+                for condition in &field.conditions {
+                    out.push_str(&format!(", {}", print_expr(&condition.expr)));
+                }
+                out.push(')');
+            }
+            StructLine::Invariant(condition) => {
+                out.push_str(&format!(" (invariant {})", print_expr(&condition.expr)));
+            }
+        }
+    }
+    out + ")"
 }
 
 fn print_fun(decl: &FunDecl) -> String {
@@ -209,6 +233,20 @@ pub fn print_expr(expr: &Expr) -> String {
                 out.push_str(&format!(" else {}", print_expr(otherwise)));
             }
             out + ")"
+        }
+        ExprKind::Tuple(elements) => {
+            let elements: Vec<String> = elements
+                .iter()
+                .map(|element| match &element.name {
+                    Some(name) => format!("{}: {}", name.name, print_expr(&element.value)),
+                    None => print_expr(&element.value),
+                })
+                .collect();
+            if elements.is_empty() {
+                "(tuple)".to_string()
+            } else {
+                format!("(tuple {})", elements.join(" "))
+            }
         }
     }
 }

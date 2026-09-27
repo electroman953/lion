@@ -1,0 +1,18 @@
+exit: 0
+----- stdout
+(struct Exam (student : Text) (score : Float = 0, (<= 0 score)) (max : Float = 20) (invariant (<= score max)) (private note : Text = "") (grade : Int, (in grade (.. 1 5))))
+(struct Marker)
+(fun Exam.passes () in Bool = (>= (. self score) (/ (. self max) 2)))
+(fun Exam.add ((var self) (points)) [(+= (. self score) points)])
+(let a (call Exam "Léa" 12))
+(let b (call Exam student: "Léa" score: 12))
+(let c (as (tuple "Léa" 12) Exam))
+(let d (tuple "Léa" 12) : Exam)
+(let ok (paren (in-type (tuple "Léa" 12) Exam)))
+(let one (tuple 1))
+(let none_at_all (tuple))
+(let named (tuple student: "Léa" score: 12))
+(let inner (* (paren (+ 1 2)) 3))
+(= (. a score) 3)
+(call (. a add) 2)
+----- stderr

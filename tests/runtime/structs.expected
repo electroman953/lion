@@ -1,0 +1,21 @@
+exit: 0
+----- stdout
+Point(x: 0, y: 0)
+Point(x: 3, y: -4)
+a is at 3, -4, at distance 7
+[Point(x: 0, y: 0), Point(x: 3, y: -4)]
+Segment(start: Point(x: 3, y: -4), end: Point(x: 0, y: 0))
+Node(value: 1, next: Node(value: 2, next: none))
+true
+true
+true
+Point(x: 3, y: -4)
+Point(x: 4, y: 0)
+[10, 7]
+Segment(start: Point(x: 0, y: 0), end: Point(x: 0, y: 0))
+42
+hey!
+a point at 3
+a segment of length 10
+nothing
+----- stderr

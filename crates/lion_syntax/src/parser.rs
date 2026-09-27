@@ -15,10 +15,12 @@ pub struct Parsed {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Parses the tokens of one file, which must end with [`TokenKind::Eof`].
-pub fn parse(tokens: &[Token]) -> Parsed {
+/// Parses the tokens of one file, which must end with [`TokenKind::Eof`]. The text
+/// of the file gives the conditions of structures as written, for messages.
+pub fn parse(text: &str, tokens: &[Token]) -> Parsed {
     assert!(matches!(tokens.last().map(|t| &t.kind), Some(TokenKind::Eof)));
     let mut parser = Parser {
+        text,
         tokens,
         pos: 0,
         diagnostics: Vec::new(),
@@ -36,6 +38,7 @@ struct Reported;
 type PResult<T> = Result<T, Reported>;
 
 struct Parser<'t> {
+    text: &'t str,
     tokens: &'t [Token],
     pos: usize,
     diagnostics: Vec<Diagnostic>,
@@ -94,6 +97,7 @@ impl<'t> Parser<'t> {
             }
             TokenKind::Keyword(Keyword::Return) => self.return_statement(),
             TokenKind::Keyword(Keyword::Fun | Keyword::Infix) => self.fun_statement(),
+            TokenKind::Keyword(Keyword::Struct) => self.struct_statement(),
             TokenKind::Keyword(keyword @ (Keyword::Elif | Keyword::Else)) => {
                 let error = Diagnostic::error(format!("`{}` without `if`", keyword.as_str()))
                     .with_primary(start, "")
@@ -118,7 +122,6 @@ impl<'t> Parser<'t> {
         }
         let TokenKind::Keyword(keyword) = self.peek() else { return None };
         Some(match keyword {
-            Keyword::Struct => ("structures", "§12"),
             Keyword::Trait => ("traits", "§14"),
             Keyword::Use => ("modules", "§20"),
             Keyword::Private => ("`private`", "§20.3"),
@@ -302,6 +305,111 @@ impl<'t> Parser<'t> {
         };
         let decl = FunDecl { infix, receiver, name, params, ret, type_params, modifies, body };
         Ok(Stmt { kind: StmtKind::Fun(decl), span: start.to(self.previous_span()) })
+    }
+
+    /// `struct Name: fields and invariants ;`, one per line (§12.1, §26).
+    fn struct_statement(&mut self) -> PResult<Stmt> {
+        let index = self.pos;
+        let start = self.bump().span;
+        let span = self.span();
+        let name = match self.peek() {
+            TokenKind::UpperIdent(name) => {
+                let name = Ident { name: name.clone(), span };
+                self.bump();
+                name
+            }
+            TokenKind::LowerIdent(name) => {
+                let error = Diagnostic::error(format!("the structure `{name}` needs an uppercase name"))
+                    .with_primary(span, "a structure is a type")
+                    .with_help(format!("write `{}` (§4.2)", uppercase_first(name)));
+                return Err(self.error(error));
+            }
+            _ => return Err(self.expected("the name of the structure")),
+        };
+        if self.at_keyword(Keyword::Of) {
+            return Err(self.not_implemented(self.span(), "generic structures", "§15.1"));
+        }
+        if !self.eat(&TokenKind::Colon) {
+            return Err(self.expected("`:` and the fields of the structure"));
+        }
+        if !self.at_line_end() {
+            let error = Diagnostic::error("the fields of a structure go on their own lines")
+                .with_primary(self.span(), "")
+                .with_help("write one field per line, and `;` alone on the last line (§12.1)");
+            return Err(self.error(error));
+        }
+        let opener = Opener { keyword: "struct", index, branch: index };
+        let mut lines = Vec::new();
+        loop {
+            while self.eat(&TokenKind::Newline) {}
+            if self.at(&TokenKind::Semicolon) {
+                break;
+            }
+            if self.at(&TokenKind::Eof) || self.at_declaration() {
+                return Err(self.unclosed_block(opener));
+            }
+            match self.struct_line() {
+                Ok(line) => {
+                    lines.push(line);
+                    self.end_of_line_in_block(opener);
+                }
+                Err(Reported) => self.skip_statement(),
+            }
+        }
+        let end = self.close_block(opener)?;
+        Ok(Stmt { kind: StmtKind::Struct(StructDecl { name, lines }), span: start.to(end) })
+    }
+
+    /// A keyword that starts a declaration or a statement, never a line of a structure.
+    fn at_declaration(&self) -> bool {
+        matches!(
+            self.peek(),
+            TokenKind::Keyword(
+                Keyword::Fun
+                    | Keyword::Struct
+                    | Keyword::Let
+                    | Keyword::Var
+                    | Keyword::If
+                    | Keyword::While
+                    | Keyword::For
+                    | Keyword::Match
+                    | Keyword::Return
+                    | Keyword::Trait
+                    | Keyword::Use
+            )
+        )
+    }
+
+    /// `[private] name in Type [= default] {, condition}`, or a condition on several
+    /// fields (§26: `struct_line`).
+    fn struct_line(&mut self) -> PResult<StructLine> {
+        let private = if self.at_keyword(Keyword::Private) { Some(self.bump().span) } else { None };
+        let is_field = matches!(self.peek(), TokenKind::LowerIdent(_))
+            && self.kind_at(self.pos + 1) == &TokenKind::Keyword(Keyword::In)
+            && (self.type_starts_at(self.pos + 2) || self.kind_at(self.pos + 2) == &TokenKind::LParen);
+        if !is_field {
+            if private.is_some() {
+                return Err(self.expected("a field: `private name in Type`"));
+            }
+            return Ok(StructLine::Invariant(self.condition()?));
+        }
+        let name = self.binding_name()?;
+        self.bump();
+        let ty = self.type_expr()?;
+        let default = if self.eat(&TokenKind::Assign) { Some(self.expr()?) } else { None };
+        let mut conditions = Vec::new();
+        while self.eat(&TokenKind::Comma) {
+            conditions.push(self.condition()?);
+        }
+        Ok(StructLine::Field(FieldDecl { private, name, ty, default, conditions }))
+    }
+
+    /// An expression, with its text as written, spaces reduced to one.
+    fn condition(&mut self) -> PResult<Condition> {
+        let expr = self.expr()?;
+        let written = &self.text[expr.span.start as usize..expr.span.end as usize];
+        let text = written.split_whitespace().collect::<Vec<_>>().join(" ");
+        Ok(Condition { expr, text })
     }
 
     /// `[var] name [in T] [= default]`, separated by commas (§11.2).
@@ -1031,17 +1139,50 @@ impl<'t> Parser<'t> {
         Ok(Expr { kind: ExprKind::List(elements), span: start.to(end) })
     }
 
+    /// `(expr)`, or a tuple: `()`, `(x,)`, `(a, b)`, `(name: a, grade: b)` (§4.5, D56).
     fn parenthesized(&mut self) -> PResult<Expr> {
         let start = self.bump().span;
         if self.at(&TokenKind::RParen) {
-            return Err(self.not_implemented(start.to(self.span()), "tuples", "§16"));
+            let end = self.bump().span;
+            return Ok(Expr { kind: ExprKind::Tuple(Vec::new()), span: start.to(end) });
         }
-        let inner = self.nested(Self::expr)?;
-        if self.at(&TokenKind::Comma) {
-            return Err(self.not_implemented(start.to(self.span()), "tuples", "§16"));
+        let first = self.nested(Self::element)?;
+        if first.name.is_none() && self.at(&TokenKind::RParen) {
+            let end = self.bump().span;
+            return Ok(Expr { kind: ExprKind::Paren(Box::new(first.value)), span: start.to(end) });
         }
-        let end = self.expect(&TokenKind::RParen, "`)`")?;
-        Ok(Expr { kind: ExprKind::Paren(Box::new(inner)), span: start.to(end) })
+        if !self.at(&TokenKind::Comma) {
+            if first.name.is_some() && self.at(&TokenKind::RParen) {
+                let error = Diagnostic::error("a tuple of one element ends with a comma")
+                    .with_primary(self.span(), "")
+                    .with_help("write `(name: value,)` (D56)");
+                return Err(self.error(error));
+            }
+            return Err(self.expected("`,` or `)`"));
+        }
+        let mut elements = vec![first];
+        while self.eat(&TokenKind::Comma) {
+            if self.at(&TokenKind::RParen) {
+                break;
+            }
+            elements.push(self.nested(Self::element)?);
+        }
+        let end = self.expect(&TokenKind::RParen, "`,` or `)`")?;
+        Ok(Expr { kind: ExprKind::Tuple(elements), span: start.to(end) })
+    }
+
+    /// `[name:] value`, in a tuple.
+    fn element(&mut self) -> PResult<Element> {
+        let name = match self.peek() {
+            TokenKind::LowerIdent(name) if self.kind_at(self.pos + 1) == &TokenKind::Colon => {
+                let name = Ident { name: name.clone(), span: self.span() };
+                self.bump();
+                self.bump();
+                Some(name)
+            }
+            _ => None,
+        };
+        Ok(Element { name, value: self.expr()? })
     }
 
     /// A text literal with its interpolations (§4.5, D24).
@@ -1358,6 +1499,11 @@ fn is_operator(kind: &TokenKind) -> bool {
         ),
         _ => false,
     }
+}
+
+fn uppercase_first(name: &str) -> String {
+    let mut chars = name.chars();
+    chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
 }
 
 fn lowercase_first(name: &str) -> String {

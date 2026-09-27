@@ -18,10 +18,17 @@ use lion_syntax::ast;
 
 use crate::flow::Assigned;
 use crate::names::Resolved;
+use crate::places::Path;
 use crate::{Checker, Context, ContextKind, GlobalInfo, GlobalType, LocalInfo, article, ir_locals, typed};
 
 pub(crate) struct FunctionInfo<'a> {
     pub(crate) decl: &'a ast::FunDecl,
+    /// For a method, the type of `self` (§12.4).
+    pub(crate) receiver: Option<Type>,
+    /// A method whose declaration does not write `self`: its first parameter is added.
+    implicit_self: bool,
+    /// A method declared with `var self`, which changes its object (§12.4).
+    pub(crate) var_self: bool,
     /// `None` when the declaration has an error or needs what is not implemented.
     signature: Option<Vec<ParamInfo>>,
     /// The return type, when written.
@@ -38,6 +45,14 @@ impl FunctionInfo<'_> {
     fn is_generic(&self) -> bool {
         self.signature.as_ref().is_some_and(|params| params.iter().any(|param| param.ty.is_none()))
     }
+
+    /// `passes`, or `Student.passes` for a method.
+    fn full_name(&self) -> String {
+        match self.receiver {
+            Some(receiver) => format!("{receiver}.{}", self.decl.name.name),
+            None => self.decl.name.name.clone(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -52,7 +67,10 @@ struct ParamInfo {
 
 /// One checked version of a function.
 pub(crate) struct Instance {
+    /// The function; unused for a function made by the checker.
     function: usize,
+    /// For a function made by the checker (§12.3): its name and where it comes from.
+    synthetic: Option<(String, Span)>,
     /// For a generic function: the types of the arguments given by the calls of this
     /// instance, which gave that many arguments. Empty otherwise.
     arg_types: Vec<Type>,
@@ -100,10 +118,14 @@ pub(crate) struct ScriptCall {
 }
 
 /// An argument once checked, before the call is built.
-enum Pending {
+pub(crate) enum Pending {
     Value(ir::Expr),
     /// A variable given to a `var` parameter, and its type.
     Place(ir::Place, Type),
+    /// A part of a `var` variable given to a `var` parameter: it is copied into a
+    /// temporary, given to the function, then stored back (C50). `setup` evaluates the
+    /// indices of the path first.
+    Element(Path, Vec<ir::Stmt>),
     /// Any other value given to a `var` parameter: the modification is lost (§11.2).
     Temporary(ir::Expr),
 }
@@ -113,23 +135,36 @@ impl Pending {
         match self {
             Pending::Value(value) | Pending::Temporary(value) => value.ty,
             Pending::Place(_, ty) => *ty,
+            Pending::Element(path, _) => path.ty(),
         }
     }
 }
 
 impl Instance {
     pub(crate) fn into_ir(self, functions: &[FunctionInfo]) -> ir::Function {
-        let decl = functions[self.function].decl;
         let checked = self.checked.expect("every instance of a valid program is checked");
         let ret = match self.ret {
             Ret::Declared(ty) | Ret::Inferred(ty) => ty,
             _ => unreachable!("a valid program knows every return type"),
         };
+        if let Some((name, span)) = self.synthetic {
+            return ir::Function {
+                name,
+                params: checked.params.len() as u32,
+                defaults: Vec::new(),
+                ret,
+                locals: ir_locals(checked.locals),
+                body: checked.body,
+                span: Some(span),
+            };
+        }
+        let function = &functions[self.function];
+        let decl = function.decl;
         let name = if self.arg_types.is_empty() {
-            decl.name.name.clone()
+            function.full_name()
         } else {
             let types: Vec<String> = checked.params.iter().map(Type::to_string).collect();
-            format!("{}[{}]", decl.name.name, types.join(", "))
+            format!("{}[{}]", function.full_name(), types.join(", "))
         };
         ir::Function {
             name,
@@ -146,6 +181,7 @@ impl Instance {
 impl<'a> Checker<'a> {
     /// Registers the functions and globals of the file before anything is checked.
     pub(crate) fn register_top_level(&mut self, module: &'a ast::Module) {
+        self.register_structures(module);
         let mut declarations: Vec<&'a ast::LetStmt> = Vec::new();
         for stmt in &module.stmts {
             match &stmt.kind {
@@ -185,9 +221,30 @@ impl<'a> Checker<'a> {
                 self.functions[index].instance = Some(instance);
             }
         }
+        self.check_structures();
     }
 
     fn register_function(&mut self, decl: &'a ast::FunDecl) {
+        let info = FunctionInfo {
+            decl,
+            receiver: None,
+            implicit_self: false,
+            var_self: false,
+            signature: None,
+            declared_ret: None,
+            modifies: Vec::new(),
+            instances: HashMap::new(),
+            instance: None,
+        };
+        if let Some(receiver) = &decl.receiver {
+            let Some(ty) = self.receiver_type(receiver) else { return };
+            if !self.check_method_name(ty, decl) {
+                return;
+            }
+            self.methods.insert((ty, decl.name.name.clone()), self.functions.len());
+            self.functions.push(FunctionInfo { receiver: Some(ty), ..info });
+            return;
+        }
         if let Some(&previous) = self.function_names.get(&decl.name.name) {
             self.diagnostics.push(
                 Diagnostic::error(format!("the function `{}` is already declared", decl.name.name))
@@ -198,14 +255,68 @@ impl<'a> Checker<'a> {
             return;
         }
         self.function_names.insert(decl.name.name.clone(), self.functions.len());
-        self.functions.push(FunctionInfo {
-            decl,
-            signature: None,
-            declared_ret: None,
-            modifies: Vec::new(),
-            instances: HashMap::new(),
-            instance: None,
-        });
+        self.functions.push(info);
+    }
+
+    /// The type of `self` in `fun Type.name(...)`: a structure, or a basic type (§12.4).
+    fn receiver_type(&mut self, receiver: &ast::Ident) -> Option<Type> {
+        if let Some(&index) = self.struct_names.get(&receiver.name) {
+            return Some(Type::Struct(self.structs[index].id));
+        }
+        let ty = ast::TypeExpr {
+            kind: ast::TypeExprKind::Named { module: Vec::new(), name: receiver.clone(), args: Vec::new() },
+            span: receiver.span,
+        };
+        if matches!(receiver.name.as_str(), "List" | "Set" | "Domain" | "Map") {
+            self.not_implemented(receiver.span, "methods of generic types", "§12.4, §15");
+            return None;
+        }
+        self.resolve_type(&ty)
+    }
+
+    /// A method has its own name among the methods and the fields of its type.
+    fn check_method_name(&mut self, ty: Type, decl: &ast::FunDecl) -> bool {
+        let name = &decl.name.name;
+        if let Some(&previous) = self.methods.get(&(ty, name.clone())) {
+            self.diagnostics.push(
+                Diagnostic::error(format!("the method `{ty}.{name}` is already declared"))
+                    .with_primary(decl.name.span, "declared again here")
+                    .with_secondary(self.functions[previous].decl.name.span, "first declared here"),
+            );
+            return false;
+        }
+        if let Type::Struct(structure) = ty
+            && let Some(field) =
+                self.structs[self.struct_index(structure)].fields.iter().find(|field| &field.name == name)
+        {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`{ty}` already has a field `{name}`"))
+                    .with_primary(decl.name.span, "")
+                    .with_secondary(field.span, "field declared here")
+                    .with_help("give the method another name"),
+            );
+            return false;
+        }
+        let standard = match ty {
+            Type::Text => ["size"].as_slice(),
+            Type::Error => ["message"].as_slice(),
+            _ => &[],
+        };
+        if standard.contains(&name.as_str()) {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`{ty}` already has `{name}`"))
+                    .with_primary(decl.name.span, "")
+                    .with_help("give the method another name"),
+            );
+            return false;
+        }
+        const OPERATORS: &[&str] =
+            &["plus", "subtract", "negate", "times", "divide", "power", "equals", "less"];
+        if OPERATORS.contains(&name.as_str()) {
+            self.not_implemented(decl.name.span, "operators defined by methods", "§9.5");
+            return false;
+        }
+        true
     }
 
     fn new_instance(
@@ -217,6 +328,7 @@ impl<'a> Checker<'a> {
     ) -> usize {
         self.instances.push(Instance {
             function,
+            synthetic: None,
             arg_types,
             origin,
             ret,
@@ -236,15 +348,29 @@ impl<'a> Checker<'a> {
             self.not_implemented(decl.name.span, "`infix` functions", "§9.5");
             supported = false;
         }
-        if let Some(receiver) = &decl.receiver {
-            self.not_implemented(receiver.span.to(decl.name.span), "methods", "§12.4");
-            supported = false;
-        }
         if let Some((name, _)) = decl.type_params.first() {
             self.not_implemented(name.span, "type variables", "§15.2");
             supported = false;
         }
         let mut params = Vec::new();
+        // `self` is the first parameter of a method: written `var self` when the method
+        // changes it, left out otherwise (§12.4).
+        if let Some(receiver) = self.functions[index].receiver {
+            let var_self = decl.params.first().is_some_and(|param| param.name.name == "self");
+            if !var_self {
+                self.functions[index].implicit_self = true;
+            }
+            self.functions[index].var_self = var_self;
+            let span =
+                decl.params.first().filter(|_| var_self).map_or(decl.name.span, |param| param.name.span);
+            params.push(ParamInfo {
+                name: "self".to_string(),
+                ty: Some(receiver),
+                by_reference: var_self,
+                has_default: false,
+                span,
+            });
+        }
         let mut defaults_started = false;
         for (position, param) in decl.params.iter().enumerate() {
             if let Some(previous) = decl.params[..position].iter().find(|p| p.name.name == param.name.name) {
@@ -262,6 +388,28 @@ impl<'a> Checker<'a> {
                         .with_note("a method is declared `fun Type.name(...)` (§12.4)"),
                 );
                 supported = false;
+                continue;
+            }
+            if param.name.name == "self" {
+                let problem = if param.var.is_none() {
+                    Some(
+                        "`self` is written in the parameters only as `var self`, for a method that changes its object",
+                    )
+                } else if position > 0 {
+                    Some("`var self` is the first parameter")
+                } else if param.ty.is_some() || param.default.is_some() {
+                    Some("`var self` has the type of the method, and no default value")
+                } else {
+                    None
+                };
+                if let Some(problem) = problem {
+                    self.diagnostics.push(
+                        Diagnostic::error(problem)
+                            .with_primary(param.name.span, "")
+                            .with_note("a method reads its object as `self`; it changes it only when declared `fun Type.name(var self, ...)` (§12.4)"),
+                    );
+                    supported = false;
+                }
                 continue;
             }
             if let (Some(var_span), Some(default)) = (param.var, &param.default) {
@@ -417,6 +565,8 @@ impl<'a> Checker<'a> {
         let decl = self.functions[function].decl;
         let arg_types = self.instances[instance].arg_types.clone();
         let generic = self.functions[function].is_generic();
+        // The written parameters, after the `self` of a method that does not write it.
+        let offset = usize::from(self.functions[function].implicit_self);
         // The parameters are the first locals (C6: they belong to the outermost block).
         let ids: Vec<ir::LocalId> = params
             .iter()
@@ -445,7 +595,8 @@ impl<'a> Checker<'a> {
         let mut valid = true;
         for (position, (param, id)) in params.iter().zip(&ids).enumerate() {
             let needed = !generic || position >= arg_types.len();
-            if let (true, Some(default)) = (needed, &decl.params[position].default) {
+            let written = position.checked_sub(offset).map(|position| &decl.params[position]);
+            if let (true, Some(default)) = (needed, written.and_then(|param| param.default.as_ref())) {
                 match self.expr(default) {
                     Some(value) => {
                         let expected = self.ctx.locals[id.index()].ty.unwrap_or(value.ty);
@@ -638,13 +789,32 @@ impl<'a> Checker<'a> {
         args: &[ast::Arg],
         span: Span,
     ) -> Option<ir::Expr> {
+        self.call_with(index, None, Vec::new(), callee, args, span)
+    }
+
+    /// A call of a function, or of a method with its object already checked; `after`
+    /// runs once the call returns (§12.3).
+    pub(crate) fn call_with(
+        &mut self,
+        index: usize,
+        receiver: Option<Pending>,
+        after: Vec<ir::Stmt>,
+        callee: Span,
+        args: &[ast::Arg],
+        span: Span,
+    ) -> Option<ir::Expr> {
         let name = self.functions[index].decl.name.name.clone();
-        let Some(params) = self.functions[index].signature.clone() else {
+        let Some(mut params) = self.functions[index].signature.clone() else {
             for arg in args {
                 self.expr(&arg.value);
             }
             return None;
         };
+        let mut pending = Vec::new();
+        if let Some(receiver) = receiver {
+            params.remove(0);
+            pending.push(Some(receiver));
+        }
         let required = params.iter().filter(|param| !param.has_default).count();
         if args.len() > params.len() || args.is_empty() && required > 0 {
             let expected = if required == params.len() {
@@ -671,7 +841,6 @@ impl<'a> Checker<'a> {
             );
             return None;
         }
-        let mut pending = Vec::new();
         for (arg, param) in args.iter().zip(&params) {
             pending.push(self.argument(&name, arg, param));
         }
@@ -691,7 +860,7 @@ impl<'a> Checker<'a> {
                 self.ctx.flow.narrow(global, None);
             }
         }
-        Some(self.build_call(instance, pending, ret, span))
+        Some(self.build_call(instance, pending, after, ret, span))
     }
 
     /// The instance of a generic function for the types of the given arguments (C1).
@@ -757,6 +926,22 @@ impl<'a> Checker<'a> {
     /// The argument of a `var` parameter: a `var` variable, which the call may change,
     /// or any other value, whose change is lost (§11.2).
     fn reference_argument(&mut self, arg: &ast::Arg, param: &ParamInfo) -> Option<Pending> {
+        if is_part_of_variable(&arg.value) {
+            let path = self.place_path(&arg.value)?;
+            if let Some(expected) = param.ty
+                && path.ty() != expected
+            {
+                self.diagnostics.push(
+                    Diagnostic::error("mismatched types")
+                        .with_primary(arg.value.span, format!("this is {}", article(path.ty())))
+                        .with_secondary(param.span, format!("this `var` parameter is {}", article(expected)))
+                        .with_note("a `var` parameter works on the caller's variable itself, so both have the same type (§11.2)"),
+                );
+                return None;
+            }
+            let (setup, path) = self.stabilize(path);
+            return Some(Pending::Element(path, setup));
+        }
         let ast::ExprKind::Name(name) = &arg.value.kind else {
             let value = self.expr(&arg.value)?;
             let value = match param.ty {
@@ -822,34 +1007,111 @@ impl<'a> Checker<'a> {
     }
 
     /// The call, keeping the left-to-right order of the arguments (§9.2) when some of
-    /// them are stored in temporaries to be passed by reference.
-    fn build_call(&mut self, instance: usize, pending: Vec<Pending>, ret: Type, span: Span) -> ir::Expr {
-        let needs_temporaries = pending.iter().any(|arg| matches!(arg, Pending::Temporary(_)));
-        let mut lets = Vec::new();
+    /// them are stored in temporaries to be passed by reference. The parts of variables
+    /// given to `var` parameters are stored back after the call, then `after` runs.
+    fn build_call(
+        &mut self,
+        instance: usize,
+        pending: Vec<Pending>,
+        mut after: Vec<ir::Stmt>,
+        ret: Type,
+        span: Span,
+    ) -> ir::Expr {
+        let needs_temporaries =
+            pending.iter().any(|arg| matches!(arg, Pending::Temporary(_) | Pending::Element(..)));
+        let mut before = Vec::new();
+        let mut stored = Vec::new();
         let mut args = Vec::new();
         for arg in pending {
             match arg {
                 Pending::Value(value) if needs_temporaries => {
                     let temp = self.temporary(value.ty, value.span);
                     args.push(ir::Arg::Value(typed(ir::ExprKind::Local(temp), value.ty, value.span)));
-                    lets.push((temp, value));
+                    before.push(ir::Stmt::Assign { place: ir::Place::Local(temp), value });
                 }
                 Pending::Value(value) => args.push(ir::Arg::Value(value)),
                 Pending::Place(place, _) => args.push(ir::Arg::Reference(place)),
                 Pending::Temporary(value) => {
                     let temp = self.temporary(value.ty, value.span);
                     args.push(ir::Arg::Reference(ir::Place::Local(temp)));
-                    lets.push((temp, value));
+                    before.push(ir::Stmt::Assign { place: ir::Place::Local(temp), value });
+                }
+                Pending::Element(path, setup) => {
+                    let temp = self.temporary(path.ty(), path.span);
+                    before.extend(setup);
+                    let value = self.read_path(&path, path.steps.len());
+                    before.push(ir::Stmt::Assign { place: ir::Place::Local(temp), value });
+                    args.push(ir::Arg::Reference(ir::Place::Local(temp)));
+                    let value = typed(ir::ExprKind::Local(temp), path.ty(), path.span);
+                    stored.push(ir::Stmt::AssignElement { root: path.root, path: path.steps.clone(), value });
+                    stored.extend(self.check_invariants(&path, false));
                 }
             }
         }
+        stored.append(&mut after);
         let function = ir::FunctionId(instance as u32);
         let mut call = typed(ir::ExprKind::Call { function, args }, ret, span);
-        for (local, value) in lets.into_iter().rev() {
-            call =
-                typed(ir::ExprKind::Let { local, value: Box::new(value), body: Box::new(call) }, ret, span);
+        if !stored.is_empty() {
+            let result = self.temporary(ret, span);
+            let value = Box::new(typed(ir::ExprKind::Local(result), ret, span));
+            let rest = typed(ir::ExprKind::Block { stmts: stored, value }, ret, span);
+            call = typed(
+                ir::ExprKind::Let { local: result, value: Box::new(call), body: Box::new(rest) },
+                ret,
+                span,
+            );
+        }
+        if !before.is_empty() {
+            call = typed(ir::ExprKind::Block { stmts: before, value: Box::new(call) }, ret, span);
         }
         call
+    }
+
+    /// The name of an instance's function, for messages.
+    fn instance_name(&self, instance: usize) -> String {
+        match &self.instances[instance].synthetic {
+            Some((name, _)) => name.clone(),
+            None => self.functions[self.instances[instance].function].full_name(),
+        }
+    }
+
+    /// A function made by the checker, whose body is given by `finish_synthetic`.
+    pub(crate) fn synthetic_instance(&mut self, name: String, span: Span, ret: Type) -> usize {
+        self.instances.push(Instance {
+            function: usize::MAX,
+            synthetic: Some((name, span)),
+            arg_types: Vec::new(),
+            origin: None,
+            ret: Ret::Declared(ret),
+            state: BodyState::Checked,
+            reads: Vec::new(),
+            calls: Vec::new(),
+            checked: None,
+        });
+        self.instances.len() - 1
+    }
+
+    pub(crate) fn finish_synthetic(
+        &mut self,
+        instance: usize,
+        params: Vec<Type>,
+        locals: Vec<LocalInfo>,
+        body: Vec<ir::Stmt>,
+        calls: Vec<usize>,
+    ) {
+        let instance = &mut self.instances[instance];
+        instance.calls = calls;
+        instance.checked = Some(CheckedBody { params, locals, body, defaults: Vec::new() });
+    }
+
+    /// A call of a function made by the checker, checked like the others when the
+    /// script makes it (C3).
+    pub(crate) fn calls_synthetic(&mut self, instance: usize, span: Span) {
+        self.ctx.calls.push(instance);
+        if self.ctx.kind == ContextKind::Script {
+            let unassigned = self.unassigned_globals();
+            self.script_calls.push(ScriptCall { instance, span, unassigned });
+        }
     }
 
     /// The globals that may have no value at the current point of the script.
@@ -920,7 +1182,7 @@ impl<'a> Checker<'a> {
             unassigned.sort_by_key(|local| local.0);
             for global in unassigned {
                 let decl = self.globals[&self.global_names[&global]].decl;
-                let function = &self.functions[self.instances[call.instance].function].decl.name.name;
+                let function = &self.instance_name(call.instance);
                 self.diagnostics.push(
                     Diagnostic::error(format!(
                         "`{function}` may read `{}`, which may have no value at this call",
@@ -932,6 +1194,17 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+    }
+}
+
+/// `l[i]`, `s.grade`: a part of a variable, which a `var` parameter can change.
+fn is_part_of_variable(expr: &ast::Expr) -> bool {
+    match &expr.kind {
+        ast::ExprKind::Index { object, .. } | ast::ExprKind::Field { object, .. } => {
+            matches!(object.kind, ast::ExprKind::Name(_)) || is_part_of_variable(object)
+        }
+        ast::ExprKind::Paren(inner) => is_part_of_variable(inner),
+        _ => false,
     }
 }
 
@@ -952,8 +1225,16 @@ fn widen_returns(stmts: &mut [ir::Stmt]) {
                 widen_returns(then);
                 widen_returns(otherwise);
             }
-            ir::Stmt::While { body, .. } => widen_returns(body),
-            _ => {}
+            ir::Stmt::While { body, .. } | ir::Stmt::For { body, .. } | ir::Stmt::Seq(body) => {
+                widen_returns(body)
+            }
+            ir::Stmt::Assign { .. }
+            | ir::Stmt::Expr(_)
+            | ir::Stmt::AssignElement { .. }
+            | ir::Stmt::Add { .. }
+            | ir::Stmt::Break
+            | ir::Stmt::Continue
+            | ir::Stmt::Return(_) => {}
         }
     }
 }

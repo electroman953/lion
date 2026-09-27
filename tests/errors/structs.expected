@@ -1,0 +1,169 @@
+exit: 1
+----- stdout
+----- stderr
+error: this `Student` is invalid
+   --> tests/errors/structs.lion:10:9
+    |
+  4 |     grade in Float, 0 <= grade <= 20
+    |                     ---------------- condition declared here
+   ...
+ 10 | let a = Student("Léa", 25)
+    |         ^^^^^^^^^^^^^^^^^^ grade = 25.0 does not satisfy 0 <= grade <= 20
+    |
+    = the values are constants, so the conditions of `Student` are checked now (§12.3, D39)
+
+error: `Student` is built from 2 values, not 1
+   --> tests/errors/structs.lion:11:9
+    |
+  2 | struct Student:
+    |        ------- declared here
+   ...
+ 11 | let b = Student("Léa")
+    |         ^^^^^^^^^^^^^^
+    |
+    = the fields of `Student`: name in Text, grade in Float
+
+error: this value is named `note`, but the field at this position is `grade`
+   --> tests/errors/structs.lion:12:30
+    |
+  4 |     grade in Float, 0 <= grade <= 20
+    |     ----- field declared here
+   ...
+ 12 | let c = Student(name: "Léa", note: 3)
+    |                              ^^^^
+    |
+    = named values keep the order of the fields (§12.2)
+
+error: a structure is built from values
+   --> tests/errors/structs.lion:13:17
+    |
+ 13 | let d = Student(var a, 3)
+    |                 ^^^ remove this `var`
+    |
+    = `var` at a call marks an argument that the function modifies (§11.2)
+
+error: cannot change the content of the constant `s`
+   --> tests/errors/structs.lion:15:1
+    |
+ 14 | let s = Student("Tom", 12)
+    |     - declared with `let`
+ 15 | s.grade = 3
+    | ^
+    |
+    = a value held by `let` never changes, nor does its content (§6.4)
+    = help: to change it, declare it with `var`: `var s = ...`
+
+error: cannot change the content of the constant `s`
+   --> tests/errors/structs.lion:16:1
+    |
+ 14 | let s = Student("Tom", 12)
+    |     - declared with `let`
+   ...
+ 16 | s.bump()
+    | ^
+    |
+    = `bump` changes its object: it is declared with `var self` (§12.4)
+    = a value held by `let` never changes, nor does its content (§6.4)
+    = help: to change it, declare it with `var`: `var s = ...`
+
+error: `Student` has no field `grde`
+   --> tests/errors/structs.lion:17:8
+    |
+  2 | struct Student:
+    |        ------- declared here
+   ...
+ 17 | show(s.grde)
+    |        ^^^^
+    |
+    = help: a similar field exists: `grade`
+
+error: not implemented yet: methods used as values (detached methods)
+   --> tests/errors/structs.lion:18:6
+    |
+ 18 | show(s.passes)
+    |      ^^^^^^^^
+    |
+    = this part of Lion (spec §12.6) is not supported by this version of the implementation
+
+error: A Student has no method `nope`
+   --> tests/errors/structs.lion:19:8
+    |
+ 19 | show(s.nope())
+    |      - this is a Student
+    |        ^^^^
+    |
+    = a method is declared `fun Student.nope(...)` (§12.4)
+
+error: A Student has no method `name`
+   --> tests/errors/structs.lion:20:8
+    |
+ 20 | show(s.name())
+    |      - this is a Student
+    |        ^^^^
+    |
+    = `name` is a field: write `.name`, without parentheses
+
+error: this method cannot change `self`
+   --> tests/errors/structs.lion:22:5
+    |
+ 22 |     self.grade = 0
+    |     ^^^^
+    |
+    = a method changes its object only when it is declared with `var self` (§12.4)
+    = help: add `var self` as the first parameter: `fun Type.name(var self, ...)`
+
+error: cannot find the type `Studnt`
+   --> tests/errors/structs.lion:24:6
+    |
+ 24 | show(Studnt("a", 1))
+    |      ^^^^^^ unknown type
+    |
+    = help: a similar type exists: `Student`
+
+error: cannot convert an Int to Student with `as`
+   --> tests/errors/structs.lion:25:9
+    |
+ 25 | let u = 3 as Student
+    |         ^^^^^^^^^^^^
+    |
+    = Lion 0.1 defines `as` between Int and Float, from Text to a number, and from a number to Text (§8.5)
+    = help: a Student is built from the values of its fields: `Student(...)` or `(...) as Student` (§12.2)
+
+error: `Int` is not a structure
+   --> tests/errors/structs.lion:26:9
+    |
+ 26 | let v = Int(3)
+    |         ^^^
+    |
+    = `Type(...)` builds a structure (§12.2)
+    = help: to convert a value, write `x as Int` (§8.5)
+
+error: `<` is not defined for Student values
+   --> tests/errors/structs.lion:27:8
+    |
+ 27 | show(s < s)
+    |        ^
+    |
+    = `<`, `>`, `<=` and `>=` compare Int and Float values
+    = Lion 0.1 does not define an order on Student
+
+error: cannot compare a Student with an Int
+   --> tests/errors/structs.lion:28:8
+    |
+ 28 | show(s == 3)
+    |      - this is a Student
+    |        ^^
+    |           - this is an Int
+    |
+    = Lion 0.1 does not define comparisons between values of different types
+
+error: A value of type `Error or Student` has no field `grade`
+   --> tests/errors/structs.lion:32:18
+    |
+ 32 | show(e.grade + t.grade)
+    |                - this is a value of type `Error or Student`
+    |                  ^^^^^
+    |
+    = help: an Error must be handled first: `if x in Error: ... ;`, or `try x` (§18.3)
+
+17 errors found

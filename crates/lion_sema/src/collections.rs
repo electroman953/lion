@@ -7,9 +7,7 @@ use lion_diagnostics::{Diagnostic, Span};
 use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
-use crate::flow::Assigned;
-use crate::names::Resolved;
-use crate::{Checker, GlobalType, Scope, article, typed};
+use crate::{Checker, Scope, article, capitalize, typed};
 
 /// One element of a comprehension after the output (§16.4).
 enum Part {
@@ -163,7 +161,7 @@ impl Checker<'_> {
         let list_type = Type::list(output.ty);
         let result = self.temporary(list_type, span);
         let mut body =
-            vec![ir::Stmt::Add { root: ir::Place::Local(result), indices: Vec::new(), value: output }];
+            vec![ir::Stmt::Add { root: ir::Place::Local(result), path: Vec::new(), value: output }];
         for part in parts.into_iter().rev() {
             body = vec![match part {
                 Part::Generator { var, iterable } => ir::Stmt::For { var, iterable, body },
@@ -250,9 +248,19 @@ impl Checker<'_> {
         }
     }
 
-    /// `l.size`, `l.first`, `l.last`, `t.size`, `r.size` (§16.2, D38).
+    /// `l.size`, `l.first`, `l.last`, `t.size`, `r.size` (§16.2, D38), and the fields of
+    /// structures (§12.1).
     pub(crate) fn property(&mut self, object: &ast::Expr, name: &ast::Ident, span: Span) -> Option<ir::Expr> {
         let object = self.expr(object)?;
+        let object = self.within_try(object);
+        if self.methods.contains_key(&(object.ty, name.name.clone())) {
+            self.not_implemented(span, "methods used as values (detached methods)", "§12.6");
+            return None;
+        }
+        if object.ty.members().iter().any(|member| matches!(member, Type::Struct(_))) {
+            let (field, ty) = self.field_of(object.ty, name, object.span)?;
+            return Some(typed(ir::ExprKind::Field { object: Box::new(object), field }, ty, span));
+        }
         let (property, ty) = match (object.ty, name.name.as_str()) {
             (Type::List(_) | Type::Text | Type::Range, "size") => (ir::Property::Size, Type::Int),
             (Type::List(element), "first") => (ir::Property::First, element.get()),
@@ -331,14 +339,16 @@ impl Checker<'_> {
         Some(typed(kind, ty, span))
     }
 
-    /// `l[i] = value` and `l.add(value)`: a change inside a `var` variable (§6.4).
+    /// `l[i] = value`, `s.grade = value` and `l.add(value)`: a change inside a `var`
+    /// variable (§6.4), then the check of the structures that contain it (§12.3).
     pub(crate) fn change_in_place(
         &mut self,
         target: &ast::Expr,
         value: &ast::Expr,
         adding: bool,
     ) -> Option<ir::Stmt> {
-        let (root, indices, ty) = self.place_path(target)?;
+        let path = self.place_path(target)?;
+        let ty = path.ty();
         let expected = if adding {
             match ty {
                 Type::List(element) => element.get(),
@@ -356,14 +366,21 @@ impl Checker<'_> {
         let value = self.expr_expecting(value, expected)?;
         let context = (target.span, format!("this is {}", article(expected)));
         let value = self.coerce(value, expected, Some(context))?;
-        Some(if adding {
-            ir::Stmt::Add { root, indices, value }
+        let (mut stmts, path) = self.stabilize(path);
+        let (root, steps) = (path.root, path.steps.clone());
+        stmts.push(if adding {
+            ir::Stmt::Add { root, path: steps, value }
         } else {
-            ir::Stmt::AssignElement { root, indices, value }
-        })
+            ir::Stmt::AssignElement { root, path: steps, value }
+        });
+        // `add` changes the list at the end of the path, which is part of the structures.
+        let checks = self.check_invariants(&path, adding);
+        stmts.extend(checks);
+        Some(if stmts.len() == 1 { stmts.pop().expect("one statement") } else { ir::Stmt::Seq(stmts) })
     }
 
-    /// `l[i] += value`: the indices are evaluated once, into temporaries (§9.2).
+    /// `l[i] += value`, `s.grade += value`: the indices are evaluated once, into
+    /// temporaries (§9.2).
     pub(crate) fn compound_element(
         &mut self,
         target: &ast::Expr,
@@ -371,29 +388,11 @@ impl Checker<'_> {
         value: &ast::Expr,
         span: Span,
     ) -> Option<ir::Stmt> {
-        let (root, indices, ty) = self.place_path(target)?;
+        let path = self.place_path(target)?;
+        let ty = path.ty();
         let rhs = self.expr(value)?;
-        let mut stmts = Vec::new();
-        let (mut current, mut current_ty) = match root {
-            ir::Place::Local(local) => (ir::ExprKind::Local(local), self.ctx.locals[local.index()].ty?),
-            ir::Place::Global(local) => {
-                let GlobalType::Known(ty) = self.globals[&self.global_names[&local]].ty else { return None };
-                (ir::ExprKind::Global(local), ty?)
-            }
-        };
-        let mut stored = Vec::new();
-        for index in indices {
-            let temp = self.temporary(Type::Int, index.span);
-            let index_span = index.span;
-            stmts.push(ir::Stmt::Assign { place: ir::Place::Local(temp), value: index });
-            let index = typed(ir::ExprKind::Local(temp), Type::Int, index_span);
-            stored.push(index.clone());
-            let Type::List(element) = current_ty else { unreachable!("checked by place_path") };
-            let object = typed(current, current_ty, target.span);
-            current = ir::ExprKind::Index { object: Box::new(object), index: Box::new(index) };
-            current_ty = element.get();
-        }
-        let current = typed(current, ty, target.span);
+        let (mut stmts, path) = self.stabilize(path);
+        let current = self.read_path(&path, path.steps.len());
         let result = self.arithmetic(op, span, current, rhs, span)?;
         if result.ty != ty && !(result.ty == Type::Int && ty == Type::Float) {
             self.diagnostics.push(
@@ -404,100 +403,11 @@ impl Checker<'_> {
             );
             return None;
         }
-        stmts.push(ir::Stmt::AssignElement { root, indices: stored, value: widen(result, ty) });
+        let value = widen(result, ty);
+        stmts.push(ir::Stmt::AssignElement { root: path.root, path: path.steps.clone(), value });
+        let checks = self.check_invariants(&path, false);
+        stmts.extend(checks);
         Some(ir::Stmt::Seq(stmts))
-    }
-
-    /// The variable and the indices that `l[i][j]` designates, and the type found there.
-    fn place_path(&mut self, target: &ast::Expr) -> Option<(ir::Place, Vec<ir::Expr>, Type)> {
-        match &target.kind {
-            ast::ExprKind::Name(name) => self.changeable_variable(name, target.span),
-            ast::ExprKind::Paren(inner) => self.place_path(inner),
-            ast::ExprKind::Index { object, index } => {
-                let (root, mut indices, ty) = self.place_path(object)?;
-                let index = self.expr(index)?;
-                let element = match (ty, index.ty) {
-                    (Type::List(element), Type::Int) => element.get(),
-                    (Type::Text, _) => {
-                        self.diagnostics.push(
-                            Diagnostic::error("a Text cannot be changed character by character")
-                                .with_primary(target.span, "")
-                                .with_help("build a new text with interpolation, and assign it"),
-                        );
-                        return None;
-                    }
-                    (Type::List(_), other) => {
-                        self.diagnostics.push(
-                            Diagnostic::error("the index of an element to change is an Int")
-                                .with_primary(index.span, format!("this is {}", article(other))),
-                        );
-                        return None;
-                    }
-                    (other, _) => {
-                        self.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "{} has no elements to change",
-                                capitalize(&article(other))
-                            ))
-                            .with_primary(target.span, ""),
-                        );
-                        return None;
-                    }
-                };
-                indices.push(index);
-                Some((root, indices, element))
-            }
-            _ => {
-                self.diagnostics.push(
-                    Diagnostic::error("only a variable, or an element of one, can be changed")
-                        .with_primary(target.span, "")
-                        .with_note("a temporary value would lose the change"),
-                );
-                None
-            }
-        }
-    }
-
-    /// A variable whose content changes: a `var` with a value (§6.4).
-    fn changeable_variable(&mut self, name: &str, span: Span) -> Option<(ir::Place, Vec<ir::Expr>, Type)> {
-        match self.resolve(name, span) {
-            Resolved::Local(local) => {
-                if !self.check_has_value(local, span) {
-                    return None;
-                }
-                let info = &self.ctx.locals[local.index()];
-                if !info.mutable {
-                    let decl_span = info.decl_span;
-                    self.diagnostics.push(
-                        Diagnostic::error(format!("cannot change the content of the constant `{name}`"))
-                            .with_primary(span, "")
-                            .with_secondary(decl_span, "declared with `let`")
-                            .with_note("a value held by `let` never changes, nor does its content (§6.4)")
-                            .with_help(format!("to change it, declare it with `var`: `var {name} = ...`")),
-                    );
-                    return None;
-                }
-                let ty = info.ty?;
-                self.ctx.flow.set(local, Assigned::Yes);
-                Some((ir::Place::Local(local), Vec::new(), ty))
-            }
-            Resolved::Global(local) => {
-                if !self.check_global_assignment(local, span) {
-                    return None;
-                }
-                self.ctx.reads.push(local);
-                let GlobalType::Known(ty) = self.globals[&self.global_names[&local]].ty else { return None };
-                Some((ir::Place::Global(local), Vec::new(), ty?))
-            }
-            Resolved::Function(_) | Resolved::Standard(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(format!("`{name}` is a function, not a variable"))
-                        .with_primary(span, ""),
-                );
-                None
-            }
-            Resolved::Nothing => None,
-        }
     }
 }
 
@@ -513,9 +423,4 @@ pub(crate) fn widen(value: ir::Expr, ty: Type) -> ir::Expr {
     } else {
         value
     }
-}
-
-fn capitalize(text: &str) -> String {
-    let mut chars = text.chars();
-    chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
 }

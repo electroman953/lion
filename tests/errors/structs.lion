@@ -1,0 +1,32 @@
+// Mistakes in the use of structures (§12).
+struct Student:
+    name in Text
+    grade in Float, 0 <= grade <= 20
+;
+fun Student.passes() in Bool = self.grade >= 10
+fun Student.bump(var self):
+    self.grade += 1
+;
+let a = Student("Léa", 25)
+let b = Student("Léa")
+let c = Student(name: "Léa", note: 3)
+let d = Student(var a, 3)
+let s = Student("Tom", 12)
+s.grade = 3
+s.bump()
+show(s.grde)
+show(s.passes)
+show(s.nope())
+show(s.name())
+fun Student.reset():
+    self.grade = 0
+;
+show(Studnt("a", 1))
+let u = 3 as Student
+let v = Int(3)
+show(s < s)
+show(s == 3)
+let grade = 12.5
+let t = Student("Zoé", grade)
+let e = Student("Zoé", 12.5)
+show(e.grade + t.grade)

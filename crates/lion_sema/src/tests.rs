@@ -10,7 +10,7 @@ fn check_text(text: &str) -> Result<String, Vec<String>> {
     let mut map = SourceMap::new();
     let id = map.add("t.lion", text);
     let lexed = lex(id, text);
-    let parsed = parse(&lexed.tokens);
+    let parsed = parse(text, &lexed.tokens);
     assert!(lexed.diagnostics.is_empty() && parsed.diagnostics.is_empty(), "syntax error in {text:?}");
     let checked = check(&parsed.module);
     match checked.program {
@@ -278,4 +278,95 @@ fn errors_in_generic_functions() {
         ["the return type of `fact` must be written"]
     );
     assert!(check_text("fun fact(n) in Int = if n <= 1 then 1 else n * fact(n - 1)\nshow(fact(3))").is_ok());
+}
+
+const STUDENT: &str = "struct Student:\n    name in Text\n    grade in Float, 0 <= grade <= 20\n;\n";
+
+#[test]
+fn constructions_from_constants_are_checked_now() {
+    // D39: valid constants give a Student, with no check at run time.
+    assert_eq!(
+        body(&format!("{STUDENT}let s = Student(\"Léa\", 12)")),
+        "s#0 = (struct Student \"Léa\" (int_to_float 12))"
+    );
+    assert_eq!(errors(&format!("{STUDENT}let s = Student(\"Léa\", 25)")), ["this `Student` is invalid"]);
+    // Other values go through the constructor, which gives a `Student or Error`.
+    let ir = check_text(&format!("{STUDENT}let g = 12.0\nlet s = Student(\"Léa\", g)")).unwrap();
+    assert!(ir.contains("s#1 let Error or Student"), "{ir}");
+    assert!(ir.contains("s#1 = (call Student \"Léa\" g#0)"), "{ir}");
+    // Without conditions, a construction is always a plain value; defaults fill the end.
+    assert_eq!(
+        body("struct P:\n    x in Int = 0\n    y in Int = 0\n;\nlet p = P(3)"),
+        "p#0 = (struct P 3 0)"
+    );
+}
+
+#[test]
+fn construction_forms() {
+    let expected = "s#0 = (struct Student \"Léa\" (int_to_float 12))";
+    assert_eq!(body(&format!("{STUDENT}let s = Student(name: \"Léa\", grade: 12)")), expected);
+    assert_eq!(body(&format!("{STUDENT}let s = (\"Léa\", 12) as Student")), expected);
+    assert_eq!(body(&format!("{STUDENT}let s = (\"Léa\", 12) in Student")), expected);
+    assert_eq!(body(&format!("{STUDENT}let ok = ((\"Léa\", 25) in Student)")), "ok#0 = false");
+    assert_eq!(
+        errors(&format!("{STUDENT}let s = Student(grade: 12, name: \"Léa\")")),
+        [
+            "this value is named `grade`, but the field at this position is `name`",
+            "this value is named `name`, but the field at this position is `grade`"
+        ]
+    );
+    assert_eq!(
+        errors(&format!("{STUDENT}let s = Student(\"Léa\")")),
+        ["`Student` is built from 2 values, not 1"]
+    );
+}
+
+#[test]
+fn changes_of_fields_are_checked() {
+    let ir = body(&format!("{STUDENT}var s = Student(\"Léa\", 12)\ns.grade = 14"));
+    assert!(ir.contains("s#0.grade = (int_to_float 14)"), "{ir}");
+    assert!(ir.contains("(call Student.check s#0)"), "{ir}");
+    assert!(ir.contains("(broken \"Student\""), "{ir}");
+    assert_eq!(
+        errors(&format!("{STUDENT}let s = Student(\"Léa\", 12)\ns.grade = 14")),
+        ["cannot change the content of the constant `s`"]
+    );
+    // A structure without conditions is not checked.
+    assert_eq!(body("struct P:\n    x in Int\n;\nvar p = P(1)\np.x = 2"), "p#0 = (struct P 1)\np#0.x = 2");
+}
+
+#[test]
+fn methods() {
+    let text = format!(
+        "{STUDENT}fun Student.passes() in Bool = self.grade >= 10\nfun Student.bump(var self):\n    self.grade += 1\n;\nvar s = Student(\"Léa\", 12)\nshow(s.passes())\ns.bump()"
+    );
+    let ir = check_text(&text).unwrap();
+    assert!(ir.contains("fun Student.passes in Bool"), "{ir}");
+    assert!(ir.contains("(call Student.bump &s#0)"), "{ir}");
+    // A method without `var self` cannot change `self`; a constant cannot call one with it.
+    assert_eq!(
+        errors(&format!("{STUDENT}fun Student.reset():\n    self.grade = 0\n;")),
+        ["this method cannot change `self`"]
+    );
+    assert_eq!(
+        errors(&format!(
+            "{STUDENT}fun Student.bump(var self):\n    self.grade += 1\n;\nlet s = Student(\"a\", 1)\ns.bump()"
+        )),
+        ["cannot change the content of the constant `s`"]
+    );
+    assert_eq!(errors("fun Int.twice() = self * 2\nshow(\"a\".twice())"), ["A Text has no method `twice`"]);
+    assert_eq!(body("fun Int.twice() = self * 2\nshow(3.twice())"), "(show (call Int.twice 3))");
+}
+
+#[test]
+fn conditions_of_structures() {
+    assert_eq!(
+        errors("var limit = 3\nstruct A:\n    x in Int, x < limit\n;"),
+        ["a structure cannot read the variable `limit`"]
+    );
+    assert_eq!(errors("struct A:\n    x in Int, x + 1\n;"), ["a condition of a structure must be a Bool"]);
+    assert_eq!(
+        errors("fun f() in Int = 1\nstruct A:\n    x in Int = f()\n;"),
+        ["the default value of a field is a constant"]
+    );
 }

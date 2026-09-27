@@ -1,0 +1,25 @@
+// How structures are checked: constants are checked now (D39), other values by the
+// constructor of the structure, and each change by its validator (§12.3).
+struct Student:
+    name in Text
+    grade in Float, 0 <= grade <= 20
+;
+struct Point:
+    x in Int = 0
+    y in Int = 0
+;
+fun Student.passes() in Bool = self.grade >= 10
+fun Student.add_bonus(var self, n in Float):
+    self.grade += n
+;
+let lea = Student("Léa", 14)
+let origin = Point()
+let g = 12.5
+let tom = Student("Tom", g)
+var class = [lea]
+class[1].grade = 11
+class[1].add_bonus(2)
+var p = Point(1)
+p.y = 3
+show(lea.passes())
+show(("Zoé", g) in Student)

@@ -38,7 +38,7 @@ impl IntOp {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BugKind {
     /// The exact result does not fit in a 64-bit Int (§8.1). `rhs` is `None` for negation.
     IntOverflow { op: IntOp, lhs: i64, rhs: Option<i64> },
@@ -56,6 +56,9 @@ pub enum BugKind {
     SliceOutOfRange { start: i64, end: i64, size: usize },
     /// `l.first` or `l.last` of an empty list (D38).
     EmptyList,
+    /// A value of a structure no longer satisfies its invariants after a change (§12.3,
+    /// D40). `detail` names the condition and the values of its fields.
+    BrokenInvariant { structure: String, detail: String },
 }
 
 /// The number of calls that may be in progress at once, the same in both modes (C13).
@@ -73,12 +76,16 @@ impl BugKind {
             BugKind::IndexOutOfRange { .. } => "index out of range".to_string(),
             BugKind::SliceOutOfRange { .. } => "extract out of range".to_string(),
             BugKind::EmptyList => "the list is empty".to_string(),
+            BugKind::BrokenInvariant { structure, .. } => {
+                format!("this change breaks an invariant of {structure}")
+            }
         }
     }
 
     /// The values involved (spec §18.4: a bug shows the values in question).
     pub fn details(&self) -> String {
         match *self {
+            BugKind::BrokenInvariant { ref detail, .. } => detail.clone(),
             BugKind::IntOverflow { op, lhs, rhs: Some(rhs) } => {
                 format!("{lhs} {} {rhs} exceeds the capacity of an Int (64 bits)", op.symbol())
             }
@@ -111,7 +118,7 @@ impl BugKind {
 
     /// A suggestion to fix the program (spec §18.4, D18).
     pub fn help(&self) -> String {
-        match *self {
+        match self {
             BugKind::IntOverflow { op, .. } => {
                 format!("use a Float, or check the value before the {}", op.noun())
             }
@@ -131,6 +138,9 @@ impl BugKind {
                 "check the index against `size` first; the last element is at `size`, or `last`".to_string()
             }
             BugKind::EmptyList => "check that `size > 0` first".to_string(),
+            BugKind::BrokenInvariant { .. } => {
+                "a value must satisfy its conditions after each change, and when the outermost `var self` method on it returns: check the values before changing them (§12.3)".to_string()
+            }
         }
     }
 }

@@ -1,6 +1,6 @@
 fun square(x) = x * x
 for i in 1..3: show(i) ;
-struct Student:
+trait Shape:
 ;
 Color = {red, green, blue}
 let l = [1, 2, 3]
