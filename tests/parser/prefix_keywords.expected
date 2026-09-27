@@ -1,0 +1,9 @@
+exit: 0
+----- stdout
+(var score (shared (call Counter)))
+(var total (shared synced (call Counter count: (+ 1 2))))
+(var other (shared synced (call Counter)))
+(let same_object (same score total))
+(let t (task (call load "notes.csv")))
+(let g (wait t))
+----- stderr

@@ -27,6 +27,8 @@ pub(crate) struct Capture {
     pub(crate) ty: Type,
     /// Named after `modifies`: the function shares the variable (§11.5).
     pub(crate) by_reference: bool,
+    /// The variable names a shared object, and so does the captured one (§17.2).
+    pub(crate) sharing: Option<crate::sharing::Sharing>,
     pub(crate) span: Span,
 }
 
@@ -66,7 +68,7 @@ impl Checker<'_> {
 
     /// Registers and checks a function declared inside a body, and gives the value that
     /// holds it with the variables it captures.
-    fn closure(
+    pub(crate) fn closure(
         &mut self,
         decl: &ast::FunDecl,
         span: Span,
@@ -187,7 +189,10 @@ impl Checker<'_> {
             if by_reference {
                 self.ctx.locals[outer.index()].boxed = true;
             }
-            captures.push(Capture { name, ty, by_reference, span });
+            // A copy of a `var shared` is a frozen copy, which is not shared (§17.2).
+            let info = &self.ctx.locals[outer.index()];
+            let sharing = info.shared.filter(|_| by_reference || !info.mutable);
+            captures.push(Capture { name, ty, by_reference, sharing, span });
         }
         valid.then_some(captures)
     }
@@ -285,15 +290,30 @@ impl Checker<'_> {
         &mut self,
         method: usize,
         object: ir::Expr,
+        object_ast: &ast::Expr,
         name: &ast::Ident,
         span: Span,
     ) -> Option<ir::Expr> {
         if self.functions[method].var_self {
+            // `score.increment`, `score` a `var shared`: the function changes that object.
+            let sharing = self.sharing_of_expr(object_ast);
+            if let Some((_, true)) = sharing {
+                return self.detached_shared_method(method, object_ast, name, span);
+            }
+            let note = match sharing {
+                Some(_) => "a `let shared` object never changes (§17.2)",
+                None => {
+                    "a detached method reads a copy of its object; only a `var shared` object is changed through it (§12.6)"
+                }
+            };
             self.diagnostics.push(
-                Diagnostic::error(format!("`{}` changes its object: it cannot be detached from it", name.name))
-                    .with_primary(span, "")
-                    .with_note("a detached method reads a copy of its object; only a `shared` object could be changed through it (§12.6)")
-                    .with_help(format!("call it: `.{}(...)`", name.name)),
+                Diagnostic::error(format!(
+                    "`{}` changes its object: it cannot be detached from it",
+                    name.name
+                ))
+                .with_primary(span, "")
+                .with_note(note)
+                .with_help(format!("call it: `.{}(...)`", name.name)),
             );
             return None;
         }
@@ -476,6 +496,7 @@ fn names_in_expr(expr: &ast::Expr, names: &mut Vec<(String, Span)>) {
         Paren(inner) | Try(inner) | Parallel(inner) | Task(inner) | Wait(inner) => {
             names_in_expr(inner, names)
         }
+        Shared { value, .. } => names_in_expr(value, names),
         List(elements) | Set(elements) => elements.iter().for_each(|element| names_in_expr(element, names)),
         Tuple(elements) => elements.iter().for_each(|element| names_in_expr(&element.value, names)),
         Unary { operand, .. } => names_in_expr(operand, names),

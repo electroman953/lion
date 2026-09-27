@@ -1,0 +1,17 @@
+// A variable shared with a nested function goes to a `var` parameter (§11.2, §11.5).
+struct Counter:
+    count in Int = 0
+    ;
+fun Counter.increment(var self): self.count += 1 ;
+fun reset(var c in Counter): c.count = 0 ;
+
+fun run() in Int:
+    var c = Counter(count: 5)
+    fun step() modifies c: c.increment() ;
+    step()
+    step()
+    reset(c)
+    step()
+    return c.count
+;
+show(run())

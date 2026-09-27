@@ -1,0 +1,18 @@
+exit: 0
+----- stdout
+Counter(count: 1)
+1
+2
+4
+14
+true
+false
+false
+true
+114
+2
+[1, 4, 9, 16]
+10
+7
+1
+----- stderr

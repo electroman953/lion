@@ -427,6 +427,7 @@ impl<'a> Checker<'a> {
             loop_variable: false,
             captured: false,
             boxed: false,
+            shared: None,
         });
         self.ctx.flow.set(id, Assigned::Yes);
         id
@@ -825,6 +826,7 @@ fn names_in(expr: &ast::Expr, names: &mut Vec<String>) {
             }
         }
         Paren(inner) | Try(inner) | Parallel(inner) | Task(inner) | Wait(inner) => names_in(inner, names),
+        Shared { value, .. } => names_in(value, names),
         Fun(_) => {}
         List(elements) | Set(elements) => elements.iter().for_each(|element| names_in(element, names)),
         Tuple(elements) => elements.iter().for_each(|element| names_in(&element.value, names)),

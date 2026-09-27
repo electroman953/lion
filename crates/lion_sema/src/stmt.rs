@@ -6,6 +6,7 @@ use lion_syntax::ast;
 
 use crate::flow::{Assigned, Flow};
 use crate::names::Resolved;
+use crate::parallel::Variable;
 use crate::{Checker, ContextKind, GlobalType, LoopExits, Scope, article, typed};
 
 impl Checker<'_> {
@@ -31,8 +32,8 @@ impl Checker<'_> {
             ast::StmtKind::Let(decl) => self.let_stmt(decl),
             ast::StmtKind::Assign { target, op, value, .. } => self.assign(target, *op, value, stmt.span),
             ast::StmtKind::Expr(expr) => match &expr.kind {
-                // `l.add(value)` changes the list in place.
-                ast::ExprKind::Call { callee, args } if matches!(&callee.kind, ast::ExprKind::Field { name, .. } if name.name == "add") =>
+                // `l.add(value)` changes the list in place; a type may have its own `add`.
+                ast::ExprKind::Call { callee, args } if matches!(&callee.kind, ast::ExprKind::Field { name, object } if name.name == "add" && !self.has_own_add(object)) =>
                 {
                     let ast::ExprKind::Field { object, .. } = &callee.kind else { unreachable!() };
                     self.add_stmt(object, args, expr.span)
@@ -112,8 +113,8 @@ impl Checker<'_> {
         }
     }
 
-    /// `let x = value in T` and its variants (§6.1, §6.2).
-    fn let_stmt(&mut self, decl: &ast::LetStmt) -> Option<ir::Stmt> {
+    /// `let x = value in T` and its variants (§6.1, §6.2), without `shared`.
+    pub(crate) fn plain_let(&mut self, decl: &ast::LetStmt) -> Option<ir::Stmt> {
         let annotation = decl.annotation.as_ref().map(|ty| (self.resolve_type(ty), ty.span));
         // `let s = ("Léa", 12) in Student` builds a Student, as `Student("Léa", 12)` (§6.2, §12.2).
         if let (Some((Some(Type::Struct(structure)), _)), Some(value)) = (annotation, &decl.value)
@@ -212,7 +213,7 @@ impl Checker<'_> {
                     return None;
                 }
                 let assignable = self.check_assignable(local, target.span)
-                    && !self.changes_outside_parallel(Some(local), name, target.span);
+                    && !self.changes_outside_parallel(Variable::Local(local), name, target.span);
                 // Even a refused assignment gives the variable a value, to report it only once.
                 self.ctx.locals[local.index()].first_assignment.get_or_insert(target.span);
                 self.ctx.flow.set(local, Assigned::Yes);
@@ -224,7 +225,7 @@ impl Checker<'_> {
             }
             Resolved::Global(local) => {
                 if !self.check_global_assignment(local, target.span)
-                    || self.changes_outside_parallel(None, name, target.span)
+                    || self.changes_outside_parallel(Variable::Global(local), name, target.span)
                 {
                     return None;
                 }

@@ -123,7 +123,7 @@ impl Checker<'_> {
                     return None;
                 }
                 let in_method = name == "self" && info.by_reference;
-                if self.changes_outside_parallel(Some(local), name, span) {
+                if self.changes_outside_parallel(crate::parallel::Variable::Local(local), name, span) {
                     return None;
                 }
                 let ty = self.local_type(local)?;
@@ -132,7 +132,7 @@ impl Checker<'_> {
             }
             Resolved::Global(local) => {
                 if !self.check_global_assignment(local, span)
-                    || self.changes_outside_parallel(None, name, span)
+                    || self.changes_outside_parallel(crate::parallel::Variable::Global(local), name, span)
                 {
                     return None;
                 }

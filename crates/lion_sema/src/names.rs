@@ -4,6 +4,7 @@
 use lion_diagnostics::{Diagnostic, Span};
 use lion_ir as ir;
 
+use crate::parallel::Variable;
 use crate::{Checker, ContextKind, GlobalType};
 
 /// Standard functions available without `use` (spec §23).
@@ -33,6 +34,7 @@ impl Checker<'_> {
     /// standard library. Declarations may hide standard functions (C2).
     pub(crate) fn resolve(&mut self, name: &str, span: Span) -> Resolved {
         if let Some(local) = self.lookup(name) {
+            self.check_shared_in_parallel(Variable::Local(local), name, span);
             return Resolved::Local(local);
         }
         if let Some(&index) = self.ctx.scopes.iter().rev().find_map(|scope| scope.functions.get(name)) {
@@ -50,7 +52,10 @@ impl Checker<'_> {
         }
         if self.ctx.kind != ContextKind::Script && self.tables.globals.contains_key(name) {
             return match self.global(name, span) {
-                Some(local) => Resolved::Global(local),
+                Some(local) => {
+                    self.check_shared_in_parallel(Variable::Global(local), name, span);
+                    Resolved::Global(local)
+                }
                 None => Resolved::Nothing,
             };
         }

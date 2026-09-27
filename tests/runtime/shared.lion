@@ -1,0 +1,69 @@
+// Explicit sharing (§17.2): the names of one shared object, `same`, detached methods,
+// and a `shared synced` object changed in parallel (§19.3).
+struct Counter:
+    count in Int = 0
+    ;
+fun Counter.increment(var self): self.count += 1 ;
+fun Counter.add(var self, n in Int): self.count += n ;
+
+var score = shared Counter()
+score.increment()
+show(score)
+
+let frozen = score          // a frozen copy, which is not shared
+score.increment()
+show(frozen.count)
+show(score.count)
+
+// A detached method of a `var shared` changes the object (§12.6).
+let inc = score.increment
+inc()
+inc()
+show(score.count)
+let add = score.add
+add(10)
+show(score.count)
+
+// A `let` of a `let shared` names the same object.
+let config = shared Counter(count: 7)
+let alias = config
+show(alias same config)
+show(score same config)
+var other = shared Counter()
+show(other same score)
+show(score same score)
+
+// A `var` parameter designates the same object.
+fun bump(var c in Counter): c.add(100) ;
+bump(score)
+show(score.count)
+
+fun twice():
+    var local = shared Counter()
+    let f = local.increment
+    f()
+    f()
+    return local.count
+;
+show(twice())
+
+var total = shared synced Counter()
+fun work(n in Int) in Int modifies total:
+    total.add(n)
+    return n * n
+;
+let squares = parallel [work(n), n in 1..4]
+show(squares)
+show(total.count)
+
+// A task may change a `shared synced` object; one that does not touch a shared object
+// needs nothing (§19.3, 27.3).
+var log = shared synced Counter()
+fun record(n in Int) in Int modifies log:
+    log.increment()
+    return n
+;
+let job = task record(5)
+let quiet = task twice()
+show((wait job) + (wait quiet))
+show(log.count)

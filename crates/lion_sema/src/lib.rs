@@ -23,6 +23,7 @@ mod names;
 mod narrowing;
 mod parallel;
 mod places;
+mod sharing;
 mod standard;
 mod stmt;
 mod structs;
@@ -72,6 +73,7 @@ pub fn check_program(files: &[Source]) -> Checked {
     checker.check_remaining_functions();
     checker.check_script_calls();
     checker.check_parallel_regions();
+    checker.check_synced();
     checker.finish()
 }
 
@@ -95,6 +97,8 @@ struct LocalInfo {
     captured: bool,
     /// A variable that a nested function modifies: it lives in a cell (§11.5).
     boxed: bool,
+    /// A name of an object made with `shared` (§17.2).
+    shared: Option<crate::sharing::Sharing>,
 }
 
 impl LocalInfo {
@@ -111,6 +115,7 @@ impl LocalInfo {
             loop_variable: false,
             captured: false,
             boxed: false,
+            shared: None,
         }
     }
 }
@@ -249,6 +254,14 @@ struct Checker<'a> {
     tests: Vec<(String, usize)>,
     /// For each statement of the script, whether it declares a global with a value.
     declarations: Vec<bool>,
+    /// The globals that name a shared object (§17.2).
+    global_sharing: HashMap<ir::LocalId, crate::sharing::Sharing>,
+    /// The `shared synced` objects, and those that a task or a parallel part uses
+    /// (§19.3, D53).
+    synced: Vec<(crate::sharing::Sharing, String)>,
+    synced_used: std::collections::HashSet<Span>,
+    /// The uses of a shared object in a parallel part that are already reported.
+    shared_reported: std::collections::HashSet<Span>,
 }
 
 impl<'a> Checker<'a> {
@@ -286,6 +299,10 @@ impl<'a> Checker<'a> {
             parallel_regions: Vec::new(),
             tests: Vec::new(),
             declarations: Vec::new(),
+            global_sharing: HashMap::new(),
+            synced: Vec::new(),
+            synced_used: std::collections::HashSet::new(),
+            shared_reported: std::collections::HashSet::new(),
         };
         checker.register_program();
         checker
@@ -372,6 +389,7 @@ impl<'a> Checker<'a> {
             loop_variable: false,
             captured: false,
             boxed: false,
+            shared: None,
         });
         self.ctx.flow.set(id, Assigned::Yes);
         id

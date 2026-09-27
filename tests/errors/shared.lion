@@ -1,0 +1,24 @@
+struct Counter:
+    count in Int = 0
+    ;
+fun Counter.increment(var self): self.count += 1 ;
+
+let config = shared Counter()
+var copy = config
+config.increment()
+let x = 3
+show(x same config)
+show([shared Counter()])
+let lonely = shared synced Counter()
+var score = shared Counter()
+fun work(n in Int) in Int modifies score:
+    score.increment()
+    return n
+;
+let r = parallel [work(n), n in 1..3]
+let s = parallel [n + score.count, n in 1..3]
+let inc = config.increment
+let job = task work(1)
+let flag = shared synced 0
+let other_flag = flag
+show(other_flag same flag)

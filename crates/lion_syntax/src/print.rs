@@ -272,6 +272,8 @@ pub fn print_expr(expr: &Expr) -> String {
             out + ")"
         }
         ExprKind::Parallel(inner) => format!("(parallel {})", print_expr(inner)),
+        ExprKind::Shared { value, synced: false } => format!("(shared {})", print_expr(value)),
+        ExprKind::Shared { value, synced: true } => format!("(shared synced {})", print_expr(value)),
         ExprKind::Fun(decl) => print_fun(decl),
         ExprKind::Task(value) => format!("(task {})", print_expr(value)),
         ExprKind::Wait(value) => format!("(wait {})", print_expr(value)),

@@ -83,6 +83,7 @@ impl Checker<'_> {
             ast::ExprKind::Set(elements) => self.collection(Collection::Set, elements, span),
             ast::ExprKind::Tuple(elements) => self.tuple(elements, span),
             ast::ExprKind::Parallel(inner) => self.parallel_expr(inner, span),
+            ast::ExprKind::Shared { value, .. } => self.misplaced_shared(value, span),
             ast::ExprKind::Fun(decl) => self.anonymous_function(decl, span, None),
             ast::ExprKind::Task(value) => {
                 // What runs as a task changes nothing outside it (§19.3).
@@ -272,8 +273,7 @@ impl Checker<'_> {
     ) -> Option<ir::Expr> {
         use ast::BinaryOp::*;
         if op == Same {
-            self.not_implemented(op_span, "`same`", "§9.4, §17.2");
-            return None;
+            return self.same(lhs, rhs, span);
         }
         if matches!(op, And | Or) {
             // The right side is checked where the left side has decided nothing yet:
@@ -1109,7 +1109,9 @@ impl Checker<'_> {
         let ast::ExprKind::Name(name) = &callee.kind else {
             return match callee.kind {
                 ast::ExprKind::TypeName(ref name) => self.type_call(name, callee.span, args, span),
-                ast::ExprKind::Field { ref name, .. } if name.name == "add" => {
+                ast::ExprKind::Field { ref name, ref object }
+                    if name.name == "add" && !self.has_own_add(object) =>
+                {
                     self.diagnostics.push(
                         Diagnostic::error("`add` is called on its own line: `l.add(value)`")
                             .with_primary(span, "")

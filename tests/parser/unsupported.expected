@@ -16,12 +16,12 @@ error: not implemented yet: calling C code
    |
    = this part of Lion (spec §21.2) is not supported by this version of the implementation
 
-error: not implemented yet: shared values
-  --> tests/parser/unsupported.lion:7:13
+error: not implemented yet: `compile`
+  --> tests/parser/unsupported.lion:7:12
    |
- 7 | let score = shared Counter()
-   |             ^^^^^^
+ 7 | let fast = compile f(1)
+   |            ^^^^^^^
    |
-   = this part of Lion (spec §17.2) is not supported by this version of the implementation
+   = this part of Lion (spec §21.1) is not supported by this version of the implementation
 
 2 errors found

@@ -318,6 +318,12 @@ pub enum ExprKind {
     Tuple(Vec<Element>),
     /// `parallel [f(x), x in l]`: a comprehension computed in parallel (§19.2).
     Parallel(Box<Expr>),
+    /// `shared Counter()`, `shared synced Counter()`: an object that several holders
+    /// share (§17.2, §19.3).
+    Shared {
+        value: Box<Expr>,
+        synced: bool,
+    },
     /// `fun(x in Int) = x * 2`: an anonymous function (§11.1); its name is `fun`.
     Fun(Box<FunDecl>),
     /// `task f(x)`: the expression runs as a task (§19.1).

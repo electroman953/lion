@@ -1,0 +1,7 @@
+// `shared` and `synced` cover the whole expression to their right (§9.1, D49).
+var score = shared Counter()
+var total = shared synced Counter(count: 1 + 2)
+var other = synced shared Counter()
+let same_object = score same total
+let t = task load("notes.csv")
+let g = wait t

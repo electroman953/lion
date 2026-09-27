@@ -100,6 +100,12 @@ impl Checker<'_> {
         self.diagnostics.push(error);
     }
 
+    /// Whether `object` is a variable, or a part of one, whose type has a method `add`:
+    /// then `object.add(...)` calls it, rather than adding to a List.
+    pub(crate) fn has_own_add(&self, object: &ast::Expr) -> bool {
+        self.place_type(object).is_some_and(|ty| self.visible_method(ty, "add").is_some())
+    }
+
     /// The method `name` of the type `ty` that the module being checked sees: one of
     /// its own, or of a module it uses (§20.3).
     pub(crate) fn visible_method(&self, ty: Type, name: &str) -> Option<usize> {

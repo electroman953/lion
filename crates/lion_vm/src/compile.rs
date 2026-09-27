@@ -507,6 +507,20 @@ impl Compiler<'_> {
             }
             ExprKind::Global(global) => self.emit(Instr::LoadGlobal { dst, global: global.0 }, span),
             ExprKind::Call { function, args } => {
+                // A variable in a cell goes to a `var` parameter through a copy, stored
+                // back after the call (C50). The copy lies below the frame of the call.
+                let copies: Vec<Option<Reg>> = args
+                    .iter()
+                    .map(|arg| match arg {
+                        ir::Arg::Reference(ir::Place::Local(local))
+                            if self.boxed(*local) && !self.by_reference(*local) =>
+                        {
+                            Some(self.temp())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let mut write_backs = Vec::new();
                 // The arguments go to consecutive registers, evaluated left to right (§9.2).
                 let start = self.next_temp;
                 for _ in args {
@@ -519,6 +533,12 @@ impl Compiler<'_> {
                         ir::Arg::Reference(ir::Place::Local(local)) if self.by_reference(*local) => {
                             self.emit(Instr::Move { dst: at, src: register(*local) }, span);
                         }
+                        ir::Arg::Reference(ir::Place::Local(local)) if self.boxed(*local) => {
+                            let copy = copies[offset].expect("allocated above");
+                            self.emit(Instr::LoadCell { dst: copy, cell: register(*local) }, span);
+                            self.emit(Instr::RefLocal { dst: at, src: copy }, span);
+                            write_backs.push((copy, register(*local)));
+                        }
                         ir::Arg::Reference(ir::Place::Local(local)) => {
                             self.emit(Instr::RefLocal { dst: at, src: register(*local) }, span);
                         }
@@ -529,6 +549,9 @@ impl Compiler<'_> {
                 }
                 let count = args.len() as u32;
                 self.emit(Instr::Call { function: function.0, dst, args: start, count }, span);
+                for (copy, cell) in write_backs {
+                    self.emit(Instr::StoreCell { cell, src: copy }, None);
+                }
             }
             ExprKind::Let { local, value, body } => {
                 self.expr_into(value, register(*local));

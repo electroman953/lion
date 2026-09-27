@@ -24,7 +24,7 @@ error: `increment` changes its object: it cannot be detached from it
  16 | let inc = c.increment
     |           ^^^^^^^^^^^
     |
-    = a detached method reads a copy of its object; only a `shared` object could be changed through it (§12.6)
+    = a detached method reads a copy of its object; only a `var shared` object is changed through it (§12.6)
     = help: call it: `.increment(...)`
 
 3 errors found

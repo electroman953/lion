@@ -1127,9 +1127,11 @@ impl<'t> Parser<'t> {
             if *keyword == Keyword::Fun {
                 return self.anonymous_function();
             }
+            if matches!(keyword, Keyword::Shared | Keyword::Synced) {
+                return self.shared();
+            }
             let unsupported = match keyword {
                 Keyword::Compile => Some(("`compile`", "§21.1")),
-                Keyword::Shared | Keyword::Synced => Some(("shared values", "§17.2")),
                 _ => None,
             };
             if let Some((what, section)) = unsupported {
@@ -1137,6 +1139,25 @@ impl<'t> Parser<'t> {
             }
         }
         self.or_expr()
+    }
+
+    /// `shared value` or `shared synced value` (§17.2, §19.3); `synced shared` is the
+    /// same. `synced` alone protects nothing that is not shared.
+    fn shared(&mut self) -> PResult<Expr> {
+        let first = self.span();
+        let mut shared = self.eat_keyword(Keyword::Shared);
+        let synced = self.eat_keyword(Keyword::Synced);
+        shared |= self.eat_keyword(Keyword::Shared);
+        let span = first.to(self.previous_span());
+        if !shared {
+            return Err(self.error(
+                Diagnostic::error("`synced` is written after `shared`: `shared synced ...`")
+                    .with_primary(span, "")
+                    .with_note("a lock protects an object that several tasks share (§19.3)"),
+            ));
+        }
+        let value = self.expr()?;
+        Ok(Expr { span: span.to(value.span), kind: ExprKind::Shared { value: Box::new(value), synced } })
     }
 
     /// `if c then a elif d then b else e`, which covers the whole expression to its

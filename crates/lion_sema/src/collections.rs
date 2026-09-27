@@ -396,10 +396,11 @@ impl Checker<'_> {
     /// `l.size`, `l.first`, `l.last`, `t.size`, `r.size` (§16.2, D38), and the fields of
     /// structures (§12.1).
     pub(crate) fn property(&mut self, object: &ast::Expr, name: &ast::Ident, span: Span) -> Option<ir::Expr> {
+        let object_ast = object;
         let object = self.expr(object)?;
         let object = self.within_try(object);
         if let Some(method) = self.visible_method(object.ty, &name.name) {
-            return self.detached_method(method, object, name, span);
+            return self.detached_method(method, object, object_ast, name, span);
         }
         if object.ty.members().iter().any(|member| matches!(member, Type::Struct(_))) {
             let (field, ty) = self.field_of(object.ty, name, object.span)?;

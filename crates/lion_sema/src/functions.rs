@@ -846,6 +846,7 @@ impl<'a> Checker<'a> {
                     loop_variable: false,
                     captured: false,
                     boxed: false,
+                    shared: None,
                 });
                 self.ctx.flow.set(id, Assigned::Yes);
                 id
@@ -867,6 +868,7 @@ impl<'a> Checker<'a> {
                 loop_variable: false,
                 captured: true,
                 boxed: capture.by_reference,
+                shared: capture.sharing,
             });
             self.ctx.flow.set(id, Assigned::Yes);
             let scope = self.ctx.scopes.first_mut().expect("the outermost block");
@@ -1333,7 +1335,7 @@ impl<'a> Checker<'a> {
             Resolved::Local(local) => {
                 // An argument of a `var` parameter must have a value (C8).
                 if !self.check_has_value(local, span)
-                    || self.changes_outside_parallel(Some(local), name, span)
+                    || self.changes_outside_parallel(crate::parallel::Variable::Local(local), name, span)
                 {
                     return None;
                 }
@@ -1345,7 +1347,7 @@ impl<'a> Checker<'a> {
             Resolved::Global(local) => {
                 // Giving a global to a `var` parameter changes it (C7).
                 if !self.check_global_assignment(local, span)
-                    || self.changes_outside_parallel(None, name, span)
+                    || self.changes_outside_parallel(crate::parallel::Variable::Global(local), name, span)
                 {
                     return None;
                 }
@@ -1481,6 +1483,27 @@ impl<'a> Checker<'a> {
 
     /// A global that `instance` modifies, directly or through the instances it calls,
     /// and the instance that modifies it directly (§11.5).
+    /// The globals that `instance` reads or modifies, directly or through its calls, each
+    /// with the instance that uses it.
+    pub(crate) fn globals_used_by(&self, instance: usize) -> Vec<(ir::LocalId, usize)> {
+        let mut seen = HashSet::new();
+        let mut queue = vec![instance];
+        let mut used = Vec::new();
+        while let Some(current) = queue.pop() {
+            if !seen.insert(current) {
+                continue;
+            }
+            let checked = &self.instances[current];
+            used.extend(checked.reads.iter().map(|&global| (global, current)));
+            if checked.synthetic.is_none() {
+                let modifies = &self.functions[checked.function].modifies;
+                used.extend(modifies.iter().map(|&global| (global, current)));
+            }
+            queue.extend(checked.calls.iter().copied());
+        }
+        used
+    }
+
     pub(crate) fn modified_global_of(&self, instance: usize) -> Option<(ir::LocalId, Option<usize>)> {
         let mut seen = HashSet::new();
         let mut queue = vec![instance];
@@ -1489,8 +1512,12 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let checked = &self.instances[current];
+            // A `shared synced` object may change in parallel, a lock protecting it (§19.3).
+            let synced =
+                |global: &ir::LocalId| self.global_sharing.get(global).is_some_and(|sharing| sharing.synced);
             if checked.synthetic.is_none()
-                && let Some(&global) = self.functions[checked.function].modifies.first()
+                && let Some(&global) =
+                    self.functions[checked.function].modifies.iter().find(|global| !synced(global))
             {
                 return Some((global, Some(current)));
             }

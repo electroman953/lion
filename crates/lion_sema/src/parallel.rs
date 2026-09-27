@@ -22,7 +22,23 @@ pub(crate) struct Parallel {
     first_local: usize,
     /// Where `ctx.calls` stood when the part started.
     first_call: usize,
-    span: Span,
+    pub(crate) span: Span,
+}
+
+impl Parallel {
+    /// Whether the local was declared before the part.
+    pub(crate) fn is_outside(&self, local: ir::LocalId) -> bool {
+        local.index() < self.first_local
+    }
+}
+
+/// A variable, as a name resolves to it.
+#[derive(Clone, Copy)]
+pub(crate) enum Variable {
+    /// Of the function being checked, or of the script.
+    Local(ir::LocalId),
+    /// A global seen from a function.
+    Global(ir::LocalId),
 }
 
 /// A checked parallel part: the functions it calls, checked once all are known.
@@ -65,16 +81,17 @@ impl Checker<'_> {
 
     /// Whether assigning `local` from here changes a variable outside the parallel part;
     /// reports it.
-    pub(crate) fn changes_outside_parallel(
-        &mut self,
-        local: Option<ir::LocalId>,
-        name: &str,
-        span: Span,
-    ) -> bool {
+    pub(crate) fn changes_outside_parallel(&mut self, variable: Variable, name: &str, span: Span) -> bool {
         let Some(region) = self.ctx.parallel else { return false };
         // A global seen from a function is always outside.
-        if local.is_some_and(|local| local.index() >= region.first_local) {
+        if let Variable::Local(local) = variable
+            && !region.is_outside(local)
+        {
             return false;
+        }
+        // A lock protects each access to a `shared synced` object (§19.3).
+        if let Some(sharing) = self.sharing_of(variable) {
+            return !sharing.synced;
         }
         self.diagnostics.push(
             Diagnostic::error(format!("a parallel part cannot change `{name}`, which is declared outside it"))
@@ -87,7 +104,7 @@ impl Checker<'_> {
     }
 
     /// The functions called in parallel must not modify globals, directly or through the
-    /// functions they call (§19.3).
+    /// functions they call, nor use a shared object that is not `synced` (§19.3).
     pub(crate) fn check_parallel_regions(&mut self) {
         let regions = std::mem::take(&mut self.parallel_regions);
         if regions.is_empty() {
@@ -96,6 +113,7 @@ impl Checker<'_> {
         for region in regions {
             let mut reported = HashSet::new();
             for &instance in &region.calls {
+                self.check_shared_uses(instance, region.span, &mut reported);
                 let Some((global, through)) = self.modified_global_of(instance) else { continue };
                 let name = self.instance_display_name(instance);
                 if !reported.insert((name.clone(), global)) {
@@ -119,6 +137,44 @@ impl Checker<'_> {
                     )),
                 );
             }
+        }
+    }
+
+    /// The shared objects that `instance` uses, directly or through its calls: refused
+    /// unless `synced` (§19.3).
+    fn check_shared_uses(
+        &mut self,
+        instance: usize,
+        span: Span,
+        reported: &mut HashSet<(String, ir::LocalId)>,
+    ) {
+        for (global, current) in self.globals_used_by(instance) {
+            let Some(sharing) = self.global_sharing.get(&global).copied() else { continue };
+            if sharing.synced {
+                self.synced_used.insert(sharing.origin);
+                continue;
+            }
+            let name = self.instance_display_name(instance);
+            if !reported.insert((name.clone(), global)) {
+                continue;
+            }
+            let global_name = self.global_names[&global].clone();
+            let via = if current == instance {
+                String::new()
+            } else {
+                format!(" (through `{}`)", self.instance_display_name(current))
+            };
+            self.diagnostics.push(
+                Diagnostic::error(format!(
+                    "`{name}` uses `{global_name}`{via}, which is shared, so it cannot run in parallel"
+                ))
+                .with_primary(span, "")
+                .with_secondary(sharing.origin, "shared here")
+                .with_note("two tasks could use the object at the same time (§19.3)")
+                .with_help(format!(
+                    "declare `{global_name}` as `shared synced`: a lock then protects each access"
+                )),
+            );
         }
     }
 }

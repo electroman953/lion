@@ -4,7 +4,7 @@ unsafe:
 ;
 let twice = fun(x) = x * 2
 let l = [1, 2, 3]
-let score = shared Counter()
+let fast = compile f(1)
 let t = ("Léa", 12)
 let w = try f()
 let ok = 1
