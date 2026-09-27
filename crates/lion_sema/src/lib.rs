@@ -229,6 +229,9 @@ struct Checker<'a> {
     traits: Vec<crate::traits::TraitInfo<'a>>,
     /// `Comparable`: the types that have an order (§15.2, C67).
     comparable: ir::TraitRef,
+    /// `Error`: the simple error of `error(...)`, and every type with a method
+    /// `message() in Text` (§18.2, D17).
+    error_trait: ir::TraitRef,
     /// The type variables in scope, and what they stand for: themselves in a signature,
     /// the types of an instance in its body (§15.2).
     type_vars: Vec<(String, Type)>,
@@ -274,6 +277,7 @@ impl<'a> Checker<'a> {
             structs: Vec::new(),
             traits: Vec::new(),
             comparable: ir::TraitRef::new("Comparable"),
+            error_trait: ir::TraitRef::new("Error"),
             type_vars: Vec::new(),
             enums: Vec::new(),
             instances: Vec::new(),
@@ -466,6 +470,7 @@ fn article(ty: Type) -> String {
     match ty {
         Type::Int => "an Int".to_string(),
         Type::Error => "an Error".to_string(),
+        Type::Trait(set) if set.name() == "Error" => "an Error".to_string(),
         Type::None => "`none`".to_string(),
         Type::Union(_) => format!("a value of type `{ty}`"),
         Type::Tuple(_) => format!("a tuple {ty}"),

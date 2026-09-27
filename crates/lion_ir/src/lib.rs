@@ -448,6 +448,9 @@ pub enum Builtin {
     Ask,
     /// A failed `expect`: the test records the message and goes on (§24.1, D72).
     ExpectFailed,
+    /// Stops the script with the Error whose message is given, as a `try` of the script
+    /// does (§18.3, D80).
+    Fail,
     /// `exit(code)`: stops the program with this exit code (§20.1, D36).
     Exit,
     /// `reverse(l)`: a List or a Text in the opposite order (§23).
@@ -625,6 +628,7 @@ impl Builtin {
             Builtin::Broken => "broken",
             Builtin::Ask => "ask",
             Builtin::ExpectFailed => "expect_failed",
+            Builtin::Fail => "fail",
             Builtin::Exit => "exit",
             Builtin::Reverse => "reverse",
             Builtin::Floor => "floor",

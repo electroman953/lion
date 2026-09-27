@@ -1,0 +1,18 @@
+exit: 1
+----- stdout
+10
+error: the value is too big
+error: negative
+content of x
+no file at (empty)
+not found: (empty)
+content of a.txt
+----- stderr
+error: no file at (empty)
+   --> tests/runtime/custom_errors.lion:38:12
+    |
+ 38 | let stop = try open("")
+    |            ^^^^^^^^^^^^ this `try` met the error
+    |
+    = the script stops on an Error that it does not handle (§18.3)
+

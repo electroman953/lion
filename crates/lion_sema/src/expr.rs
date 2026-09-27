@@ -474,7 +474,7 @@ impl Checker<'_> {
         let value = self.expr(inner);
         self.ctx.in_try -= 1;
         let value = value?;
-        if !value.ty.members().contains(&Type::Error) {
+        if !self.may_be_error(value.ty) {
             self.diagnostics.push(
                 Diagnostic::error(format!(
                     "`try` needs a value that may be an Error; this is {}",
@@ -514,7 +514,7 @@ impl Checker<'_> {
             }
         };
         match self.declared_return(instance) {
-            Some(ret) if !ret.members().contains(&Type::Error) => {
+            Some(ret) if !self.may_be_error(ret) => {
                 self.diagnostics.push(
                     Diagnostic::error(format!(
                         "`try` cannot return an Error from a function that returns {}",
@@ -534,20 +534,55 @@ impl Checker<'_> {
 
     /// The value without its Error, which leaves the function or stops the script.
     fn unwrap_error(&mut self, value: ir::Expr, span: Span) -> Option<ir::Expr> {
-        let Some(rest) = value.ty.without(Type::Error) else {
+        let errors = Type::Trait(self.error_trait);
+        let Some(rest) = value.ty.without(errors) else {
             self.diagnostics
                 .push(Diagnostic::error("this value is always an Error").with_primary(value.span, ""));
             return None;
         };
+        let found = value.ty.intersection(errors).unwrap_or(Type::Error);
         if let ContextKind::Function(_) = self.ctx.kind {
-            self.ctx.returns.push((Some(Type::Error), span));
+            self.ctx.returns.push((Some(found), span));
+        }
+        // In the script, an Error of the program stops it with its message (§18.3, D80).
+        let own: Vec<Type> = found.members().into_iter().filter(|&ty| ty != Type::Error).collect();
+        if self.ctx.kind == ContextKind::Script && !own.is_empty() {
+            let own = Type::union(own);
+            let temp = self.temporary(value.ty, value.span);
+            let read = |ty: Type| typed(ir::ExprKind::Local(temp), ty, span);
+            let message = self.message_of(read(own), span)?;
+            let fail = typed(
+                ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Fail, args: vec![message] },
+                Type::None,
+                span,
+            );
+            let test =
+                typed(ir::ExprKind::TypeTest { value: Box::new(read(value.ty)), ty: own }, Type::Bool, span);
+            let rest_with_simple = value.ty.without(own).unwrap_or(rest);
+            let stmts = vec![
+                ir::Stmt::Assign { place: ir::Place::Local(temp), value },
+                ir::Stmt::If { cond: test, then: vec![ir::Stmt::Expr(fail)], otherwise: Vec::new() },
+            ];
+            let unwrapped = if rest_with_simple == rest {
+                read(rest)
+            } else {
+                typed(ir::ExprKind::Try(Box::new(read(rest_with_simple))), rest, span)
+            };
+            return Some(typed(ir::ExprKind::Block { stmts, value: Box::new(unwrapped) }, rest, span));
         }
         Some(typed(ir::ExprKind::Try(Box::new(value)), rest, span))
     }
 
+    /// Whether a value of this type may be an Error (§18.2).
+    pub(crate) fn may_be_error(&self, ty: Type) -> bool {
+        let errors = Type::Trait(self.error_trait).members();
+        ty.members().iter().any(|member| errors.contains(member))
+    }
+
     /// Inside `try`, every step that may give an Error is covered (§18.3, D35).
     pub(crate) fn within_try(&mut self, value: ir::Expr) -> ir::Expr {
-        if self.ctx.in_try == 0 || !value.ty.members().contains(&Type::Error) || value.ty == Type::Error {
+        let all_errors = value.ty.is_subset_of(Type::Trait(self.error_trait));
+        if self.ctx.in_try == 0 || !self.may_be_error(value.ty) || all_errors {
             return value;
         }
         let span = value.span;
@@ -1130,11 +1165,18 @@ impl Checker<'_> {
     fn message(&mut self, object: &ast::Expr, args: &[ast::Arg], span: Span) -> Option<ir::Expr> {
         let error = self.expr(object)?;
         let error = self.within_try(error);
-        if error.ty != Type::Error {
+        // A type of the program with its own `message` method: an ordinary call.
+        if error.ty != Type::Error
+            && let Some(method) = self.visible_method(error.ty, "message")
+        {
+            let receiver = crate::functions::Pending::Value(error);
+            return self.call_with(method, Some(receiver), Vec::new(), span, args, span);
+        }
+        if !error.ty.is_subset_of(Type::Trait(self.error_trait)) {
             let mut diagnostic = Diagnostic::error(format!("{} has no `message()`", article(error.ty)))
                 .with_primary(error.span, "")
                 .with_note("`message()` gives the text of an Error (§18.2)");
-            if error.ty.members().contains(&Type::Error) {
+            if self.may_be_error(error.ty) {
                 diagnostic =
                     diagnostic.with_help("test it first: `if x in Error: show(x.message()) ;` (§7.4)");
             }
@@ -1145,8 +1187,70 @@ impl Checker<'_> {
             self.diagnostics.push(Diagnostic::error("`message()` takes no argument").with_primary(span, ""));
             return None;
         }
-        let kind = ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Message, args: vec![error] };
-        Some(typed(kind, Type::Text, span))
+        self.message_of(error, span)
+    }
+
+    /// The text of a value that is an Error: the simple one gives its own, the others
+    /// their `message()` (§18.2).
+    pub(crate) fn message_of(&mut self, error: ir::Expr, span: Span) -> Option<ir::Expr> {
+        let members = error.ty.members();
+        if members == [Type::Error] {
+            let kind = ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Message, args: vec![error] };
+            return Some(typed(kind, Type::Text, span));
+        }
+        let temp = self.temporary(error.ty, error.span);
+        let mut result: Option<ir::Expr> = None;
+        for &member in members.iter().rev() {
+            let read = typed(ir::ExprKind::Local(temp), member, span);
+            let text = if member == Type::Error {
+                typed(
+                    ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Message, args: vec![read] },
+                    Type::Text,
+                    span,
+                )
+            } else {
+                let method = self.visible_method(member, "message")?;
+                let instance = match self.functions[method].instance {
+                    Some(instance) => instance,
+                    None => self.instantiate(method, vec![member], span)?,
+                };
+                self.ctx.calls.push(instance);
+                self.record_early_call(instance, span);
+                let call = ir::ExprKind::Call {
+                    function: ir::FunctionId(instance as u32),
+                    args: vec![ir::Arg::Value(read)],
+                };
+                typed(call, Type::Text, span)
+            };
+            result = Some(match result {
+                None => text,
+                Some(otherwise) => {
+                    let test = typed(
+                        ir::ExprKind::TypeTest {
+                            value: Box::new(typed(ir::ExprKind::Local(temp), error.ty, span)),
+                            ty: member,
+                        },
+                        Type::Bool,
+                        span,
+                    );
+                    typed(
+                        ir::ExprKind::If {
+                            cond: Box::new(test),
+                            then: Box::new(text),
+                            otherwise: Box::new(otherwise),
+                        },
+                        Type::Text,
+                        span,
+                    )
+                }
+            });
+        }
+        let body = result?;
+        Some(typed(
+            ir::ExprKind::Let { local: temp, value: Box::new(error), body: Box::new(body) },
+            Type::Text,
+            span,
+        ))
     }
 
     /// `show(value)`: any value can be shown (§23, D29).

@@ -814,18 +814,35 @@ impl<'a> Machine<'a> {
                     };
                     return Err(self.bug(kind, at));
                 }
-                Instr::Try { dst, src } => {
+                Instr::Try { dst, src, errors } => {
                     let value = self.stack[self.base + src as usize].clone();
-                    if let Value::Error(message) = &value {
+                    // An Error of the program: a structure or an enumeration of the set.
+                    let own = errors != u32::MAX && {
+                        let number = match &value {
+                            Value::Struct(record) => Some(record.layout.index),
+                            Value::Enum(enumeration, _) => Some(enumeration.index),
+                            _ => None,
+                        };
+                        number.is_some_and(|number| self.program.type_sets[errors as usize].contains(&number))
+                    };
+                    if matches!(value, Value::Error(_)) || own {
                         if self.frames.len() == 1 {
                             let span = self.chunk.spans[at];
-                            return Err(Box::new(Trap::Failure { message: message.to_string(), span }));
+                            let message = match &value {
+                                Value::Error(message) => message.to_string(),
+                                other => other.to_text(),
+                            };
+                            return Err(Box::new(Trap::Failure { message, span }));
                         }
                         pc = self.return_to_caller(value);
                         code = &self.chunk.code;
                     } else {
                         self.set(dst, value);
                     }
+                }
+                Instr::Fail { message } => {
+                    let message = self.text(message).to_string();
+                    return Err(Box::new(Trap::Failure { message, span: self.chunk.spans[at] }));
                 }
                 Instr::NewError { dst, a } => {
                     let message = self.text(a).to_string();

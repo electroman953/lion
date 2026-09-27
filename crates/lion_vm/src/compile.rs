@@ -649,7 +649,23 @@ impl Compiler<'_> {
             }
             ExprKind::Try(value) => {
                 let src = self.operand(value);
-                self.emit(Instr::Try { dst, src }, span);
+                // The errors of the program are structures or enumerations (§18.2).
+                let result = expr.ty.members();
+                let errors: Vec<u32> = self
+                    .named_types(value.ty)
+                    .into_iter()
+                    .zip(
+                        value
+                            .ty
+                            .members()
+                            .into_iter()
+                            .filter(|member| matches!(member, ir::Type::Struct(_) | ir::Type::Enum(_))),
+                    )
+                    .filter(|(_, member)| !result.contains(member))
+                    .map(|((_, number), _)| number)
+                    .collect();
+                let errors = if errors.is_empty() { u32::MAX } else { self.type_set(errors) };
+                self.emit(Instr::Try { dst, src, errors }, span);
             }
             ExprKind::Block { stmts, value } => {
                 self.block(stmts);
@@ -682,6 +698,7 @@ impl Compiler<'_> {
                 builtin:
                     builtin @ (Builtin::Ask
                     | Builtin::ExpectFailed
+                    | Builtin::Fail
                     | Builtin::Exit
                     | Builtin::Reverse
                     | Builtin::Floor
@@ -694,6 +711,7 @@ impl Compiler<'_> {
                 let instr = match builtin {
                     Builtin::Ask => Instr::Ask { dst, prompt: a },
                     Builtin::ExpectFailed => Instr::ExpectFailed { message: a },
+                    Builtin::Fail => Instr::Fail { message: a },
                     Builtin::Exit => Instr::Exit { code: a },
                     Builtin::Reverse => Instr::Reverse { dst, a },
                     Builtin::Floor => Instr::Floor { dst, a },
@@ -767,16 +785,20 @@ impl Compiler<'_> {
         if !needed(kinds::STRUCT) && !needed(kinds::ENUM) {
             return Instr::TypeTest { dst, src, kinds };
         }
-        let mut set: Vec<u32> = tested.iter().map(|(_, number)| *number).collect();
+        let set = self.type_set(tested.iter().map(|(_, number)| *number).collect());
+        Instr::TypeTestNamed { dst, src, kinds: kinds & !(kinds::STRUCT | kinds::ENUM), set }
+    }
+
+    /// The index of a set of type numbers in `Program::type_sets`.
+    fn type_set(&mut self, mut set: Vec<u32>) -> u32 {
         set.sort_unstable();
-        let set = match self.shared.type_sets.iter().position(|known| *known == set) {
-            Some(index) => index,
+        match self.shared.type_sets.iter().position(|known| *known == set) {
+            Some(index) => index as u32,
             None => {
                 self.shared.type_sets.push(set);
-                self.shared.type_sets.len() - 1
+                self.shared.type_sets.len() as u32 - 1
             }
-        };
-        Instr::TypeTestNamed { dst, src, kinds: kinds & !(kinds::STRUCT | kinds::ENUM), set: set as u32 }
+        }
     }
 
     /// The structures and enumerations among the members of `ty`: their kind and number.

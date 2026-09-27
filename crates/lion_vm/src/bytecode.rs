@@ -147,7 +147,7 @@ pub enum Instr {
     TypeTestNamed { dst: Reg, src: Reg, kinds: u16, set: u32 },
     /// The value in `src`, unless it is an Error: then the function returns it, or the
     /// script stops (§18.3).
-    Try { dst: Reg, src: Reg },
+    Try { dst: Reg, src: Reg, errors: u32 },
     NewError { dst: Reg, a: Reg },
     ErrorMessage { dst: Reg, a: Reg },
     TextToInt { dst: Reg, a: Reg },
@@ -169,6 +169,8 @@ pub enum Instr {
     Broken { name: Reg, detail: Reg },
 
     Show { src: Reg },
+    /// Stops the script with an Error whose message is the Text in `message` (§18.3).
+    Fail { message: Reg },
     /// A failed `expect`: the test records the Text in `message` (§24.1).
     ExpectFailed { message: Reg },
     /// Writes the Text in `prompt`, then reads a line into `dst` (§23).

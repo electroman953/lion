@@ -99,6 +99,10 @@ impl Checker<'_> {
         if name.name == "Comparable" {
             return Some(Type::Trait(self.comparable));
         }
+        // `Error` is a trait: its own errors, and the types with `message()` (§18.2).
+        if name.name == "Error" && args.is_empty() {
+            return Some(Type::Trait(self.error_trait));
+        }
         if name.name == "List" || name.name == "Set" || name.name == "Task" {
             let [element] = args else {
                 self.diagnostics.push(

@@ -141,6 +141,20 @@ impl<'a> Checker<'a> {
             })
             .collect();
         self.comparable.set_members(comparable);
+        // `Error`: the simple error, and the types with `message() in Text` (§18.2, D17).
+        let mut errors = vec![Type::Error];
+        errors.extend(candidates.iter().copied().filter(|&ty| {
+            ty != Type::Error
+                && self.methods.get(&(ty, "message".to_string())).is_some_and(|methods| {
+                    methods.iter().any(|&method| {
+                        let function = &self.functions[method];
+                        function.declared_ret == Some(Type::Text)
+                            && !function.var_self
+                            && function.signature.as_ref().is_some_and(|params| params.len() == 1)
+                    })
+                })
+        }));
+        self.error_trait.set_members(errors);
         // The defaults given to each type, to find two traits that give the same one.
         let mut given: HashMap<(Type, String), usize> = HashMap::new();
         // Two traits in conflict are reported once, whatever the number of types.

@@ -1,0 +1,39 @@
+// Errors of the program: every type with `message() in Text` is an Error (§18.2, C42).
+struct NotFound:
+    path in Text
+;
+fun NotFound.message() in Text = "no file at {self.path}"
+
+Problem = {too_big, too_small}
+fun Problem.message() in Text = match self:
+    too_big then "the value is too big"
+    too_small then "the value is too small"
+;
+
+fun check(n in Int) in Int or Error:
+    if n > 10: return Problem.too_big ;
+    if n < 0: return error("negative") ;
+    return n
+;
+fun open(path in Text) in Text or Error:
+    if path == "": return NotFound("(empty)") ;
+    return "content of {path}"
+;
+fun both(n in Int) in Int or Error:
+    let a = try check(n)
+    return a * 2
+;
+for n in [5, 20, -1]:
+    let r = both(n)
+    match r:
+        in Error e: show("error: {e.message()}") ;
+        in Int v: show(v) ;
+    ;
+;
+show(open("x"))
+let o = open("")
+if o in Error: show(o.message()) ;
+if o in NotFound: show("not found: {o.path}") ;
+show(try open("a.txt"))
+let stop = try open("")
+show("not reached")
