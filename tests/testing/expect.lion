@@ -1,0 +1,22 @@
+// Tests and `expect` (§24.1, D72): run only by `lion test`.
+fun add(a in Int, b in Int) in Int = a + b
+
+test "addition":
+    expect add(2, 3) == 5
+    expect add(-1, 1) == 0
+;
+
+test "wrong":
+    expect add(2, 3) == 6
+    expect add(1, 1) > 5
+    expect add(1, 1) == 2
+    let words = ["a"]
+    expect words.size == 2
+;
+
+test "bug":
+    let l = [1]
+    show(l[3])
+;
+
+show("the script itself is not run by lion test")

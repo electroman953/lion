@@ -44,6 +44,8 @@ pub(crate) struct FunctionInfo {
     expected: Option<ir::FunData>,
     /// The type variables, with the trait each must satisfy (`None` for `Type`) (§15.2).
     pub(crate) type_params: Vec<(ir::VarRef, Option<Type>, Span)>,
+    /// A `test` block, by name (§24.1).
+    pub(crate) test: Option<String>,
     /// `None` when the declaration has an error or needs what is not implemented.
     pub(crate) signature: Option<Vec<ParamInfo>>,
     /// The return type, when written.
@@ -136,6 +138,12 @@ pub(crate) struct ScriptCall {
     span: Span,
     /// The globals that may have no value at the call.
     unassigned: Vec<ir::LocalId>,
+}
+
+impl ScriptCall {
+    pub(crate) fn new(instance: usize, span: Span, unassigned: Vec<ir::LocalId>) -> ScriptCall {
+        ScriptCall { instance, span, unassigned }
+    }
 }
 
 /// An argument once checked, before the call is built.
@@ -253,6 +261,7 @@ impl<'a> Checker<'a> {
         }
         self.enter_module(0);
         self.conform_traits();
+        self.register_tests();
         for module in (1..count).rev() {
             self.check_module_init(module);
         }
@@ -321,6 +330,7 @@ impl<'a> Checker<'a> {
             closure: Some(ClosureInfo { captures }),
             expected,
             type_params: Vec::new(),
+            test: None,
             signature: None,
             declared_ret: None,
             modifies: Vec::new(),
@@ -350,6 +360,7 @@ impl<'a> Checker<'a> {
             closure: None,
             expected: None,
             type_params: Vec::new(),
+            test: None,
             signature: None,
             declared_ret: None,
             modifies: Vec::new(),
@@ -366,6 +377,12 @@ impl<'a> Checker<'a> {
         }
         self.enter_module(previous);
         index
+    }
+
+    /// The function of an instance, unless the checker made it.
+    pub(crate) fn instance_function(&self, instance: usize) -> Option<usize> {
+        let instance = &self.instances[instance];
+        instance.synthetic.is_none().then_some(instance.function)
     }
 
     /// The types of the parameters of an instance.
@@ -390,6 +407,7 @@ impl<'a> Checker<'a> {
             closure: None,
             expected: None,
             type_params: Vec::new(),
+            test: None,
             signature: None,
             declared_ret: None,
             modifies: Vec::new(),
@@ -1615,8 +1633,21 @@ impl<'a> Checker<'a> {
                 .filter(|global| reads[call.instance].contains(global))
                 .collect();
             unassigned.sort_by_key(|local| local.0);
+            let test = self
+                .instance_function(call.instance)
+                .and_then(|function| self.functions[function].test.clone());
             for global in unassigned {
                 let decl = self.global_info(global).decl;
+                if let Some(test) = &test {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!("the test \"{test}\" reads `{}`, a variable of the script", decl.name.name))
+                            .with_primary(call.span, "")
+                            .with_secondary(decl.name.span, "declared here")
+                            .with_note("before a test, `lion test` gives values only to the variables declared with one; the other statements of the script do not run (C68)")
+                            .with_help("give the variable its value where it is declared, or give the test its own variables"),
+                    );
+                    continue;
+                }
                 let function = &self.instance_name(call.instance);
                 self.diagnostics.push(
                     Diagnostic::error(format!(

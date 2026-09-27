@@ -60,6 +60,97 @@ pub fn run(path: &str) -> ExitCode {
     }
 }
 
+/// `lion test`: the tests of a file, or of every Lion file of a folder (§24.1).
+pub fn test(path: &str) -> ExitCode {
+    let files = if path.ends_with(".lion") {
+        vec![std::path::PathBuf::from(path)]
+    } else if Path::new(path).is_dir() {
+        let mut files = Vec::new();
+        collect_lion_files(Path::new(path), &mut files);
+        files
+    } else {
+        eprintln!("error: `{path}` is neither a Lion file nor a folder");
+        return ExitCode::from(exit::USAGE);
+    };
+    let (mut passed, mut failed, mut refused) = (0, 0, 0);
+    for file in &files {
+        let name = file.display().to_string();
+        let Some((mut sources, id)) = load(&name) else {
+            refused += 1;
+            continue;
+        };
+        let Some(program) = front_end(&mut sources, id) else {
+            refused += 1;
+            continue;
+        };
+        let chunk = lion_vm::compile(&program);
+        let hidden = |span: lion_diagnostics::Span| sources.get(span.source).name().starts_with("<std>/");
+        for (index, (test, _)) in chunk.tests.iter().enumerate() {
+            let mut out = BufWriter::new(io::stdout().lock());
+            let mut input = io::stdin().lock();
+            let mut report_alert = |alert: lion_vm::Alert| {
+                let _ = io::stdout().flush();
+                eprintln!("{}", render(&alert.located(&hidden).to_diagnostic(), &sources));
+            };
+            let result = lion_vm::run_test(&chunk, index, &mut out, &mut input, &mut report_alert);
+            let _ = out.flush();
+            drop(out);
+            let problems: Vec<Diagnostic> = match result {
+                Ok(failures) => failures
+                    .into_iter()
+                    .map(|failure| {
+                        let mut diagnostic = Diagnostic::error(failure.message);
+                        if let Some(span) = failure.span {
+                            diagnostic = diagnostic.with_primary(span, "");
+                        }
+                        diagnostic
+                    })
+                    .collect(),
+                Err(lion_vm::Trap::Exit(code)) => {
+                    vec![Diagnostic::error(format!("the test stopped the program with `exit({code})`"))]
+                }
+                Err(trap) => vec![trap.located(&hidden).to_diagnostic()],
+            };
+            if problems.is_empty() {
+                println!("test \"{test}\" in {name} ... ok");
+                passed += 1;
+            } else {
+                println!("test \"{test}\" in {name} ... FAILED");
+                for problem in &problems {
+                    eprintln!("{}", render(problem, &sources));
+                }
+                failed += 1;
+            }
+        }
+    }
+    let plural = |count: usize, word: &str| format!("{count} {word}{}", if count == 1 { "" } else { "s" });
+    let mut summary = format!("{}: {} passed, {} failed", plural(passed + failed, "test"), passed, failed);
+    if refused > 0 {
+        summary.push_str(&format!("; {} with errors", plural(refused, "file")));
+    }
+    println!("{summary}");
+    if failed + refused > 0 { ExitCode::from(exit::REFUSED) } else { ExitCode::SUCCESS }
+}
+
+/// The Lion files of a folder and of its subfolders, in order; hidden folders and the
+/// build folder `target` are skipped.
+fn collect_lion_files(folder: &Path, files: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(folder) else { return };
+    let mut paths: Vec<std::path::PathBuf> =
+        entries.filter_map(|entry| entry.ok().map(|entry| entry.path())).collect();
+    paths.sort();
+    for path in paths {
+        let name = path.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
+        if path.is_dir() {
+            if !name.starts_with('.') && name != "target" {
+                collect_lion_files(&path, files);
+            }
+        } else if name.ends_with(".lion") {
+            files.push(path);
+        }
+    }
+}
+
 pub fn debug(stage: &str, path: &str) -> ExitCode {
     if !matches!(stage, "tokens" | "ast" | "ir" | "bytecode") {
         eprintln!("error: unknown stage `{stage}`; the stages are tokens, ast, ir and bytecode");

@@ -419,7 +419,9 @@ fn names_in_stmts(stmts: &[ast::Stmt], names: &mut Vec<(String, Span)>) {
             | ast::StmtKind::Struct(_)
             | ast::StmtKind::TypeDef(_)
             | ast::StmtKind::Trait(_)
+            | ast::StmtKind::Test { .. }
             | ast::StmtKind::Use(_) => {}
+            ast::StmtKind::Expect(condition) => names_in_expr(&condition.expr, names),
         }
     }
 }

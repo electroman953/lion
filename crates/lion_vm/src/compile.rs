@@ -57,6 +57,28 @@ pub fn compile(program: &ir::Program) -> Program {
         .map(|(index, function)| compile_function(function, index == program.main.index(), &mut shared))
         .collect();
     let module_inits = program.module_inits.iter().map(|init| init.map(|function| function.0)).collect();
+    // Before a test, the declarations of the globals of the script run, and nothing else.
+    let main = program.function(program.main);
+    let declarations = (!program.tests.is_empty()).then(|| {
+        let body = main
+            .body
+            .iter()
+            .zip(&program.declarations)
+            .filter(|(_, declaration)| **declaration)
+            .map(|(stmt, _)| stmt.clone())
+            .collect();
+        let script = ir::Function {
+            name: "script declarations".to_string(),
+            params: 0,
+            captures: 0,
+            defaults: Vec::new(),
+            ret: main.ret,
+            locals: main.locals.clone(),
+            body,
+            span: None,
+        };
+        compile_function(&script, true, &mut shared)
+    });
     Program {
         functions,
         layouts,
@@ -64,6 +86,8 @@ pub fn compile(program: &ir::Program) -> Program {
         type_sets: shared.type_sets,
         main: program.main.index(),
         module_inits,
+        tests: program.tests.iter().map(|(name, function)| (name.clone(), function.0)).collect(),
+        declarations,
     }
 }
 
@@ -643,6 +667,7 @@ impl Compiler<'_> {
             ExprKind::CallBuiltin {
                 builtin:
                     builtin @ (Builtin::Ask
+                    | Builtin::ExpectFailed
                     | Builtin::Exit
                     | Builtin::Reverse
                     | Builtin::Floor
@@ -654,6 +679,7 @@ impl Compiler<'_> {
                 let a = self.operand(&args[0]);
                 let instr = match builtin {
                     Builtin::Ask => Instr::Ask { dst, prompt: a },
+                    Builtin::ExpectFailed => Instr::ExpectFailed { message: a },
                     Builtin::Exit => Instr::Exit { code: a },
                     Builtin::Reverse => Instr::Reverse { dst, a },
                     Builtin::Floor => Instr::Floor { dst, a },

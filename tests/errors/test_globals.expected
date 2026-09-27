@@ -1,0 +1,32 @@
+exit: 1
+----- stdout
+----- stderr
+error: the test "reads later" reads `later`, a variable of the script
+  --> tests/errors/test_globals.lion:5:1
+   |
+ 2 | var later in Int
+   |     ----- declared here
+  ...
+ 5 | test "reads later":
+   | ^^^^^^^^^^^^^^^^^^
+   |
+   = before a test, `lion test` gives values only to the variables declared with one; the other statements of the script do not run (C68)
+   = help: give the variable its value where it is declared, or give the test its own variables
+
+error: `expect` is written in a test
+  --> tests/errors/test_globals.lion:8:1
+   |
+ 8 | expect later == 5
+   | ^^^^^^^^^^^^^^^^^
+   |
+   = help: write it in `test "name": ... ;` (§24.1)
+
+error: two tests are named "twice"
+   --> tests/errors/test_globals.lion:11:1
+    |
+ 11 | test "twice":
+    | ^^^^^^^^^^^^
+    |
+    = help: give each test its own name
+
+3 errors found

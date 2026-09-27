@@ -76,6 +76,8 @@ pub fn print_stmt(stmt: &Stmt) -> String {
             }
             out + ")"
         }
+        StmtKind::Test { name, decl } => format!("(test {name:?} {})", print_fun(decl)),
+        StmtKind::Expect(condition) => format!("(expect {})", print_expr(&condition.expr)),
         StmtKind::Use(path) => {
             let names: Vec<&str> = path.iter().map(|name| name.name.as_str()).collect();
             format!("(use {})", names.join("."))

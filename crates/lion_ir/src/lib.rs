@@ -24,6 +24,11 @@ pub struct Program {
     /// For each file, the function that gives its globals their values, if it has some:
     /// it runs once, before the first use of the module (§20.2, D81).
     pub module_inits: Vec<Option<FunctionId>>,
+    /// The tests of the file that is run, by name, which `lion test` runs (§24.1).
+    pub tests: Vec<(String, FunctionId)>,
+    /// For each statement of the script: whether it declares a global with a value.
+    /// Before a test, only these run (C68).
+    pub declarations: Vec<bool>,
     /// The top-level statements of the file that is run (§20.1). The locals declared
     /// at its top level are the globals, which other functions reach with `Global`.
     pub main: FunctionId,
@@ -87,6 +92,7 @@ impl LocalId {
     }
 }
 
+#[derive(Clone)]
 pub struct Local {
     pub name: String,
     /// A variable that a nested function modifies (§11.5): it lives in a cell, which
@@ -435,6 +441,8 @@ pub enum Builtin {
     Broken,
     /// `ask(prompt)`: writes the prompt, reads a line (§23, D29).
     Ask,
+    /// A failed `expect`: the test records the message and goes on (§24.1, D72).
+    ExpectFailed,
     /// `exit(code)`: stops the program with this exit code (§20.1, D36).
     Exit,
     /// `reverse(l)`: a List or a Text in the opposite order (§23).
@@ -611,6 +619,7 @@ impl Builtin {
             Builtin::Message => "message",
             Builtin::Broken => "broken",
             Builtin::Ask => "ask",
+            Builtin::ExpectFailed => "expect_failed",
             Builtin::Exit => "exit",
             Builtin::Reverse => "reverse",
             Builtin::Floor => "floor",

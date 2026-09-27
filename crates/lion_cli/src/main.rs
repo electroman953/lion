@@ -11,10 +11,11 @@ const USAGE: &str = "\
 usage:
   lion run <file.lion>             check a program, then run it (interpreted mode)
   lion check <file.lion>           check a program without running it
+  lion test [file.lion | folder]   run the tests of a file, or of every file of a folder
   lion debug <stage> <file.lion>   show a stage of the compiler: tokens, ast, ir or bytecode
   lion --version
 
-not implemented yet: `lion build`, `lion test`, `lion fmt` and the interactive mode (`lion` alone)
+not implemented yet: `lion build`, `lion fmt` and the interactive mode (`lion` alone)
 ";
 
 fn main() -> ExitCode {
@@ -52,7 +53,9 @@ fn dispatch(args: &[String]) -> ExitCode {
         ["run", file] => driver::run(file),
         ["check", file] => driver::check(file),
         ["debug", stage, file] => driver::debug(stage, file),
-        [command @ ("build" | "test" | "fmt"), ..] => {
+        ["test"] => driver::test("."),
+        ["test", path] => driver::test(path),
+        [command @ ("build" | "fmt"), ..] => {
             eprintln!("error: `lion {command}` is not implemented yet\n\n{USAGE}");
             ExitCode::from(exit::USAGE)
         }

@@ -75,6 +75,8 @@ impl Builder {
             structs: Vec::new(),
             enums: Vec::new(),
             module_inits: vec![None],
+            tests: Vec::new(),
+            declarations: Vec::new(),
             main: ir::FunctionId(0),
         };
         let chunk = compile(&program);

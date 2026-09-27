@@ -160,19 +160,19 @@ fn errors_recover_at_the_next_line() {
 
 #[test]
 fn recovery_skips_the_blocks_of_a_failed_statement() {
-    let text = "test \"s\":\n    let inner = 1\n    if a: x = 1 ;\n;\nlet after = 2\n";
+    let text = "unsafe:\n    let inner = 1\n    if a: x = 1 ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
-    assert_eq!(errors, ["not implemented yet: tests"]);
+    assert_eq!(errors, ["not implemented yet: calling C code"]);
     assert_eq!(tree, "(let after 2)\n");
-    let text = "test \"s\":\n    if a:\n        b = 1\n    elif c:\n        d = 2\n    else:\n        e = 3\n    ;\n;\nlet after = 2\n";
+    let text = "unsafe:\n    if a:\n        b = 1\n    elif c:\n        d = 2\n    else:\n        e = 3\n    ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
-    assert_eq!(errors, ["not implemented yet: tests"]);
+    assert_eq!(errors, ["not implemented yet: calling C code"]);
     assert_eq!(tree, "(let after 2)\n");
 }
 
 #[test]
 fn unsupported_constructions_are_reported() {
-    let cases = [("test \"s\":\n;", "not implemented yet: tests")];
+    let cases = [("unsafe:\n;", "not implemented yet: calling C code")];
     for (text, message) in cases {
         assert_eq!(first_error(text), message, "for {text:?}");
     }
@@ -486,4 +486,12 @@ fn traits() {
         "(trait Shape (fun area () in Float required) (fun half () in Float = (/ (call (. self area)) 2)) (name : Text))"
     );
     assert_eq!(first_error("trait Shape: fun area() ;"), "the methods of a trait go on their own lines");
+}
+
+#[test]
+fn tests_and_expect() {
+    assert_eq!(
+        ast("test \"sum\":\n    expect 1 + 1 == 2\n;"),
+        "(test \"sum\" (fun test () [(expect (== (+ 1 1) 2))]))"
+    );
 }

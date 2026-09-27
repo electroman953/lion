@@ -1241,6 +1241,19 @@ fn to_float(expr: ir::Expr) -> ir::Expr {
 }
 
 impl Checker<'_> {
+    /// `lhs op rhs` on checked values, evaluated once each.
+    pub(crate) fn compare_values(
+        &mut self,
+        op: ast::CompareOp,
+        op_span: Span,
+        lhs: ir::Expr,
+        rhs: ir::Expr,
+        span: Span,
+    ) -> Option<ir::Expr> {
+        let comparison = self.comparison(op, op_span, &lhs, &rhs)?;
+        Some(compare_pair(comparison, lhs, rhs, span))
+    }
+
     /// `lhs == rhs`, for the value patterns of `match` (§10.3).
     pub(crate) fn equality_test(&mut self, lhs: ir::Expr, rhs: ir::Expr, span: Span) -> Option<ir::Expr> {
         let comparison = self.comparison(ast::CompareOp::Eq, span, &lhs, &rhs)?;

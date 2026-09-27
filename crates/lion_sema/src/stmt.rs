@@ -26,7 +26,7 @@ impl Checker<'_> {
         self.check_constants_assigned(&scope.declared);
     }
 
-    fn stmt(&mut self, stmt: &ast::Stmt) -> Option<ir::Stmt> {
+    pub(crate) fn stmt(&mut self, stmt: &ast::Stmt) -> Option<ir::Stmt> {
         match &stmt.kind {
             ast::StmtKind::Let(decl) => self.let_stmt(decl),
             ast::StmtKind::Assign { target, op, value, .. } => self.assign(target, *op, value, stmt.span),
@@ -66,6 +66,21 @@ impl Checker<'_> {
                 None
             }
             ast::StmtKind::Fun(decl) => self.local_function(decl, stmt.span),
+            // Tests are registered beforehand, from the top level only (§24.1).
+            ast::StmtKind::Test { .. }
+                if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 =>
+            {
+                None
+            }
+            ast::StmtKind::Test { decl, .. } => {
+                self.diagnostics.push(
+                    Diagnostic::error("a test is declared at the top level of a file")
+                        .with_primary(decl.name.span, "")
+                        .with_help("move it out of the block (§24.1)"),
+                );
+                None
+            }
+            ast::StmtKind::Expect(condition) => self.expect_stmt(condition, stmt.span),
             // `use` is resolved beforehand, from the top level only (§20.2).
             ast::StmtKind::Use(_) if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 => {
                 None

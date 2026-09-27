@@ -1,0 +1,10 @@
+// Before each test, the globals declared with a value get it; the other statements of
+// the script do not run (C68).
+let with_value = 3
+var later in Int
+later = 5
+show("not shown by lion test")
+
+test "declared with a value":
+    expect with_value == 3
+;

@@ -68,6 +68,14 @@ pub enum StmtKind {
     Use(Vec<Ident>),
     /// `trait Shape: required methods and fields ;` (§14).
     Trait(TraitDecl),
+    /// `test "name": ... ;`, run only by `lion test` (§24.1, D19). The declaration is
+    /// that of a function without parameters, named `test`.
+    Test {
+        name: String,
+        decl: Box<FunDecl>,
+    },
+    /// `expect condition`, in a test (§24.1, D72); with the text of the condition.
+    Expect(Condition),
 }
 
 /// A trait: the methods and the fields that a type needs to satisfy it (§14).

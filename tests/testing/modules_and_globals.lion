@@ -1,0 +1,12 @@
+// A test reads the globals of modules, which get their values at the first use (D81),
+// not those of the script, whose statements do not run (C68).
+use math
+use shapes_for_tests.area
+
+
+test "modules":
+    expect math.max(2, 5) == 5
+    expect area.square(3.0) == 9.0
+    expect area.unit == 1.0
+;
+

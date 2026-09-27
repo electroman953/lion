@@ -31,12 +31,13 @@ L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 2
 - **Modules** (§20) : `use geometry`, `use shapes.circle`, noms qualifiés (`geometry.area(...)`, `geometry.Point`), `private`, globales initialisées au premier usage, modules qui s'utilisent mutuellement.
 - **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles) et `csv`.
 - **Parallélisme de données** (§19.2) : `parallel [...]`, `parallel {...}`, `parallel for`, avec les règles de sûreté du §19.3 vérifiées à la compilation. L'exécution reste séquentielle pour l'instant (mêmes résultats).
+- **Tests intégrés** (§24.1) : `test "nom": ... ;`, `expect a == b` qui montre « expected 6, got 5 », commande `lion test`.
 - **Bibliothèque standard, noyau** (§23) : `show`, `ask`, `exit`, `error`, `sum`, `reverse`, `floor`, `ceil`, `round`, `isqrt`.
 - **Vérifications à la compilation** : types, noms inconnus (avec suggestions), constantes réaffectées, lecture d'une variable qui peut ne pas avoir de valeur sur un des chemins (§6.1), `;` oublié localisé grâce à l'indentation (§5.3).
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, exposant négatif, conversion Float → Int impossible, récursion sans fin (plus de 100 000 appels imbriqués). Chacun est signalé avec l'emplacement, les appels en cours, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 
-**Pas encore implémenté** : structures et traits génériques (`Pair of (A, B)`), fonctions anonymes génériques, méthodes détachées, égalité définie par `equals`, lecture des éléments d'un n-uplet, `Domain` et `Map`, valeurs `shared`, appel de code C, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, formateur, tests intégrés, mode interactif.
+**Pas encore implémenté** : structures et traits génériques (`Pair of (A, B)`), fonctions anonymes génériques, méthodes détachées, égalité définie par `equals`, lecture des éléments d'un n-uplet, `Domain` et `Map`, valeurs `shared`, appel de code C, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, formateur, mode interactif.
 
 ## Construire et utiliser
 
@@ -59,6 +60,7 @@ show(z)          // 30
 | --- | --- |
 | `lion run f.lion` | vérifie puis exécute en mode interprété, avec les alertes |
 | `lion check f.lion` | vérifie sans exécuter |
+| `lion test [f.lion \| dossier]` | lance les blocs `test "nom": ... ;` et leurs `expect` |
 | `lion debug tokens\|ast\|ir\|bytecode f.lion` | montre une étape du compilateur |
 
 Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 ligne de commande incorrecte, 70 erreur interne.
@@ -81,6 +83,7 @@ cargo test --workspace
 | `tests/errors` | `lion check` (erreurs de compilation) |
 | `tests/integration` | `lion run` (programmes complets) |
 | `tests/programs` | `lion run`, depuis leur dossier (les programmes du §27 de la spec) |
+| `tests/testing` | `lion test` (tests intégrés et `expect`) |
 
 Après un changement voulu de sortie, régénérer avec `LION_BLESS=1 cargo test --test golden`, puis relire le diff.
 

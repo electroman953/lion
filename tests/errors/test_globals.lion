@@ -1,0 +1,12 @@
+// A test cannot read a global that only a statement of the script gives a value (C68).
+var later in Int
+later = 5
+
+test "reads later":
+    expect later == 5
+;
+expect later == 5
+test "twice":
+;
+test "twice":
+;

@@ -94,6 +94,13 @@ impl<'t> Parser<'t> {
             TokenKind::Keyword(Keyword::Let | Keyword::Var) => self.let_statement(),
             TokenKind::Keyword(Keyword::If) => self.if_statement(),
             TokenKind::Keyword(Keyword::While) => self.while_statement(),
+            TokenKind::Keyword(Keyword::Test) => self.test_statement(),
+            TokenKind::Keyword(Keyword::Expect) => {
+                let start = self.bump().span;
+                let condition = self.condition()?;
+                let span = start.to(condition.expr.span);
+                Ok(Stmt { kind: StmtKind::Expect(condition), span })
+            }
             TokenKind::Keyword(Keyword::For) => self.for_statement(),
             TokenKind::Keyword(Keyword::Parallel)
                 if self.kind_at(self.pos + 1) == &TokenKind::Keyword(Keyword::For) =>
@@ -137,7 +144,6 @@ impl<'t> Parser<'t> {
     fn unsupported_statement(&self) -> Option<(&'static str, &'static str)> {
         let TokenKind::Keyword(keyword) = self.peek() else { return None };
         Some(match keyword {
-            Keyword::Test | Keyword::Expect => ("tests", "§24.1"),
             Keyword::Unsafe => ("calling C code", "§21.2"),
             _ => return None,
         })
@@ -272,6 +278,40 @@ impl<'t> Parser<'t> {
     }
 
     /// `while c: ... ;` (§10.2).
+    /// `test "name": ... ;` (§24.1).
+    fn test_statement(&mut self) -> PResult<Stmt> {
+        let index = self.pos;
+        let start = self.bump().span;
+        let name_span = self.span();
+        let TokenKind::TextStart = self.peek() else {
+            return Err(self.expected("the name of the test, between quotes"));
+        };
+        let text = self.text()?;
+        let ExprKind::Text(parts) = &text.kind else { unreachable!("a text") };
+        let [TextPart::Literal(name)] = parts.as_slice() else {
+            let error = Diagnostic::error("the name of a test is a text without interpolation")
+                .with_primary(name_span.to(text.span), "");
+            return Err(self.error(error));
+        };
+        let name = name.clone();
+        let opener = Opener { keyword: "test", index, branch: index };
+        let body = self.block(opener)?;
+        let end = self.close_block(opener)?;
+        let decl = FunDecl {
+            private: None,
+            foreign: None,
+            infix: false,
+            receiver: None,
+            name: Ident { name: "test".to_string(), span: start.to(text.span) },
+            params: Vec::new(),
+            ret: None,
+            type_params: Vec::new(),
+            modifies: Vec::new(),
+            body: FunBody::Block(body),
+        };
+        Ok(Stmt { kind: StmtKind::Test { name, decl: Box::new(decl) }, span: start.to(end) })
+    }
+
     fn while_statement(&mut self) -> PResult<Stmt> {
         let index = self.pos;
         let start = self.bump().span;

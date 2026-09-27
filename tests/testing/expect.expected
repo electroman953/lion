@@ -1,0 +1,34 @@
+exit: 1
+----- stdout
+test "addition" in tests/testing/expect.lion ... ok
+test "wrong" in tests/testing/expect.lion ... FAILED
+test "bug" in tests/testing/expect.lion ... FAILED
+3 tests: 1 passed, 2 failed
+----- stderr
+error: expected 6, got 5
+   --> tests/testing/expect.lion:10:5
+    |
+ 10 |     expect add(2, 3) == 6
+    |     ^^^^^^^^^^^^^^^^^^^^^
+
+error: expected add(1, 1) > 5: 2 > 5 is false
+   --> tests/testing/expect.lion:11:5
+    |
+ 11 |     expect add(1, 1) > 5
+    |     ^^^^^^^^^^^^^^^^^^^^
+
+error: expected 2, got 1
+   --> tests/testing/expect.lion:14:5
+    |
+ 14 |     expect words.size == 2
+    |     ^^^^^^^^^^^^^^^^^^^^^^
+
+bug: index out of range
+   --> tests/testing/expect.lion:19:10
+    |
+ 19 |     show(l[3])
+    |          ^^^^
+    |
+    = index 3 is outside 1..1; indices start at 1 (§16.2)
+    = help: check the index against `size` first; the last element is at `size`, or `last`
+

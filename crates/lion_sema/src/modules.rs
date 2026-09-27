@@ -194,6 +194,7 @@ impl<'a> Checker<'a> {
                 | ast::StmtKind::Struct(_)
                 | ast::StmtKind::TypeDef(_)
                 | ast::StmtKind::Trait(_)
+                | ast::StmtKind::Test { .. }
                 | ast::StmtKind::Use(_) => {
                     continue;
                 }

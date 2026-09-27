@@ -19,6 +19,7 @@ const SUITES: &[(&str, &[&str])] = &[
     ("integration", &["run"]),
     // The programs of the spec (§27), run from their folder, where they find their files.
     ("programs", &["run"]),
+    ("testing", &["test"]),
 ];
 
 #[test]

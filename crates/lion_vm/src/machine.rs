@@ -143,20 +143,41 @@ pub fn run(
     input: &mut dyn BufRead,
     on_alert: &mut dyn FnMut(Alert),
 ) -> Result<(), Trap> {
-    let main = &program.functions[program.main];
-    let mut machine = Machine {
-        program,
-        chunk: main,
-        base: 0,
-        stack: vec![Value::None; main.registers as usize],
-        frames: vec![Frame { function: program.main as u32, base: 0, resume: 0, dst: 0, args: 0, call: 0 }],
-        out,
-        input,
-        on_alert,
-        alerted: HashSet::new(),
-        initialized: vec![false; program.module_inits.len()],
-    };
+    let mut machine = Machine::new(program, out, input, on_alert);
     machine.run().map_err(|fault| *fault)
+}
+
+/// A failed `expect` of a test: where, and why (§24.1, D72).
+#[derive(Debug)]
+pub struct Failure {
+    pub span: Option<Span>,
+    pub message: String,
+}
+
+/// Runs the test `index` of `program.tests`, without the statements of the script: the
+/// failed `expect`s, or the trap that stopped it (§24.1).
+pub fn run_test(
+    program: &Program,
+    index: usize,
+    out: &mut dyn Write,
+    input: &mut dyn BufRead,
+    on_alert: &mut dyn FnMut(Alert),
+) -> Result<Vec<Failure>, Trap> {
+    let mut machine = Machine::new(program, out, input, on_alert);
+    // The declarations of the globals of the script run first, in its frame (C68).
+    if let Some(declarations) = &program.declarations {
+        machine.chunk = declarations;
+        machine.run().map_err(|fault| *fault)?;
+        machine.chunk = &program.functions[program.main];
+    }
+    // The test runs above the frame of the script, which then stops at its `Halt`.
+    let halt = machine.chunk.code.len() - 1;
+    let registers = machine.chunk.registers;
+    let function = program.tests[index].1 as usize;
+    // The `Halt` has no place in the source: the trace of a bug starts in the test.
+    machine.call(function, 0, registers, 0, halt, halt).map_err(|fault| *fault)?;
+    machine.run().map_err(|fault| *fault)?;
+    Ok(machine.failures)
 }
 
 /// A trap, boxed so that the results of the operations stay small on the path where
@@ -194,9 +215,40 @@ struct Machine<'a> {
     alerted: HashSet<(usize, usize)>,
     /// For each file, whether its globals have their values, or are getting them (D81).
     initialized: Vec<bool>,
+    /// The failed `expect`s of the test that runs (§24.1).
+    failures: Vec<Failure>,
 }
 
-impl Machine<'_> {
+impl<'a> Machine<'a> {
+    fn new(
+        program: &'a Program,
+        out: &'a mut dyn Write,
+        input: &'a mut dyn BufRead,
+        on_alert: &'a mut dyn FnMut(Alert),
+    ) -> Machine<'a> {
+        let main = &program.functions[program.main];
+        Machine {
+            program,
+            chunk: main,
+            base: 0,
+            stack: vec![Value::None; main.registers as usize],
+            frames: vec![Frame {
+                function: program.main as u32,
+                base: 0,
+                resume: 0,
+                dst: 0,
+                args: 0,
+                call: 0,
+            }],
+            out,
+            input,
+            on_alert,
+            alerted: HashSet::new(),
+            initialized: vec![false; program.module_inits.len()],
+            failures: Vec::new(),
+        }
+    }
+
     fn run(&mut self) -> Result<(), Fault> {
         let mut pc = 0;
         // The code of the running function, reloaded when a call enters or leaves one.
@@ -325,6 +377,10 @@ impl Machine<'_> {
                 Instr::Show { src } => {
                     let text = self.stack[self.base + src as usize].to_text();
                     writeln!(self.out, "{text}").map_err(|error| Box::new(Trap::Io(error)))?;
+                }
+                Instr::ExpectFailed { message } => {
+                    let message = self.text(message).to_string();
+                    self.failures.push(Failure { span: self.chunk.spans[at], message });
                 }
                 Instr::Ask { dst, prompt } => {
                     let line = self.ask(prompt).map_err(|error| Box::new(Trap::Io(error)))?;

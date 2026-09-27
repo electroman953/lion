@@ -1,0 +1,6 @@
+let unit = 1.0
+fun square(side in Float) in Float = side * side * unit
+
+test "a test of the module":
+    expect square(2.0) == 4.0
+;

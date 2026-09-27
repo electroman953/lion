@@ -169,6 +169,8 @@ pub enum Instr {
     Broken { name: Reg, detail: Reg },
 
     Show { src: Reg },
+    /// A failed `expect`: the test records the Text in `message` (§24.1).
+    ExpectFailed { message: Reg },
     /// Writes the Text in `prompt`, then reads a line into `dst` (§23).
     Ask { dst: Reg, prompt: Reg },
     /// Stops the program with the exit code in `code` (§20.1).
@@ -248,6 +250,10 @@ pub struct Program {
     pub main: usize,
     /// For each file, the function that gives its globals their values.
     pub module_inits: Vec<Option<u32>>,
+    /// The tests of the file, by name (§24.1).
+    pub tests: Vec<(String, u32)>,
+    /// The declarations of the globals of the script, which run before each test (C68).
+    pub declarations: Option<Chunk>,
 }
 
 /// What a value of a structure needs to be shown and compared (§12).

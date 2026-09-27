@@ -26,6 +26,7 @@ mod places;
 mod standard;
 mod stmt;
 mod structs;
+mod testing;
 mod traits;
 mod types;
 
@@ -57,7 +58,15 @@ pub fn check(module: &ast::Module) -> Checked {
 pub fn check_program(files: &[Source]) -> Checked {
     let module = files[0].module;
     let mut checker = Checker::new(files);
-    let body = checker.stmts(&module.stmts);
+    // The declarations of globals with a value also run before each test (C68).
+    let mut body = Vec::new();
+    for stmt in &module.stmts {
+        let declaration = matches!(&stmt.kind, ast::StmtKind::Let(decl) if decl.value.is_some());
+        if let Some(checked) = checker.stmt(stmt) {
+            body.push(checked);
+            checker.declarations.push(declaration);
+        }
+    }
     checker.close_scope();
     checker.ctx.body = body;
     checker.check_remaining_functions();
@@ -233,6 +242,10 @@ struct Checker<'a> {
     demands: Vec<Span>,
     /// The parts that run in parallel, checked once every function is known (§19.3).
     parallel_regions: Vec<crate::parallel::ParallelRegion>,
+    /// The tests of the file that is run, with their instances (§24.1).
+    tests: Vec<(String, usize)>,
+    /// For each statement of the script, whether it declares a global with a value.
+    declarations: Vec<bool>,
 }
 
 impl<'a> Checker<'a> {
@@ -267,6 +280,8 @@ impl<'a> Checker<'a> {
             script_calls: Vec::new(),
             demands: Vec::new(),
             parallel_regions: Vec::new(),
+            tests: Vec::new(),
+            declarations: Vec::new(),
         };
         checker.register_program();
         checker
@@ -385,6 +400,7 @@ impl<'a> Checker<'a> {
         if diagnostics.iter().any(Diagnostic::is_fatal) {
             return Checked { program: None, diagnostics };
         }
+        let tests = self.test_list();
         let script = std::mem::replace(&mut self.ctx, Context::new(ContextKind::Script));
         let main = ir::Function {
             name: "script".to_string(),
@@ -417,7 +433,11 @@ impl<'a> Checker<'a> {
         let enums = self.enums;
         let module_inits =
             self.modules.iter().map(|module| module.init.map(|init| ir::FunctionId(init as u32))).collect();
-        Checked { program: Some(ir::Program { functions, structs, enums, module_inits, main }), diagnostics }
+        let declarations = self.declarations;
+        Checked {
+            program: Some(ir::Program { functions, structs, enums, module_inits, tests, declarations, main }),
+            diagnostics,
+        }
     }
 }
 
