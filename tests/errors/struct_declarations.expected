@@ -137,14 +137,6 @@ error: `C` already has a field `v`
     |
     = help: give the method another name
 
-error: not implemented yet: operators defined by methods
-   --> tests/errors/struct_declarations.lion:36:7
-    |
- 36 | fun C.plus(other in C) = 1
-    |       ^^^^
-    |
-    = this part of Lion (spec §9.5) is not supported by this version of the implementation
-
 error: the method `C.i` is already declared
    --> tests/errors/struct_declarations.lion:38:7
     |
@@ -161,4 +153,4 @@ error: `Text` already has `size`
     |
     = help: give the method another name
 
-20 errors found
+19 errors found

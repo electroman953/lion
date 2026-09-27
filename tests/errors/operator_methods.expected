@@ -1,0 +1,59 @@
+exit: 1
+----- stdout
+----- stderr
+error: not implemented yet: equality defined by a method
+  --> tests/errors/operator_methods.lion:7:9
+   |
+ 7 | fun Box.equals(other in Box) in Bool = true
+   |         ^^^^^^
+   |
+   = this part of Lion (spec §9.5, §12.5) is not supported by this version of the implementation
+
+error: an `infix` method takes one value
+  --> tests/errors/operator_methods.lion:8:15
+   |
+ 8 | infix fun Box.fits(a in Box, b in Box) in Bool = true
+   |               ^^^^
+   |
+   = it is written between its two operands: `u dot v` (§9.5)
+
+error: an `infix` function takes two values
+  --> tests/errors/operator_methods.lion:9:11
+   |
+ 9 | infix fun both(a in Int) = a
+   |           ^^^^
+   |
+   = it is written between its two operands: `u dot v` (§9.5)
+
+error: the method `Box.plus` does not take (Box)
+   --> tests/errors/operator_methods.lion:11:6
+    |
+  5 | fun Box.plus(other in Int) in Box = Box(self.size + other)
+    |         ---- declared here
+   ...
+ 11 | show(b + b)
+    |      ^^^^^
+    |
+    = the operator is written with this method (§9.5)
+
+error: the method `Box.less` must give a Bool
+   --> tests/errors/operator_methods.lion:12:8
+    |
+  6 | fun Box.less(other in Box) in Int = 1
+    |         ---- it gives an Int
+   ...
+ 12 | show(b < b)
+    |        ^
+
+error: `-` cannot be applied to Box and Box
+   --> tests/errors/operator_methods.lion:13:8
+    |
+ 13 | show(b - b)
+    |      - this is a Box
+    |        ^
+    |          - this is a Box
+    |
+    = `-` is defined for Int and Float values
+    = help: a structure gives `-` a meaning with a method: `fun Box.subtract(other in Box) in ...` (§9.5)
+
+6 errors found

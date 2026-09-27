@@ -1,0 +1,13 @@
+// Mistakes with operators given by methods (§9.5).
+struct Box:
+    size in Int
+;
+fun Box.plus(other in Int) in Box = Box(self.size + other)
+fun Box.less(other in Box) in Int = 1
+fun Box.equals(other in Box) in Bool = true
+infix fun Box.fits(a in Box, b in Box) in Bool = true
+infix fun both(a in Int) = a
+let b = Box(1)
+show(b + b)
+show(b < b)
+show(b - b)

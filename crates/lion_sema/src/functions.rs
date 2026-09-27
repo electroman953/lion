@@ -423,10 +423,9 @@ impl<'a> Checker<'a> {
             );
             return false;
         }
-        const OPERATORS: &[&str] =
-            &["plus", "subtract", "negate", "times", "divide", "power", "equals", "less"];
-        if OPERATORS.contains(&name.as_str()) {
-            self.not_implemented(decl.name.span, "operators defined by methods", "§9.5");
+        // `equals` would also give the equality of Sets and of lists (§12.5).
+        if name == "equals" {
+            self.not_implemented(decl.name.span, "equality defined by a method", "§9.5, §12.5");
             return false;
         }
         true
@@ -457,8 +456,20 @@ impl<'a> Checker<'a> {
     pub(crate) fn resolve_signature(&mut self, index: usize) {
         let decl = self.functions[index].decl.clone();
         let mut supported = true;
-        if decl.infix {
-            self.not_implemented(decl.name.span, "`infix` functions", "§9.5");
+        // `a name b` gives two values: `a` and `b`, or `self` and `b` for a method (§9.5, D3).
+        let explicit = decl.params.iter().filter(|param| param.name.name != "self").count();
+        let expected = if decl.receiver.is_some() { 1 } else { 2 };
+        if decl.infix && explicit != expected {
+            let what = if decl.receiver.is_some() {
+                "an `infix` method takes one value"
+            } else {
+                "an `infix` function takes two values"
+            };
+            self.diagnostics.push(
+                Diagnostic::error(what)
+                    .with_primary(decl.name.span, "")
+                    .with_note("it is written between its two operands: `u dot v` (§9.5)"),
+            );
             supported = false;
         }
         if let Some((name, _)) = decl.type_params.first() {

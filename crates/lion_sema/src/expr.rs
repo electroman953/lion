@@ -20,6 +20,16 @@ struct Comparison {
     on_floats: bool,
     /// Values of an ordered enumeration are compared by their positions (D33).
     on_positions: bool,
+    /// Values of a type with a `less` method are compared with it (§9.5).
+    less: Option<Less>,
+}
+
+/// `a < b` as `a.less(b)`; `a > b` as `b.less(a)`; `<=` and `>=` negate the other two.
+#[derive(Clone, Copy)]
+struct Less {
+    instance: usize,
+    swap: bool,
+    negate: bool,
 }
 
 impl Checker<'_> {
@@ -210,6 +220,9 @@ impl Checker<'_> {
             (ast::UnaryOp::Neg, Type::Int) => (ir::UnaryOp::NegInt, Type::Int),
             (ast::UnaryOp::Neg, Type::Float) => (ir::UnaryOp::NegFloat, Type::Float),
             (ast::UnaryOp::Not, Type::Bool) => (ir::UnaryOp::Not, Type::Bool),
+            (ast::UnaryOp::Neg, found) if self.visible_method(found, "negate").is_some() => {
+                return self.operator_call(operand, "negate", Vec::new(), span);
+            }
             (ast::UnaryOp::Neg, found) => {
                 self.diagnostics.push(
                     Diagnostic::error(format!("`-` cannot be applied to {}", article(found)))
@@ -560,6 +573,21 @@ impl Checker<'_> {
         use ast::BinaryOp as Op;
         let lhs = self.within_try(lhs);
         let rhs = self.within_try(rhs);
+        // A type makes an operator available with the method of its name (§9.5, D2).
+        let method = match op {
+            Op::Add => Some("plus"),
+            Op::Sub => Some("subtract"),
+            Op::Mul => Some("times"),
+            Op::Div => Some("divide"),
+            Op::Pow => Some("power"),
+            _ => None,
+        };
+        if let Some(method) = method
+            && !lhs.ty.is_numeric()
+            && self.visible_method(lhs.ty, method).is_some()
+        {
+            return self.operator_call(lhs, method, vec![rhs], span);
+        }
         if !(lhs.ty.is_numeric() && rhs.ty.is_numeric()) {
             self.arithmetic_type_error(op, op_span, &lhs, &rhs);
             return None;
@@ -593,6 +621,76 @@ impl Checker<'_> {
         Some(typed(ir::ExprKind::Binary { op: ir_op, lhs: Box::new(lhs), rhs: Box::new(rhs) }, ty, span))
     }
 
+    /// The call of the method that gives an operator its meaning (§9.5).
+    fn operator_call(
+        &mut self,
+        receiver: ir::Expr,
+        method: &str,
+        args: Vec<ir::Expr>,
+        span: Span,
+    ) -> Option<ir::Expr> {
+        let types: Vec<Type> = args.iter().map(|arg| arg.ty).collect();
+        let ty = receiver.ty;
+        let instance = self.operator_instance(ty, method, &types, Type::None, span)?;
+        let ret = self.return_type_of(instance, span)?;
+        let args = std::iter::once(receiver).chain(args).map(ir::Arg::Value).collect();
+        let function = ir::FunctionId(instance as u32);
+        Some(typed(ir::ExprKind::Call { function, args }, ret, span))
+    }
+
+    /// The instance of the operator method `name` of `ty` for these argument types; with
+    /// `ret` other than None, the method must give that type.
+    fn operator_instance(
+        &mut self,
+        ty: Type,
+        name: &str,
+        args: &[Type],
+        ret: Type,
+        span: Span,
+    ) -> Option<usize> {
+        let method = self.visible_method(ty, name)?;
+        let params = self.functions[method].signature.clone()?;
+        let fits = params.len() == args.len() + 1
+            && params.iter().all(|param| !param.by_reference)
+            && params[1..]
+                .iter()
+                .zip(args)
+                .all(|(param, arg)| param.ty.is_none_or(|ty| arg.is_subset_of(ty)));
+        if !fits {
+            let types: Vec<String> = args.iter().map(Type::to_string).collect();
+            self.diagnostics.push(
+                Diagnostic::error(format!("the method `{ty}.{name}` does not take ({})", types.join(", ")))
+                    .with_primary(span, "")
+                    .with_secondary(self.functions[method].decl.name.span, "declared here")
+                    .with_note("the operator is written with this method (§9.5)"),
+            );
+            return None;
+        }
+        let instance = match self.functions[method].instance {
+            Some(instance) => instance,
+            None => {
+                self.instantiate(method, std::iter::once(ty).chain(args.iter().copied()).collect(), span)?
+            }
+        };
+        self.ctx.calls.push(instance);
+        self.record_early_call(instance, span);
+        if ret != Type::None {
+            let found = self.return_type_of(instance, span)?;
+            if found != ret {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("the method `{ty}.{name}` must give {}", article(ret)))
+                        .with_primary(span, "")
+                        .with_secondary(
+                            self.functions[method].decl.name.span,
+                            format!("it gives {}", article(found)),
+                        ),
+                );
+                return None;
+            }
+        }
+        Some(instance)
+    }
+
     fn arithmetic_type_error(&mut self, op: ast::BinaryOp, op_span: Span, lhs: &ir::Expr, rhs: &ir::Expr) {
         let symbol = op.as_str();
         let mut error =
@@ -609,6 +707,20 @@ impl Checker<'_> {
         }
         if let Some(help) = [lhs, rhs].iter().find_map(|operand| union_help(operand.ty)) {
             error = error.with_help(help);
+        }
+        let method = match op {
+            ast::BinaryOp::Add => Some("plus"),
+            ast::BinaryOp::Sub => Some("subtract"),
+            ast::BinaryOp::Mul => Some("times"),
+            ast::BinaryOp::Div => Some("divide"),
+            ast::BinaryOp::Pow => Some("power"),
+            _ => None,
+        };
+        if let (Some(method), Type::Struct(_)) = (method, lhs.ty) {
+            error = error.with_help(format!(
+                "a structure gives `{symbol}` a meaning with a method: `fun {}.{method}(other in {}) in ...` (§9.5)",
+                lhs.ty, rhs.ty
+            ));
         }
         self.diagnostics.push(error);
     }
@@ -671,7 +783,7 @@ impl Checker<'_> {
         let float_ops = [B::EqFloat, B::NeFloat, B::LtFloat, B::LeFloat, B::GtFloat, B::GeFloat];
         let (lty, rty) = (lhs.ty, rhs.ty);
         let equality_op = |eq: B, ne: B| if op == Eq { eq } else { ne };
-        let plain = |op| Comparison { op, on_floats: false, on_positions: false };
+        let plain = |op| Comparison { op, on_floats: false, on_positions: false, less: None };
         if matches!(lty, Type::Fun(_)) || matches!(rty, Type::Fun(_)) {
             self.diagnostics.push(
                 Diagnostic::error("functions cannot be compared")
@@ -683,14 +795,30 @@ impl Checker<'_> {
         let checked = match (lty, rty) {
             (Type::Int, Type::Int) => plain(pick(int_ops)),
             _ if lty.is_numeric() && rty.is_numeric() => {
-                Comparison { op: pick(float_ops), on_floats: true, on_positions: false }
+                Comparison { op: pick(float_ops), on_floats: true, on_positions: false, less: None }
+            }
+            // A type that defines `less` has the four orders (§9.5).
+            _ if !equality && lty == rty && self.visible_method(lty, "less").is_some() => {
+                let instance = self.operator_instance(lty, "less", &[rty], Type::Bool, op_span)?;
+                let (swap, negate) = match op {
+                    Lt => (false, false),
+                    Gt => (true, false),
+                    Le => (true, true),
+                    _ => (false, true),
+                };
+                Comparison {
+                    op: B::EqBool,
+                    on_floats: false,
+                    on_positions: false,
+                    less: Some(Less { instance, swap, negate }),
+                }
             }
             (Type::Bool, Type::Bool) if equality => plain(equality_op(B::EqBool, B::NeBool)),
             (Type::Text, Type::Text) if equality => plain(equality_op(B::EqText, B::NeText)),
             (Type::None, Type::None) if equality => plain(equality_op(B::EqNone, B::NeNone)),
             // An ordered enumeration compares the positions of its values (D33).
             (Type::Enum(enumeration), _) if !equality && lty == rty && enumeration.is_ordered() => {
-                Comparison { op: pick(int_ops), on_floats: false, on_positions: true }
+                Comparison { op: pick(int_ops), on_floats: false, on_positions: true, less: None }
             }
             (Type::Enum(enumeration), _) if !equality && lty == rty => {
                 self.diagnostics.push(
@@ -1121,6 +1249,23 @@ impl Checker<'_> {
 }
 
 fn compare_pair(comparison: Comparison, lhs: ir::Expr, rhs: ir::Expr, span: Span) -> ir::Expr {
+    if let Some(less) = comparison.less {
+        let (first, second) = if less.swap { (rhs, lhs) } else { (lhs, rhs) };
+        let function = ir::FunctionId(less.instance as u32);
+        let call = typed(
+            ir::ExprKind::Call { function, args: vec![ir::Arg::Value(first), ir::Arg::Value(second)] },
+            Type::Bool,
+            span,
+        );
+        if !less.negate {
+            return call;
+        }
+        return typed(
+            ir::ExprKind::Unary { op: ir::UnaryOp::Not, operand: Box::new(call) },
+            Type::Bool,
+            span,
+        );
+    }
     let (lhs, rhs) = if comparison.on_floats { (to_float(lhs), to_float(rhs)) } else { (lhs, rhs) };
     let position = |value: ir::Expr| convert(ir::Conversion::EnumPosition, value, Type::Int);
     let (lhs, rhs) = if comparison.on_positions { (position(lhs), position(rhs)) } else { (lhs, rhs) };

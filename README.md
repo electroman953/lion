@@ -18,6 +18,7 @@ L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 2
 - **Structures** (§12) : `struct` avec champs, valeurs par défaut, conditions et invariants, construction `T(...)`, avec noms, `(...) as T` et `let x = (...) in T`, champs finaux omis. Une construction avec des constantes est vérifiée à la compilation, sinon elle donne `T or Error`. Modifier un champ qui viole un invariant est un bug. Égalité champ par champ, méthodes (`fun Student.passes()`, `var self`, y compris sur `Int` ou `Text`), structures récursives (`maybe Node`), structures dans les unions et les `match`.
 - **Énumérations et unions nommées** (§13) : `Color = {red, green}`, `Days = [mon, tue]` ordonnée (`<`, parcours avec `for`), `Color.red` ou `red` seul quand le type est connu, `match` exhaustif sur les valeurs, `Shape = Circle or Rect`.
 - **Types** : `Int` (64 bits, débordement = bug), `Float` (IEEE 754), `Bool`, `Text`, `None`, avec conversion automatique Int → Float.
+- **Opérateurs définis par les types** (§9.5) : méthodes `plus`, `subtract`, `times`, `divide`, `power`, `negate`, `less`, et fonctions `infix` (`u dot v`).
 - **Opérateurs** :
   - `+ - * /` ;
   - `div` et `mod` euclidiens ;
@@ -34,7 +35,7 @@ L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 2
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, exposant négatif, conversion Float → Int impossible, récursion sans fin (plus de 100 000 appels imbriqués). Chacun est signalé avec l'emplacement, les appels en cours, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 
-**Pas encore implémenté** : variables de type (`T in Comparable`), fonctions anonymes génériques, méthodes détachées et méthodes d'opérateurs, lecture des éléments d'un n-uplet, `Domain` et `Map`, traits, valeurs `shared`, appel de code C, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, formateur, tests intégrés, mode interactif.
+**Pas encore implémenté** : variables de type (`T in Comparable`), fonctions anonymes génériques, méthodes détachées, égalité définie par `equals`, lecture des éléments d'un n-uplet, `Domain` et `Map`, traits, valeurs `shared`, appel de code C, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, formateur, tests intégrés, mode interactif.
 
 ## Construire et utiliser
 

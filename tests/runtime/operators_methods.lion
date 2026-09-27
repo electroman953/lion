@@ -1,0 +1,31 @@
+// Operators given by methods, and functions written between their operands (§9.5).
+struct Vector:
+    x in Float
+    y in Float
+;
+fun Vector.plus(other in Vector) in Vector = Vector(self.x + other.x, self.y + other.y)
+fun Vector.times(k in Float) in Vector = Vector(self.x * k, self.y * k)
+fun Vector.negate() in Vector = Vector(-self.x, -self.y)
+infix fun Vector.dot(other in Vector) in Float:
+    return self.x * other.x + self.y * other.y
+;
+infix fun cross(a in Vector, b in Vector) in Float = a.x * b.y - a.y * b.x
+let u = Vector(1, 2)
+let v = Vector(3, 4)
+show(u + v)
+show(u * 2.0)
+show(-u)
+show(u dot v)
+show(u dot v * 2)
+show(u cross v)
+struct Money:
+    cents in Int
+;
+fun Money.less(other in Money) in Bool = self.cents < other.cents
+let a = Money(100)
+let b = Money(250)
+show(a < b)
+show(a > b)
+show(a <= a)
+show(b >= a)
+show(Money(1) < a < b)

@@ -5,6 +5,8 @@
 //! Constructions that this version does not support yet are rejected with an explicit
 //! "not implemented yet" error naming the spec section, never silently accepted.
 
+use std::collections::HashMap;
+
 use lion_diagnostics::{Diagnostic, Span};
 
 use crate::ast::*;
@@ -21,6 +23,7 @@ pub fn parse(text: &str, tokens: &[Token]) -> Parsed {
     assert!(matches!(tokens.last().map(|t| &t.kind), Some(TokenKind::Eof)));
     let mut parser = Parser {
         text,
+        infix: infix_functions(tokens),
         tokens,
         pos: 0,
         diagnostics: Vec::new(),
@@ -39,6 +42,8 @@ type PResult<T> = Result<T, Reported>;
 
 struct Parser<'t> {
     text: &'t str,
+    /// The functions declared `infix` in the file, and whether each is a method.
+    infix: HashMap<String, bool>,
     tokens: &'t [Token],
     pos: usize,
     diagnostics: Vec<Diagnostic>,
@@ -1147,14 +1152,37 @@ impl<'t> Parser<'t> {
     }
 
     fn multiplicative(&mut self) -> PResult<Expr> {
-        self.left_associative(Self::unary, |kind| match kind {
-            TokenKind::Star => Some(BinaryOp::Mul),
-            TokenKind::Slash => Some(BinaryOp::Div),
-            TokenKind::Keyword(Keyword::Div) => Some(BinaryOp::IntDiv),
-            TokenKind::Keyword(Keyword::Mod) => Some(BinaryOp::Mod),
-            TokenKind::Keyword(Keyword::Over) => Some(BinaryOp::Over),
-            _ => None,
-        })
+        let mut lhs = self.unary()?;
+        loop {
+            if let Some(op) = multiplicative_operator(self.peek()) {
+                let op_span = self.bump().span;
+                let rhs = self.unary()?;
+                lhs = binary(op, op_span, lhs, rhs);
+                continue;
+            }
+            // `u dot v`: a function declared `infix`, at the level of `*` (§9.5, §26).
+            let TokenKind::LowerIdent(name) = self.peek() else { break };
+            let Some(&method) = self.infix.get(name) else { break };
+            let name = Ident { name: name.clone(), span: self.span() };
+            self.bump();
+            let rhs = self.unary()?;
+            let span = lhs.span.to(rhs.span);
+            let arg = |value: Expr| Arg { var_marker: None, name: None, value };
+            lhs = if method {
+                let callee = Expr {
+                    span: lhs.span.to(name.span),
+                    kind: ExprKind::Field { object: Box::new(lhs), name },
+                };
+                Expr { span, kind: ExprKind::Call { callee: Box::new(callee), args: vec![arg(rhs)] } }
+            } else {
+                let callee = Expr { span: name.span, kind: ExprKind::Name(name.name) };
+                Expr {
+                    span,
+                    kind: ExprKind::Call { callee: Box::new(callee), args: vec![arg(lhs), arg(rhs)] },
+                }
+            };
+        }
+        Ok(lhs)
     }
 
     /// Unary minus binds less tightly than `^`: `-2 ^ 2` is -4 (§8.4).
@@ -1668,6 +1696,43 @@ fn is_operator(kind: &TokenKind) -> bool {
         ),
         _ => false,
     }
+}
+
+fn multiplicative_operator(kind: &TokenKind) -> Option<BinaryOp> {
+    match kind {
+        TokenKind::Star => Some(BinaryOp::Mul),
+        TokenKind::Slash => Some(BinaryOp::Div),
+        TokenKind::Keyword(Keyword::Div) => Some(BinaryOp::IntDiv),
+        TokenKind::Keyword(Keyword::Mod) => Some(BinaryOp::Mod),
+        TokenKind::Keyword(Keyword::Over) => Some(BinaryOp::Over),
+        _ => None,
+    }
+}
+
+/// The functions declared `infix` in the file, and whether each is a method (§9.5).
+fn infix_functions(tokens: &[Token]) -> HashMap<String, bool> {
+    let mut found = HashMap::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if token.kind != TokenKind::Keyword(Keyword::Infix) {
+            continue;
+        }
+        let kind = |offset: usize| tokens.get(index + offset).map(|token| &token.kind);
+        match (kind(1), kind(2), kind(3), kind(4)) {
+            (
+                Some(TokenKind::Keyword(Keyword::Fun)),
+                Some(TokenKind::UpperIdent(_)),
+                Some(TokenKind::Dot),
+                Some(TokenKind::LowerIdent(name)),
+            ) => {
+                found.insert(name.clone(), true);
+            }
+            (Some(TokenKind::Keyword(Keyword::Fun)), Some(TokenKind::LowerIdent(name)), ..) => {
+                found.insert(name.clone(), false);
+            }
+            _ => {}
+        }
+    }
+    found
 }
 
 fn uppercase_first(name: &str) -> String {
