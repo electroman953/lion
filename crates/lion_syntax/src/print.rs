@@ -65,6 +65,17 @@ pub fn print_stmt(stmt: &Stmt) -> String {
             format!("(match {} {})", print_expr(scrutinee), cases.join(" "))
         }
         StmtKind::Struct(decl) => print_struct(decl),
+        StmtKind::Trait(decl) => {
+            let mut out = format!("(trait {}", decl.name.name);
+            for method in &decl.methods {
+                out.push(' ');
+                out.push_str(&print_fun(method));
+            }
+            for (name, ty) in &decl.fields {
+                out.push_str(&format!(" ({} : {})", name.name, print_type(ty)));
+            }
+            out + ")"
+        }
         StmtKind::Use(path) => {
             let names: Vec<&str> = path.iter().map(|name| name.name.as_str()).collect();
             format!("(use {})", names.join("."))
@@ -145,6 +156,7 @@ fn print_fun(decl: &FunDecl) -> String {
         FunBody::Block(block) => out.push_str(&format!(" {}", print_block(block))),
         FunBody::Expr(expr) => out.push_str(&format!(" = {}", print_expr(expr))),
         FunBody::Foreign => {}
+        FunBody::Required => out.push_str(" required"),
     }
     out + ")"
 }

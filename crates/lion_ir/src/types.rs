@@ -31,6 +31,13 @@ pub enum Type {
     Enum(EnumRef),
     /// `fun(A, B) in R`: a function used as a value (§7.2, D63).
     Fun(FunRef),
+    /// A trait: the set of the types that satisfy it (§14). Its members are known once
+    /// every method of the program is.
+    Trait(TraitRef),
+    /// A type variable of a generic function, as `T` in `fun biggest(a in T, b in T) in
+    /// T, T in Comparable` (§15.2). It appears only in signatures: each instance
+    /// replaces it.
+    Var(VarRef),
 }
 
 impl Type {
@@ -77,10 +84,20 @@ impl Type {
         Type::union([ty, Type::None])
     }
 
-    /// The members of a union, or the type itself.
+    /// The members of a union, or the type itself; a trait stands for the types that
+    /// satisfy it.
     pub fn members(self) -> Vec<Type> {
         match self {
-            Type::Union(union) => union.members(),
+            Type::Union(union) => {
+                let mut members: Vec<Type> = union.members().into_iter().flat_map(Type::members).collect();
+                members.sort();
+                members.dedup();
+                members
+            }
+            Type::Trait(set) => {
+                let members = set.members();
+                if members.is_empty() { vec![self] } else { members }
+            }
             other => vec![other],
         }
     }
@@ -143,6 +160,8 @@ impl fmt::Display for Type {
             Type::Error => f.write_str("Error"),
             Type::Struct(structure) => f.write_str(&structure.name()),
             Type::Enum(enumeration) => f.write_str(&enumeration.name()),
+            Type::Trait(set) => f.write_str(&set.name()),
+            Type::Var(var) => f.write_str(&var.name()),
             Type::Fun(function) => {
                 let data = function.get();
                 let params: Vec<String> = data
@@ -242,6 +261,134 @@ impl EnumRef {
 }
 
 impl fmt::Debug for EnumRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.name())
+    }
+}
+
+/// A type variable of a generic function (§15.2).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct VarRef(u32);
+
+impl VarRef {
+    pub fn new(name: &str) -> VarRef {
+        let mut interner = interner().lock().expect("the type interner is never poisoned");
+        interner.vars.push(name.to_string());
+        VarRef(interner.vars.len() as u32 - 1)
+    }
+
+    pub fn name(self) -> String {
+        interner().lock().expect("the type interner is never poisoned").vars[self.0 as usize].clone()
+    }
+}
+
+impl fmt::Debug for VarRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.name())
+    }
+}
+
+impl Type {
+    /// Whether the type mentions a type variable.
+    pub fn has_vars(self) -> bool {
+        match self {
+            Type::Var(_) => true,
+            Type::List(inner) | Type::Set(inner) => inner.get().has_vars(),
+            Type::Tuple(tuple) => tuple.elements().into_iter().any(Type::has_vars),
+            Type::Union(union) => union.members().into_iter().any(Type::has_vars),
+            Type::Fun(function) => {
+                let data = function.get();
+                data.ret.has_vars() || data.params.into_iter().any(Type::has_vars)
+            }
+            _ => false,
+        }
+    }
+
+    /// The type with its variables replaced.
+    pub fn substitute(self, bindings: &HashMap<VarRef, Type>) -> Type {
+        match self {
+            Type::Var(var) => bindings.get(&var).copied().unwrap_or(self),
+            Type::List(inner) => Type::list(inner.get().substitute(bindings)),
+            Type::Set(inner) => Type::set(inner.get().substitute(bindings)),
+            Type::Tuple(tuple) => {
+                Type::tuple(tuple.elements().into_iter().map(|ty| ty.substitute(bindings)).collect())
+            }
+            Type::Union(union) => Type::union(union.members().into_iter().map(|ty| ty.substitute(bindings))),
+            Type::Fun(function) => {
+                let data = function.get();
+                let params = data.params.into_iter().map(|ty| ty.substitute(bindings)).collect();
+                Type::function(params, data.required as usize, data.ret.substitute(bindings))
+            }
+            other => other,
+        }
+    }
+
+    /// Binds the variables of `self`, a pattern, so that it becomes `actual`; false when
+    /// it cannot, or when a variable would get two types.
+    pub fn unify(self, actual: Type, bindings: &mut HashMap<VarRef, Type>) -> bool {
+        match (self, actual) {
+            (Type::Var(var), _) => match bindings.get(&var) {
+                Some(&bound) => bound == actual,
+                None => {
+                    bindings.insert(var, actual);
+                    true
+                }
+            },
+            (Type::List(pattern), Type::List(actual)) | (Type::Set(pattern), Type::Set(actual)) => {
+                pattern.get().unify(actual.get(), bindings)
+            }
+            (Type::Tuple(pattern), Type::Tuple(actual)) => {
+                let (pattern, actual) = (pattern.elements(), actual.elements());
+                pattern.len() == actual.len()
+                    && pattern
+                        .into_iter()
+                        .zip(actual)
+                        .all(|(pattern, actual)| pattern.unify(actual, bindings))
+            }
+            (Type::Fun(pattern), Type::Fun(actual)) => {
+                let (pattern, actual) = (pattern.get(), actual.get());
+                pattern.params.len() == actual.params.len()
+                    && pattern
+                        .params
+                        .into_iter()
+                        .zip(actual.params)
+                        .all(|(pattern, actual)| pattern.unify(actual, bindings))
+                    && pattern.ret.unify(actual.ret, bindings)
+            }
+            (pattern, actual) if !pattern.has_vars() => {
+                actual.is_subset_of(pattern) || actual == Type::Int && pattern == Type::Float
+            }
+            _ => false,
+        }
+    }
+}
+
+/// A trait declared by a program, and the types that satisfy it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TraitRef(u32);
+
+impl TraitRef {
+    pub fn new(name: &str) -> TraitRef {
+        let mut interner = interner().lock().expect("the type interner is never poisoned");
+        interner.traits.push((name.to_string(), Vec::new()));
+        TraitRef(interner.traits.len() as u32 - 1)
+    }
+
+    pub fn name(self) -> String {
+        interner().lock().expect("the type interner is never poisoned").traits[self.0 as usize].0.clone()
+    }
+
+    pub fn members(self) -> Vec<Type> {
+        interner().lock().expect("the type interner is never poisoned").traits[self.0 as usize].1.clone()
+    }
+
+    /// Once every method is known: the types that satisfy the trait.
+    pub fn set_members(self, members: Vec<Type>) {
+        interner().lock().expect("the type interner is never poisoned").traits[self.0 as usize].1 = members;
+    }
+}
+
+impl fmt::Debug for TraitRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.name())
     }
@@ -354,6 +501,8 @@ struct Interner {
     tuple_ids: HashMap<Vec<Type>, u32>,
     functions: Vec<FunData>,
     function_ids: HashMap<FunData, u32>,
+    traits: Vec<(String, Vec<Type>)>,
+    vars: Vec<String>,
 }
 
 fn interner() -> &'static Mutex<Interner> {

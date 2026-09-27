@@ -114,6 +114,7 @@ impl<'t> Parser<'t> {
             TokenKind::Keyword(Keyword::Use) => self.use_statement(),
             TokenKind::Keyword(Keyword::Private) => self.private_statement(),
             TokenKind::Keyword(Keyword::Struct) => self.struct_statement(),
+            TokenKind::Keyword(Keyword::Trait) => self.trait_statement(),
             TokenKind::UpperIdent(_) if self.kind_at(self.pos + 1) == &TokenKind::Assign => {
                 self.type_definition()
             }
@@ -136,7 +137,6 @@ impl<'t> Parser<'t> {
     fn unsupported_statement(&self) -> Option<(&'static str, &'static str)> {
         let TokenKind::Keyword(keyword) = self.peek() else { return None };
         Some(match keyword {
-            Keyword::Trait => ("traits", "§14"),
             Keyword::Test | Keyword::Expect => ("tests", "§24.1"),
             Keyword::Unsafe => ("calling C code", "§21.2"),
             _ => return None,
@@ -409,6 +409,105 @@ impl<'t> Parser<'t> {
             modifies,
             body,
         })
+    }
+
+    /// `trait Name: methods and fields ;`, one per line (§14, §26: `trait_decl`).
+    fn trait_statement(&mut self) -> PResult<Stmt> {
+        let index = self.pos;
+        let start = self.bump().span;
+        let span = self.span();
+        let TokenKind::UpperIdent(name) = self.peek() else {
+            return Err(self.expected("the name of the trait, which starts with an uppercase letter"));
+        };
+        let name = Ident { name: name.clone(), span };
+        self.bump();
+        if self.at_keyword(Keyword::Of) {
+            return Err(self.not_implemented(self.span(), "generic traits", "§15.1"));
+        }
+        if !self.eat(&TokenKind::Colon) {
+            return Err(self.expected("`:` and the methods of the trait"));
+        }
+        if !self.at_line_end() {
+            let error = Diagnostic::error("the methods of a trait go on their own lines")
+                .with_primary(self.span(), "")
+                .with_help("write one method or field per line, and `;` alone on the last line (§14)");
+            return Err(self.error(error));
+        }
+        let opener = Opener { keyword: "trait", index, branch: index };
+        let (mut methods, mut fields) = (Vec::new(), Vec::new());
+        loop {
+            while self.eat(&TokenKind::Newline) {}
+            if self.at(&TokenKind::Semicolon) {
+                break;
+            }
+            if self.at(&TokenKind::Eof) || (self.at_declaration() && !self.at_keyword(Keyword::Fun)) {
+                return Err(self.unclosed_block(opener));
+            }
+            let line = if self.at_keyword(Keyword::Fun) {
+                let method_index = self.pos;
+                self.bump();
+                self.binding_name()
+                    .and_then(|name| self.trait_method(method_index, name))
+                    .map(|decl| methods.push(decl))
+            } else {
+                self.binding_name().and_then(|field| {
+                    if !self.eat_keyword(Keyword::In) {
+                        return Err(self.expected("`in` and the type of the field"));
+                    }
+                    fields.push((field, self.type_expr()?));
+                    Ok(())
+                })
+            };
+            match line {
+                Ok(()) => self.end_of_line_in_block(opener),
+                Err(Reported) => self.skip_statement(),
+            }
+        }
+        let end = self.close_block(opener)?;
+        Ok(Stmt { kind: StmtKind::Trait(TraitDecl { name, methods, fields }), span: start.to(end) })
+    }
+
+    /// `fun name(params) signature`, then a default body or nothing (§26: `trait_line`).
+    fn trait_method(&mut self, index: usize, name: Ident) -> PResult<FunDecl> {
+        if self.at(&TokenKind::LParen)
+            && !matches!(self.line_after_signature(), TokenKind::Colon | TokenKind::Assign)
+        {
+            // A required method: the signature alone.
+            self.bump();
+            let params = self.nested(Self::params)?;
+            self.expect(&TokenKind::RParen, "`)`")?;
+            let ret = if self.eat_keyword(Keyword::In) { Some(self.type_expr()?) } else { None };
+            return Ok(FunDecl {
+                private: None,
+                foreign: None,
+                infix: false,
+                receiver: None,
+                name,
+                params,
+                ret,
+                type_params: Vec::new(),
+                modifies: Vec::new(),
+                body: FunBody::Required,
+            });
+        }
+        self.fun_rest(index, None, false, None, name)
+    }
+
+    /// The token that ends the signature on this line: `:` or `=` for a body, or the end
+    /// of the line for a required method.
+    fn line_after_signature(&self) -> &'t TokenKind {
+        let mut depth = 0usize;
+        let mut index = self.pos;
+        loop {
+            match self.kind_at(index) {
+                TokenKind::LParen | TokenKind::LBracket => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket => depth = depth.saturating_sub(1),
+                kind @ (TokenKind::Colon | TokenKind::Assign) if depth == 0 => return kind,
+                kind @ (TokenKind::Newline | TokenKind::Eof | TokenKind::Semicolon) => return kind,
+                _ => {}
+            }
+            index += 1;
+        }
     }
 
     /// `struct Name: fields and invariants ;`, one per line (§12.1, §26).

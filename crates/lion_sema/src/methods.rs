@@ -47,6 +47,14 @@ impl Checker<'_> {
         }
         let value = self.expr(object)?;
         let value = self.within_try(value);
+        // A value of several possible types: the method of each, chosen at run time (§14.4).
+        let members = value.ty.members();
+        if self.visible_method(value.ty, &name.name).is_none()
+            && (members.len() > 1 || members != [value.ty])
+            && members.iter().all(|&member| self.visible_method(member, &name.name).is_some())
+        {
+            return self.dispatch_call(value, name, args, span);
+        }
         let Some(method) = self.visible_method(value.ty, &name.name) else {
             // A field that holds a function: `button.on_click()` (§11).
             if let Type::Struct(structure) = value.ty {

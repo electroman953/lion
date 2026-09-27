@@ -1,0 +1,47 @@
+exit: 1
+----- stdout
+----- stderr
+error: the trait asks twice for `area`
+  --> tests/errors/traits.lion:4:9
+   |
+ 4 |     fun area() in Int
+   |         ^^^^
+
+error: the parameters of a method of a trait have a type
+  --> tests/errors/traits.lion:5:15
+   |
+ 5 |     fun scale(k) in Float
+   |               ^
+   |
+   = help: write it: `k in Int`
+
+error: two traits give `Int` a method `label`
+   --> tests/errors/traits.lion:11:9
+    |
+  8 |     fun label() in Text = "a"
+    |         ----- the other one
+   ...
+ 11 |     fun label() in Text = "b"
+    |         ^^^^^
+    |
+    = a type receives the default methods of the traits it satisfies (§14.2)
+    = help: declare `fun Int.label(...)` to choose
+
+error: this test is always false: the value is an Int
+   --> tests/errors/traits.lion:18:6
+    |
+ 18 | show(x in Shape)
+    |      ^
+    |
+    = an Int is never a Shape
+
+error: A Shape has no method `volume`
+   --> tests/errors/traits.lion:19:23
+    |
+ 19 | fun f(s in Shape) = s.volume()
+    |                     - this is a Shape
+    |                       ^^^^^^
+    |
+    = a method is declared `fun Shape.volume(...)` (§12.4)
+
+5 errors found

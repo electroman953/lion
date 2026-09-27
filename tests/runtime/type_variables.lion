@@ -1,0 +1,24 @@
+// Type variables with their traits (§15.2).
+fun biggest(a in T, b in T) in T, T in Comparable:
+    return if b > a then b else a
+;
+fun first(l in List of T) in maybe T, T in Type:
+    return if l.size > 0 then l[1]
+;
+show(biggest(3, 7))
+show(biggest(2.5, 1.0))
+Days = [mon, tue, wed]
+show(biggest(Days.tue, Days.mon))
+struct Money:
+    cents in Int
+;
+fun Money.less(other in Money) in Bool = self.cents < other.cents
+show(biggest(Money(5), Money(9)))
+show(first([4, 5]))
+show(first(["a"]))
+show(first([] as List of Int))
+fun pair(a in T, b in T) in List of T, T in Type:
+    let result = [a, b] in List of T
+    return result
+;
+show(pair("x", "y"))

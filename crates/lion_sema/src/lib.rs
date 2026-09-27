@@ -26,6 +26,7 @@ mod places;
 mod standard;
 mod stmt;
 mod structs;
+mod traits;
 mod types;
 
 use std::collections::HashMap;
@@ -216,6 +217,12 @@ struct Checker<'a> {
     /// add a method of the same name to a type (§20.3).
     methods: HashMap<(Type, String), Vec<usize>>,
     structs: Vec<StructInfo<'a>>,
+    traits: Vec<crate::traits::TraitInfo<'a>>,
+    /// `Comparable`: the types that have an order (§15.2, C67).
+    comparable: ir::TraitRef,
+    /// The type variables in scope, and what they stand for: themselves in a signature,
+    /// the types of an instance in its body (§15.2).
+    type_vars: Vec<(String, Type)>,
     enums: Vec<ir::EnumRef>,
     /// The checked versions of the functions: one per function, or one per set of
     /// argument types for a generic function (C1).
@@ -252,6 +259,9 @@ impl<'a> Checker<'a> {
             functions: Vec::new(),
             methods: HashMap::new(),
             structs: Vec::new(),
+            traits: Vec::new(),
+            comparable: ir::TraitRef::new("Comparable"),
+            type_vars: Vec::new(),
             enums: Vec::new(),
             instances: Vec::new(),
             script_calls: Vec::new(),

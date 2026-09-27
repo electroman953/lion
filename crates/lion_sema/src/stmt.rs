@@ -79,13 +79,14 @@ impl Checker<'_> {
                 None
             }
             // Types are registered beforehand, from the top level only.
-            ast::StmtKind::Struct(_) | ast::StmtKind::TypeDef(_)
+            ast::StmtKind::Struct(_) | ast::StmtKind::TypeDef(_) | ast::StmtKind::Trait(_)
                 if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 =>
             {
                 None
             }
             ast::StmtKind::Struct(ast::StructDecl { name, .. })
-            | ast::StmtKind::TypeDef(ast::TypeDef { name, .. }) => {
+            | ast::StmtKind::TypeDef(ast::TypeDef { name, .. })
+            | ast::StmtKind::Trait(ast::TraitDecl { name, .. }) => {
                 self.diagnostics.push(
                     Diagnostic::error("a type is declared at the top level of the file")
                         .with_primary(name.span, "")

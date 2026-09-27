@@ -908,6 +908,9 @@ fn kinds_of(ty: ir::Type) -> u16 {
             ir::Type::Struct(_) => kinds::STRUCT,
             ir::Type::Enum(_) => kinds::ENUM,
             ir::Type::Fun(_) => kinds::FUN,
+            // A trait without members has no values.
+            ir::Type::Trait(_) => 0,
+            ir::Type::Var(_) => unreachable!("an instance has no type variables"),
             ir::Type::Union(_) => unreachable!("the members of a union are not unions"),
         })
         .fold(0, |all, kind| all | kind)

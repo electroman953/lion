@@ -66,6 +66,18 @@ pub enum StmtKind {
     TypeDef(TypeDef),
     /// `use geometry`, `use shapes.circle` (§20.2).
     Use(Vec<Ident>),
+    /// `trait Shape: required methods and fields ;` (§14).
+    Trait(TraitDecl),
+}
+
+/// A trait: the methods and the fields that a type needs to satisfy it (§14).
+#[derive(Clone, Debug)]
+pub struct TraitDecl {
+    pub name: Ident,
+    /// Without a body, a method is required; with one, it is a default (§14.2).
+    pub methods: Vec<FunDecl>,
+    /// Required fields, such as `name in Text` (§14.1).
+    pub fields: Vec<(Ident, TypeExpr)>,
 }
 
 #[derive(Clone, Debug)]
@@ -175,6 +187,8 @@ pub enum FunBody {
     Expr(Expr),
     /// A `foreign` function has no body.
     Foreign,
+    /// A method that a trait requires, without a default (§14).
+    Required,
 }
 
 /// One `if` or `elif` branch of an `if` statement.

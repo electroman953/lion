@@ -1,0 +1,9 @@
+exit: 0
+----- stdout
+7.14159
+forme d'aire 3.14159
+a square of side 2.0
+forme d'aire 1000.0
+true
+Circle(r: 1.0)
+----- stderr

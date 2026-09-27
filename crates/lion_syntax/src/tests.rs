@@ -160,19 +160,19 @@ fn errors_recover_at_the_next_line() {
 
 #[test]
 fn recovery_skips_the_blocks_of_a_failed_statement() {
-    let text = "trait S(a: 1):\n    let inner = 1\n    if a: x = 1 ;\n;\nlet after = 2\n";
+    let text = "test \"s\":\n    let inner = 1\n    if a: x = 1 ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
-    assert_eq!(errors, ["not implemented yet: traits"]);
+    assert_eq!(errors, ["not implemented yet: tests"]);
     assert_eq!(tree, "(let after 2)\n");
-    let text = "trait S:\n    if a:\n        b = 1\n    elif c:\n        d = 2\n    else:\n        e = 3\n    ;\n;\nlet after = 2\n";
+    let text = "test \"s\":\n    if a:\n        b = 1\n    elif c:\n        d = 2\n    else:\n        e = 3\n    ;\n;\nlet after = 2\n";
     let (tree, errors) = parse_text(text);
-    assert_eq!(errors, ["not implemented yet: traits"]);
+    assert_eq!(errors, ["not implemented yet: tests"]);
     assert_eq!(tree, "(let after 2)\n");
 }
 
 #[test]
 fn unsupported_constructions_are_reported() {
-    let cases = [("trait S:\n;", "not implemented yet: traits")];
+    let cases = [("test \"s\":\n;", "not implemented yet: tests")];
     for (text, message) in cases {
         assert_eq!(first_error(text), message, "for {text:?}");
     }
@@ -475,4 +475,15 @@ fn anonymous_functions() {
         "(let log (fun fun ((msg : Text)) [(call show msg)]))"
     );
     assert_eq!(ast("f(1)(2)"), "(call (call f 1) 2)");
+}
+
+#[test]
+fn traits() {
+    assert_eq!(
+        ast(
+            "trait Shape:\n    fun area() in Float\n    fun half() in Float = self.area() / 2\n    name in Text\n;"
+        ),
+        "(trait Shape (fun area () in Float required) (fun half () in Float = (/ (call (. self area)) 2)) (name : Text))"
+    );
+    assert_eq!(first_error("trait Shape: fun area() ;"), "the methods of a trait go on their own lines");
 }

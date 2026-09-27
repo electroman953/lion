@@ -10,7 +10,7 @@ mod print;
 mod types;
 
 pub use print::print_program;
-pub use types::{EnumRef, FunData, FunRef, StructRef, TupleRef, Type, TypeRef, UnionRef};
+pub use types::{EnumRef, FunData, FunRef, StructRef, TraitRef, TupleRef, Type, TypeRef, UnionRef, VarRef};
 
 use lion_diagnostics::Span;
 

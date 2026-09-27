@@ -1,0 +1,13 @@
+// Mistakes with type variables (§15.2).
+fun biggest(a in T, b in T) in T, T in Comparable:
+    return if b > a then b else a
+;
+fun wrong(a in T) in T, T in Int = a
+fun typo(a in Strng) = a
+show(biggest("a", "b"))
+show(biggest(1, "a"))
+trait Named:
+    fun name() in Text
+;
+fun hello(x in T) in Text, T in Named = "hello {x.name()}"
+show(hello(3))

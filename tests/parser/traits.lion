@@ -1,0 +1,8 @@
+trait Shape:
+    fun area() in Float
+    fun describe() in Text:
+        return "forme d'aire {self.area()}"
+    ;
+    fun double() in Float = 2 * self.area()
+    name in Text
+;

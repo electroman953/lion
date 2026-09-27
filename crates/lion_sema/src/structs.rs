@@ -105,6 +105,7 @@ impl<'a> Checker<'a> {
             match &stmt.kind {
                 ast::StmtKind::Struct(decl) => self.register_structure(decl),
                 ast::StmtKind::TypeDef(decl) => self.register_type_definition(decl),
+                ast::StmtKind::Trait(decl) => self.register_trait(decl),
                 _ => {}
             }
         }

@@ -1,0 +1,66 @@
+exit: 1
+----- stdout
+----- stderr
+warning: `biggest` is never called, so it is not checked
+  --> tests/errors/type_variables.lion:2:5
+   |
+ 2 | fun biggest(a in T, b in T) in T, T in Comparable:
+   |     ^^^^^^^
+   |
+   = a function with parameters without a type is checked for the types of each call (§15.3)
+
+error: `Int` is not a trait
+  --> tests/errors/type_variables.lion:5:30
+   |
+ 5 | fun wrong(a in T) in T, T in Int = a
+   |                              ^^^
+   |
+   = a type variable is declared with a trait, or `Type` for every type (§15.2)
+
+error: cannot find the type `Strng`
+  --> tests/errors/type_variables.lion:6:15
+   |
+ 6 | fun typo(a in Strng) = a
+   |               ^^^^^ unknown type
+
+error: A Text is not Comparable
+  --> tests/errors/type_variables.lion:7:6
+   |
+ 2 | fun biggest(a in T, b in T) in T, T in Comparable:
+   |                                   - `T` must be Comparable
+  ...
+ 7 | show(biggest("a", "b"))
+   |      ^^^^^^^
+   |
+   = the type variable `T` takes the type of the argument (§15.2)
+
+error: the parameter `b` is T, which does not fit a Text
+  --> tests/errors/type_variables.lion:8:6
+   |
+ 2 | fun biggest(a in T, b in T) in T, T in Comparable:
+   |                     - parameter declared here
+  ...
+ 8 | show(biggest(1, "a"))
+   |      ^^^^^^^
+   |
+   = `T` is already Int for this call
+
+warning: `hello` is never called, so it is not checked
+   --> tests/errors/type_variables.lion:12:5
+    |
+ 12 | fun hello(x in T) in Text, T in Named = "hello {x.name()}"
+    |     ^^^^^
+    |
+    = a function with parameters without a type is checked for the types of each call (§15.3)
+
+error: An Int is not Named
+   --> tests/errors/type_variables.lion:13:6
+    |
+ 12 | fun hello(x in T) in Text, T in Named = "hello {x.name()}"
+    |                            - `T` must be Named
+ 13 | show(hello(3))
+    |      ^^^^^
+    |
+    = the type variable `T` takes the type of the argument (§15.2)
+
+5 errors found

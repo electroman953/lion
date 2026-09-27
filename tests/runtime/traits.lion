@@ -1,0 +1,36 @@
+// Traits: structural conformance, default methods, calls chosen at run time (§14).
+trait Shape:
+    fun area() in Float
+    fun describe() in Text:
+        return "forme d'aire {self.area()}"
+    ;
+;
+
+struct Circle:
+    r in Float, r >= 0
+;
+fun Circle.area() in Float = 3.14159 * self.r ^ 2    // Circle est maintenant une Shape
+
+struct Square:
+    side in Float
+;
+fun Square.area() in Float = self.side * self.side
+fun Square.describe() in Text = "a square of side {self.side}"
+
+struct Farm:
+    name in Text
+;
+fun Farm.area() in Float = 1000.0
+
+fun total_area(shapes in List of Shape) in Float = sum([s.area(), s in shapes])
+
+let shapes = [Circle(1.0), Square(2.0)] in List of Shape
+show(total_area(shapes))
+for s in shapes:
+    show(s.describe())
+;
+let farm = Farm("Les Prés")
+show(farm.describe())
+show(farm in Shape)
+fun biggest(a in Shape, b in Shape) in Shape = if a.area() > b.area() then a else b
+show(biggest(Circle(1.0), Square(1.0)))

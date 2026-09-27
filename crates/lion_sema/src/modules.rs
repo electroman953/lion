@@ -193,6 +193,7 @@ impl<'a> Checker<'a> {
                 ast::StmtKind::Fun(_)
                 | ast::StmtKind::Struct(_)
                 | ast::StmtKind::TypeDef(_)
+                | ast::StmtKind::Trait(_)
                 | ast::StmtKind::Use(_) => {
                     continue;
                 }

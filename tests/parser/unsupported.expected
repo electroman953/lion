@@ -8,13 +8,13 @@ exit: 1
 (let w (try (call f)))
 (let ok 1)
 ----- stderr
-error: not implemented yet: traits
+error: not implemented yet: tests
   --> tests/parser/unsupported.lion:3:1
    |
- 3 | trait Shape:
-   | ^^^^^
+ 3 | test "shapes":
+   | ^^^^
    |
-   = this part of Lion (spec §14) is not supported by this version of the implementation
+   = this part of Lion (spec §24.1) is not supported by this version of the implementation
 
 error: not implemented yet: tasks
   --> tests/parser/unsupported.lion:7:11

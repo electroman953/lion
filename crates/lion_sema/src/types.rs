@@ -31,6 +31,8 @@ pub(crate) fn is_standard_type(name: &str) -> bool {
     // `Bool = {true, false}` is an enumeration of the standard library (D45).
     name == "List"
         || name == "Set"
+        || name == "Comparable"
+        || name == "Type"
         || SUPPORTED.iter().any(|(known, _)| *known == name)
         || PLANNED.iter().any(|(p, ..)| *p == name)
 }
@@ -91,6 +93,12 @@ impl Checker<'_> {
     }
 
     fn named_type(&mut self, name: &ast::Ident, args: &[ast::TypeExpr], ty: &ast::TypeExpr) -> Option<Type> {
+        if let Some(&(_, var)) = self.type_vars.iter().rev().find(|(known, _)| *known == name.name) {
+            return Some(var);
+        }
+        if name.name == "Comparable" {
+            return Some(Type::Trait(self.comparable));
+        }
         if name.name == "List" || name.name == "Set" {
             let [element] = args else {
                 self.diagnostics.push(

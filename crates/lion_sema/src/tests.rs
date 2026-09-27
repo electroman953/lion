@@ -539,3 +539,29 @@ fn closures_capture_copies_or_share_with_modifies() {
     let text = "fun f():\n    var n = 0\n    fun g():\n        n += 1\n    ;\n;";
     assert_eq!(errors(text), ["this function cannot change `n`, which is declared around it"]);
 }
+
+const SHAPES: &str = "trait Shape:\n    fun area() in Float\n;\nstruct Circle:\n    r in Float\n;\nfun Circle.area() in Float = 3.0 * self.r * self.r\nstruct Square:\n    side in Float\n;\nfun Square.area() in Float = self.side * self.side\n";
+
+#[test]
+fn traits_are_the_types_that_satisfy_them() {
+    // A call on a value of a trait chooses the method of its type (§14.4).
+    let ir = check_text(&format!("{SHAPES}fun f(s in Shape) in Float = s.area()")).unwrap();
+    assert!(ir.contains("(in_type %t#1 Circle)"), "{ir}");
+    assert!(check_text(&format!("{SHAPES}let l = [Circle(1.0), Square(2.0)] in List of Shape")).is_ok());
+    assert_eq!(
+        errors(&format!("{SHAPES}let x = 3\nshow(x in Shape)")),
+        ["this test is always false: the value is an Int"]
+    );
+}
+
+#[test]
+fn type_variables() {
+    let text = "fun biggest(a in T, b in T) in T, T in Comparable = if b > a then b else a\n";
+    let ir = check_text(&format!("{text}show(biggest(1, 2))")).unwrap();
+    assert!(ir.contains("fun biggest[Int, Int] in Int"), "{ir}");
+    assert_eq!(
+        errors(&format!("{text}show(biggest(\"a\", \"b\"))")),
+        ["`biggest` is never called, so it is not checked", "A Text is not Comparable"]
+    );
+    assert_eq!(errors("fun f(a in T), T in Int = a\nshow(f(1))"), ["`Int` is not a trait"]);
+}

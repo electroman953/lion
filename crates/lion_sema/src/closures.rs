@@ -367,7 +367,7 @@ fn free_names_of_function(decl: &ast::FunDecl, names: &mut Vec<(String, Span)>) 
     match &decl.body {
         ast::FunBody::Block(block) => names_in_stmts(&block.stmts, names),
         ast::FunBody::Expr(value) => names_in_expr(value, names),
-        ast::FunBody::Foreign => {}
+        ast::FunBody::Foreign | ast::FunBody::Required => {}
     }
     for name in &decl.modifies {
         names.push((name.name.clone(), name.span));
@@ -418,6 +418,7 @@ fn names_in_stmts(stmts: &[ast::Stmt], names: &mut Vec<(String, Span)>) {
             | ast::StmtKind::Continue
             | ast::StmtKind::Struct(_)
             | ast::StmtKind::TypeDef(_)
+            | ast::StmtKind::Trait(_)
             | ast::StmtKind::Use(_) => {}
         }
     }

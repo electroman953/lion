@@ -1,0 +1,21 @@
+// Mistakes with traits (§14).
+trait Shape:
+    fun area() in Float
+    fun area() in Int
+    fun scale(k) in Float
+;
+trait Named:
+    fun label() in Text = "a"
+;
+trait Titled:
+    fun label() in Text = "b"
+;
+struct Box:
+    size in Float
+;
+fun Box.area() in Float = self.size
+let x = 3
+show(x in Shape)
+fun f(s in Shape) = s.volume()
+let b = Box(2)
+show(b.label())

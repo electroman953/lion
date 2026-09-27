@@ -15,7 +15,12 @@ use crate::{Checker, typed};
 /// A type defined with `=` (§13).
 pub(crate) enum NamedType<'a> {
     Enum(EnumRef),
-    Union { decl: &'a ast::TypeDef, state: AliasState },
+    /// A trait, by index (§14).
+    Trait(usize),
+    Union {
+        decl: &'a ast::TypeDef,
+        state: AliasState,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -87,6 +92,7 @@ impl<'a> Checker<'a> {
         let named = self.tables.named_types.get(name)?;
         let (decl, state) = match named {
             NamedType::Enum(enumeration) => return Some(Some(Type::Enum(*enumeration))),
+            NamedType::Trait(index) => return Some(Some(Type::Trait(self.traits[*index].id))),
             NamedType::Union { decl, state } => (*decl, *state),
         };
         let resolved = match state {
@@ -125,7 +131,7 @@ impl<'a> Checker<'a> {
             .iter()
             .filter_map(|(name, named)| match named {
                 NamedType::Union { decl, .. } => Some((name.clone(), decl.name.span)),
-                NamedType::Enum(_) => None,
+                NamedType::Enum(_) | NamedType::Trait(_) => None,
             })
             .collect();
         // In the order of the file, for the same messages at each run.

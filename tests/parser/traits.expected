@@ -1,0 +1,4 @@
+exit: 0
+----- stdout
+(trait Shape (fun area () in Float required) (fun describe () in Text [(return (text "forme d'aire " {(call (. self area))}))]) (fun double () in Float = (* 2 (call (. self area)))) (name : Text))
+----- stderr

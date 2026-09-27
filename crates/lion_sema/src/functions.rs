@@ -42,6 +42,8 @@ pub(crate) struct FunctionInfo {
     pub(crate) closure: Option<ClosureInfo>,
     /// For an anonymous function, the function type expected where it is written.
     expected: Option<ir::FunData>,
+    /// The type variables, with the trait each must satisfy (`None` for `Type`) (§15.2).
+    pub(crate) type_params: Vec<(ir::VarRef, Option<Type>, Span)>,
     /// `None` when the declaration has an error or needs what is not implemented.
     pub(crate) signature: Option<Vec<ParamInfo>>,
     /// The return type, when written.
@@ -56,7 +58,9 @@ pub(crate) struct FunctionInfo {
 
 impl FunctionInfo {
     fn is_generic(&self) -> bool {
-        self.signature.as_ref().is_some_and(|params| params.iter().any(|param| param.ty.is_none()))
+        self.signature
+            .as_ref()
+            .is_some_and(|params| params.iter().any(|param| param.ty.is_none_or(Type::has_vars)))
     }
 
     /// `passes`, `Student.passes` for a method, `geometry.area` in a module.
@@ -91,6 +95,8 @@ pub(crate) struct Instance {
     origin: Option<Span>,
     ret: Ret,
     state: BodyState,
+    /// The types of the type variables of the function, for this instance (§15.2).
+    bindings: HashMap<ir::VarRef, Type>,
     /// Known once the body is checked.
     reads: Vec<ir::LocalId>,
     calls: Vec<usize>,
@@ -219,6 +225,7 @@ impl<'a> Checker<'a> {
         for index in 0..self.structs.len() {
             self.resolve_fields(index);
         }
+        self.resolve_traits();
         for module in 0..count {
             self.enter_module(module);
             self.register_top_level(module);
@@ -244,6 +251,8 @@ impl<'a> Checker<'a> {
                 self.functions[index].instance = Some(instance);
             }
         }
+        self.enter_module(0);
+        self.conform_traits();
         for module in (1..count).rev() {
             self.check_module_init(module);
         }
@@ -311,12 +320,52 @@ impl<'a> Checker<'a> {
             native: None,
             closure: Some(ClosureInfo { captures }),
             expected,
+            type_params: Vec::new(),
             signature: None,
             declared_ret: None,
             modifies: Vec::new(),
             instances: HashMap::new(),
             instance: None,
         });
+    }
+
+    /// A default method of a trait, given to a type that satisfies it (§14.2).
+    pub(crate) fn register_default_method(
+        &mut self,
+        decl: Rc<ast::FunDecl>,
+        receiver: Type,
+        module: usize,
+    ) -> usize {
+        let index = self.functions.len();
+        let name = decl.name.name.clone();
+        let previous = self.enter_module(module);
+        self.functions.push(FunctionInfo {
+            decl,
+            module,
+            prefix: String::new(),
+            receiver: Some(receiver),
+            implicit_self: false,
+            var_self: false,
+            native: None,
+            closure: None,
+            expected: None,
+            type_params: Vec::new(),
+            signature: None,
+            declared_ret: None,
+            modifies: Vec::new(),
+            instances: HashMap::new(),
+            instance: None,
+        });
+        self.methods.entry((receiver, name)).or_default().push(index);
+        self.resolve_signature(index);
+        let function = &self.functions[index];
+        if function.signature.is_some() && !function.is_generic() {
+            let ret = function.declared_ret.map_or(Ret::Unknown, Ret::Declared);
+            let instance = self.new_instance(index, Vec::new(), None, ret);
+            self.functions[index].instance = Some(instance);
+        }
+        self.enter_module(previous);
+        index
     }
 
     /// The types of the parameters of an instance.
@@ -340,6 +389,7 @@ impl<'a> Checker<'a> {
             native: None,
             closure: None,
             expected: None,
+            type_params: Vec::new(),
             signature: None,
             declared_ret: None,
             modifies: Vec::new(),
@@ -444,6 +494,7 @@ impl<'a> Checker<'a> {
             arg_types,
             origin,
             ret,
+            bindings: HashMap::new(),
             state: BodyState::Unchecked,
             reads: Vec::new(),
             calls: Vec::new(),
@@ -472,9 +523,36 @@ impl<'a> Checker<'a> {
             );
             supported = false;
         }
-        if let Some((name, _)) = decl.type_params.first() {
-            self.not_implemented(name.span, "type variables", "§15.2");
-            supported = false;
+        // `T in Comparable`, `T in Type`: the type variables of the signature (§15.2).
+        let outer_vars = self.type_vars.len();
+        let mut type_params = Vec::new();
+        for (name, constraint) in &decl.type_params {
+            let var = ir::VarRef::new(&name.name);
+            let constraint = match &constraint.kind {
+                ast::TypeExprKind::Named { module, name: set, args }
+                    if module.is_empty() && args.is_empty() && set.name == "Type" =>
+                {
+                    None
+                }
+                _ => match self.resolve_type(constraint) {
+                    Some(trait_type @ Type::Trait(_)) => Some(trait_type),
+                    Some(other) => {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!("`{other}` is not a trait"))
+                                .with_primary(constraint.span, "")
+                                .with_note("a type variable is declared with a trait, or `Type` for every type (§15.2)"),
+                        );
+                        supported = false;
+                        None
+                    }
+                    None => {
+                        supported = false;
+                        None
+                    }
+                },
+            };
+            type_params.push((var, constraint, name.span));
+            self.type_vars.push((name.name.clone(), Type::Var(var)));
         }
         if let Some((abi, span)) = &decl.foreign {
             supported &= self.foreign_function(index, abi, *span);
@@ -508,7 +586,7 @@ impl<'a> Checker<'a> {
                 );
                 supported = false;
             }
-            if param.name.name == "self" && decl.receiver.is_none() {
+            if param.name.name == "self" && self.functions[index].receiver.is_none() {
                 self.diagnostics.push(
                     Diagnostic::error("`self` is a parameter of methods only")
                         .with_primary(param.name.span, "")
@@ -605,9 +683,11 @@ impl<'a> Checker<'a> {
             .filter(|name| !shared.contains(&name.name))
             .filter_map(|name| self.modified_global(name))
             .collect();
+        self.type_vars.truncate(outer_vars);
         let function = &mut self.functions[index];
         function.declared_ret = declared_ret;
         function.modifies = modifies;
+        function.type_params = type_params;
         function.signature = supported.then_some(params);
     }
 
@@ -683,7 +763,12 @@ impl<'a> Checker<'a> {
         let first_diagnostic = self.diagnostics.len();
         let previous = self.enter_module(self.functions[function].module);
         let interrupted = std::mem::replace(&mut self.ctx, Context::new(ContextKind::Function(instance)));
+        // In the body, a type variable is the type it takes for this instance (§15.2).
+        let bindings: Vec<(String, Type)> =
+            self.instances[instance].bindings.iter().map(|(var, ty)| (var.name(), *ty)).collect();
+        let outer_vars = std::mem::replace(&mut self.type_vars, bindings);
         let (body, defaults, param_types) = self.function_body(instance, &params);
+        self.type_vars = outer_vars;
         let ctx = std::mem::replace(&mut self.ctx, interrupted);
         self.enter_module(previous);
         // An error in a generic function shows which call created the instance.
@@ -727,7 +812,10 @@ impl<'a> Checker<'a> {
             .iter()
             .enumerate()
             .map(|(position, param)| {
-                let ty = param.ty.or_else(|| arg_types.get(position).copied());
+                let ty = match param.ty {
+                    Some(ty) if ty.has_vars() => arg_types.get(position).copied(),
+                    ty => ty.or_else(|| arg_types.get(position).copied()),
+                };
                 let id = self.push_local(LocalInfo {
                     name: param.name.clone(),
                     ty,
@@ -807,6 +895,7 @@ impl<'a> Checker<'a> {
             ast::FunBody::Expr(value) => {
                 self.return_in_function(instance, Some(value), value.span).into_iter().collect()
             }
+            ast::FunBody::Required => unreachable!("a required method of a trait has no instance"),
             // The implementation computes the value from the parameters.
             ast::FunBody::Foreign => {
                 let native = self.functions[function].native.expect("a checked foreign function is native");
@@ -1081,10 +1170,62 @@ impl<'a> Checker<'a> {
         if let Some(&instance) = self.functions[function].instances.get(&arg_types) {
             return Some(instance);
         }
-        let ret = self.functions[function].declared_ret.map_or(Ret::Unknown, Ret::Declared);
+        let bindings = self.bind_type_variables(function, &arg_types, call)?;
+        let ret = self.functions[function]
+            .declared_ret
+            .map_or(Ret::Unknown, |ret| Ret::Declared(ret.substitute(&bindings)));
         let instance = self.new_instance(function, arg_types.clone(), Some(call), ret);
+        self.instances[instance].bindings = bindings;
         self.functions[function].instances.insert(arg_types, instance);
         Some(instance)
+    }
+
+    /// The types that the type variables take for these arguments, which must fit the
+    /// parameters, and satisfy the traits of the variables (§15.2).
+    fn bind_type_variables(
+        &mut self,
+        function: usize,
+        arg_types: &[Type],
+        call: Span,
+    ) -> Option<HashMap<ir::VarRef, Type>> {
+        let mut bindings = HashMap::new();
+        let params = self.functions[function].signature.clone().unwrap_or_default();
+        for (param, &actual) in params.iter().zip(arg_types) {
+            let Some(pattern) = param.ty.filter(|ty| ty.has_vars()) else { continue };
+            if !pattern.unify(actual, &mut bindings) {
+                let mut error = Diagnostic::error(format!(
+                    "the parameter `{}` is {}, which does not fit {}",
+                    param.name,
+                    pattern,
+                    article(actual)
+                ))
+                .with_primary(call, "")
+                .with_secondary(param.span, "parameter declared here");
+                if let Type::Var(var) = pattern
+                    && let Some(bound) = bindings.get(&var)
+                {
+                    error = error.with_note(format!("`{}` is already {bound} for this call", var.name()));
+                }
+                self.diagnostics.push(error);
+                return None;
+            }
+        }
+        for &(var, constraint, span) in &self.functions[function].type_params.clone() {
+            let (Some(constraint), Some(&bound)) = (constraint, bindings.get(&var)) else { continue };
+            if !bound.is_subset_of(constraint) {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("{} is not {constraint}", crate::capitalize(&article(bound))))
+                        .with_primary(call, "")
+                        .with_secondary(span, format!("`{}` must be {constraint}", var.name()))
+                        .with_note(format!(
+                            "the type variable `{}` takes the type of the argument (§15.2)",
+                            var.name()
+                        )),
+                );
+                return None;
+            }
+        }
+        Some(bindings)
     }
 
     fn argument(&mut self, function: &str, arg: &ast::Arg, param: &ParamInfo) -> Option<Pending> {
@@ -1123,6 +1264,10 @@ impl<'a> Checker<'a> {
     }
 
     fn value_argument(&mut self, arg: &ast::Arg, param: &ParamInfo) -> Option<Pending> {
+        // A type variable takes the type of the argument (§15.2).
+        if param.ty.is_some_and(Type::has_vars) {
+            return self.expr(&arg.value).map(Pending::Value);
+        }
         let value = match param.ty {
             Some(ty) => self.expr_expecting(&arg.value, ty)?,
             None => self.expr(&arg.value)?,
@@ -1356,6 +1501,7 @@ impl<'a> Checker<'a> {
             arg_types: Vec::new(),
             origin: None,
             ret: Ret::Declared(ret),
+            bindings: HashMap::new(),
             state: BodyState::Checked,
             reads: Vec::new(),
             calls: Vec::new(),
