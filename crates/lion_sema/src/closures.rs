@@ -244,6 +244,87 @@ impl Checker<'_> {
     }
 
     /// `f` used as a value, for a function of the file (§11).
+    /// `show`, `sum`… used as a value (§11.3): the function `fun(v) = show(v)`, whose
+    /// parameter takes the type expected where it is written, as for a generic function
+    /// (C65, C94).
+    pub(crate) fn standard_function_value(
+        &mut self,
+        name: &str,
+        span: Span,
+        expected: Option<Type>,
+    ) -> Option<ir::Expr> {
+        // `ask` and `exit` also take no value (C59).
+        let counts: &[usize] = if matches!(name, "ask" | "exit") { &[0, 1] } else { &[1] };
+        let functions: Vec<ir::FunData> = expected
+            .map(|ty| {
+                ty.members()
+                    .into_iter()
+                    .filter_map(|member| match member {
+                        Type::Fun(function) => Some(function.get()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let Some(count) =
+            functions.iter().map(|function| function.params.len()).find(|count| counts.contains(count))
+        else {
+            let error = match functions.first() {
+                Some(other) => {
+                    let other = Type::function(other.params.clone(), other.required as usize, other.ret);
+                    Diagnostic::error(format!("`{name}` cannot be {}", crate::article(other)))
+                        .with_primary(span, "")
+                        .with_note(format!(
+                            "`{name}` takes {}",
+                            if counts.len() == 2 { "one value or none" } else { "one value" }
+                        ))
+                }
+                None => {
+                    Diagnostic::error(format!("the types of the parameters of `{name}` are not known here"))
+                        .with_primary(span, "")
+                        .with_note(format!(
+                            "`{name}` is a standard function that takes values of several types (§23)"
+                        ))
+                        .with_help(format!("give the value a function type, as `let f = {name} in fun(Int)`"))
+                }
+            };
+            self.diagnostics.push(error);
+            return None;
+        };
+        // Names that no program can write, so that they hide nothing.
+        let params: Vec<String> = (1..=count).map(|position| format!("%value{position}")).collect();
+        let read = |name: String| ast::Expr { kind: ast::ExprKind::Name(name), span };
+        let call = ast::ExprKind::Call {
+            callee: Box::new(read(name.to_string())),
+            args: params
+                .iter()
+                .map(|param| ast::Arg { var_marker: None, name: None, value: read(param.clone()) })
+                .collect(),
+        };
+        let decl = ast::FunDecl {
+            private: None,
+            foreign: None,
+            infix: false,
+            receiver: None,
+            // Anonymous: under its own name, the body would call itself (C65).
+            name: ast::Ident { name: "fun".to_string(), span },
+            params: params
+                .into_iter()
+                .map(|param| ast::Param {
+                    var: None,
+                    name: ast::Ident { name: param, span },
+                    ty: None,
+                    default: None,
+                })
+                .collect(),
+            ret: None,
+            type_params: Vec::new(),
+            modifies: Vec::new(),
+            body: ast::FunBody::Expr(ast::Expr { kind: call, span }),
+        };
+        self.anonymous_function(&decl, span, expected)
+    }
+
     pub(crate) fn function_value(
         &mut self,
         index: usize,

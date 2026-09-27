@@ -58,7 +58,7 @@ impl Checker<'_> {
                 // `m.x`: a variable of a module (§20.2).
                 ast::ExprKind::Name(module) if self.imported_module(module).is_some() => {
                     let module = self.imported_module(module).expect("checked");
-                    self.module_global(module, name, span)
+                    self.module_value(module, name, span, None)
                 }
                 // `m.Color.red`: a value of an enumeration of a module.
                 ast::ExprKind::Field { object: inner, name: type_name } if matches!(&inner.kind, ast::ExprKind::Name(module) if self.imported_module(module).is_some()) =>
@@ -228,10 +228,7 @@ impl Checker<'_> {
                 Some(typed(ir::ExprKind::Global(local), ty?, span))
             }
             Resolved::Function(index) => self.function_value(index, span, None),
-            Resolved::Standard(_) => {
-                self.not_implemented(span, "standard functions used as values", "§11, §23");
-                None
-            }
+            Resolved::Standard(standard) => self.standard_function_value(standard, span, None),
             Resolved::Nothing => None,
         }
     }

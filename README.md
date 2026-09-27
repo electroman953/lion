@@ -15,7 +15,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
 
 - **Programmes-scripts** (§20.1) : `let`, `var`, déclaration sans valeur (`let e in Text`), annotation (`in Float`), redéclaration dans le même bloc, `=`, `+=`, `-=`, `*=`.
 - **Contrôle de flux** : blocs `if`/`elif`/`else`, `while` et `for` (sur plusieurs lignes ou sur une seule), intervalles `a..b` et `x in a..b`, `break`, `continue`, `return` pour terminer le script, expression `if … then … else`. Les portées suivent les blocs ; un nom ne peut pas être redéclaré dans un bloc intérieur (§6.5).
-- **Fonctions comme valeurs** (§11) : type `fun(Int) in Int`, fonctions passées en argument, rangées dans des listes ou des champs, fonctions anonymes `fun(x in Int) = x * 2`, closures (copie des variables à la création, partage avec `modifies`), curryfication `f(1)(2)`.
+- **Fonctions comme valeurs** (§11) : type `fun(Int) in Int`, fonctions passées en argument, rangées dans des listes ou des champs, fonctions anonymes `fun(x in Int) = x * 2`, closures (copie des variables à la création, partage avec `modifies`), curryfication `f(1)(2)`, fonctions standard et fonctions des modules comme valeurs (`each(l, show)`, `apply(text.upper, t)`).
 - **Fonctions** (§11) : déclarations `fun` en bloc ou en forme courte (`fun square(x) = x * x`), paramètres sans type qui rendent la fonction générique (une version par types d'arguments, §15.3), types de retour écrits ou inférés, `return` vérifié sur tous les chemins, récursion, paramètres `var` qui modifient la variable de l'appelant, valeurs par défaut, arguments nommés, globales lues par les fonctions et modifiées avec `modifies`.
 - **Listes** (§16) : `[1, 2, 3]`, `List of T`, indices à partir de 1 et extraits `l[2..4]` (bug hors limites), `size`, `first`, `last`, `add`, `l[i] = v`, `x in l`, égalité par contenu, `for x in l`, compréhensions `[f(x), x in l, condition]`, `sum`, avec la sémantique de valeur (§17.1). Les Text s'indexent aussi par caractère.
 - **Ensembles et n-uplets** (§16) : `{1, 2}`, `Set of T`, compréhensions `{f(x), x in l, condition}`, `x in s`, `union`, `inter`, `minus`, `subset`, `size`, `for`, `sum`, `add` ; n-uplets `(a, b)` comparables et utilisables dans les collections.
@@ -50,7 +50,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 - **Mode compilé** (§22) : `lion build f.lion` produit un exécutable natif, par Rust et LLVM, qui donne exactement la même sortie, les mêmes bugs et le même code de sortie que `lion run`, sans les alertes. Il va de 3 à 13 fois plus vite que la machine virtuelle sur nos mesures.
 
-**Pas encore implémenté** : méthodes de List, Set et Map, types et fonctions standard comme valeurs, lecture des éléments d'un n-uplet, modules `json`, `net` et `ui`, débogueur. La bibliothèque `ui` attend une décision de l'auteur : voir la [proposition](docs/design/ui.md). La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+**Pas encore implémenté** : méthodes de List, Set et Map, types comme valeurs, lecture des éléments d'un n-uplet, modules `json`, `net` et `ui`, débogueur. La bibliothèque `ui` attend une décision de l'auteur : voir la [proposition](docs/design/ui.md). La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ## Construire et utiliser
 

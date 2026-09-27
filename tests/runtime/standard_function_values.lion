@@ -1,0 +1,29 @@
+// The functions of the standard library and of the modules used as values (§11.3,
+// C94): a standard function takes the function type expected where it is written.
+use text
+use math
+use sets
+fun apply(f in fun(Text) in Text, t in Text) in Text = f(t)
+show(apply(text.upper, "abc"))
+show(apply(text.trim, "  x  "))
+fun each(l in List of Int, f in fun(Int)):
+    for x in l: f(x) ;
+;
+each([1, 2], show)
+let root = math.sqrt
+show(root(16.0))
+let print_text = show in fun(Text)
+print_text("hello")
+let total = sum in fun(List of Int) in Int
+show(total([1, 2, 3]))
+let floors = [floor(x), x in [1.5, 2.5]]
+show(floors)
+let f = floor in fun(Float) in Int
+show(f(3.7))
+show(sets.any([1, 2, 3], fun(n in Int) = n > 2))
+let sort = sets.sorted in fun(List of Int) in List of Int
+show(sort([3, 1, 2]))
+show(print_text)
+let quit = exit in fun()
+let stop = exit in fun(Int)
+show(quit)

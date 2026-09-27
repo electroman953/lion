@@ -143,6 +143,28 @@ impl<'a> Checker<'a> {
     }
 
     /// `m.x`: a global of a module, read after the module is initialized (D81).
+    /// `m.x` as a value: a variable of the module, or one of its functions (§11, §20.2).
+    pub(crate) fn module_value(
+        &mut self,
+        module: usize,
+        name: &ast::Ident,
+        span: Span,
+        expected: Option<Type>,
+    ) -> Option<ir::Expr> {
+        let Some(&function) = self.table_of(module).function_names.get(&name.name) else {
+            return self.module_global(module, name, span);
+        };
+        if let Some(private) = self.functions[function].decl.private {
+            self.private_error(module, name, private);
+            return None;
+        }
+        let value = self.function_value(function, span, expected)?;
+        // The module gets the values of its globals before any call of the function (D81).
+        let init = ir::Stmt::InitModule { module: module as u32 };
+        let ty = value.ty;
+        Some(typed(ir::ExprKind::Block { stmts: vec![init], value: Box::new(value) }, ty, span))
+    }
+
     pub(crate) fn module_global(&mut self, module: usize, name: &ast::Ident, span: Span) -> Option<ir::Expr> {
         let Some(global) = self.table_of(module).globals.get(&name.name) else {
             self.no_member(module, name);

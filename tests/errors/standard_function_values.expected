@@ -1,0 +1,37 @@
+exit: 1
+----- stdout
+----- stderr
+error: the types of the parameters of `show` are not known here
+  --> tests/errors/standard_function_values.lion:3:9
+   |
+ 3 | let f = show
+   |         ^^^^
+   |
+   = `show` is a standard function that takes values of several types (§23)
+   = help: give the value a function type, as `let f = show in fun(Int)`
+
+error: `sum` cannot be a fun(Int, Int) in Int
+  --> tests/errors/standard_function_values.lion:4:9
+   |
+ 4 | let g = sum in fun(Int, Int) in Int
+   |         ^^^
+   |
+   = `sum` takes one value
+
+error: `csv.parse` is private
+  --> tests/errors/standard_function_values.lion:6:16
+   |
+ 6 | show(apply(csv.parse, "a,b"))
+   |                ^^^^^
+   |
+   = `private` limits a declaration to its file (§20.3, D10)
+
+error: `exit` cannot be a fun(Int, Int)
+  --> tests/errors/standard_function_values.lion:7:9
+   |
+ 7 | let e = exit in fun(Int, Int)
+   |         ^^^^
+   |
+   = `exit` takes one value or none
+
+4 errors found

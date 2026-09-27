@@ -1,0 +1,7 @@
+// A standard function used as a value needs the type expected (C94).
+use csv
+let f = show
+let g = sum in fun(Int, Int) in Int
+fun apply(h in fun(Text) in Text, t in Text) in Text = h(t)
+show(apply(csv.parse, "a,b"))
+let e = exit in fun(Int, Int)

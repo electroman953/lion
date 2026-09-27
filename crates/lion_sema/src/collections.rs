@@ -147,14 +147,29 @@ impl Checker<'_> {
             // A function value takes the types of the function type expected (§11).
             ast::ExprKind::Fun(decl) => self.anonymous_function(decl, expr.span, Some(expected)),
             ast::ExprKind::Name(name)
-                if matches!(expected, Type::Fun(_)) && !self.is_variable(name) && self.is_function(name) =>
+                if matches!(expected, Type::Fun(_))
+                    && !self.is_variable(name)
+                    && (self.is_function(name)
+                        || crate::names::IMPLEMENTED_FUNCTIONS.contains(&name.as_str())) =>
             {
                 match self.resolve(name, expr.span) {
                     crate::names::Resolved::Function(index) => {
                         self.function_value(index, expr.span, Some(expected))
                     }
+                    crate::names::Resolved::Standard(standard) => {
+                        self.standard_function_value(standard, expr.span, Some(expected))
+                    }
                     _ => self.expr(expr),
                 }
+            }
+            // `text.upper` where a function is expected (§11, §20.2).
+            ast::ExprKind::Field { object, name }
+                if matches!(expected, Type::Fun(_))
+                    && matches!(&object.kind, ast::ExprKind::Name(module) if self.imported_module(module).is_some()) =>
+            {
+                let ast::ExprKind::Name(module) = &object.kind else { unreachable!("checked") };
+                let module = self.imported_module(module).expect("checked");
+                self.module_value(module, name, expr.span, Some(expected))
             }
             // The elements of a list expect the type of the elements: `[red, blue] in List of Color`.
             ast::ExprKind::List(elements) | ast::ExprKind::Set(elements)
