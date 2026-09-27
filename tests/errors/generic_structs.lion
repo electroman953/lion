@@ -1,0 +1,13 @@
+struct Pair of (A, B), A in Type, B in Type:
+    first in A
+    second in B
+;
+struct Wrapper of T, T in Type:
+    items in List of T = []
+;
+let a = (1, 2) in Pair of Int
+let b = (1, 2) in Pair
+fun Pair.swap() = 1
+fun firsts(p in Pair of (T, T)) in T, T in Type = p.first
+let w = Wrapper()
+let x = (1, 2) in Pair of (Int, Text)

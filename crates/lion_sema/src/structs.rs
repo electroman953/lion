@@ -18,6 +18,8 @@ use crate::{Checker, Context, ContextKind, LocalInfo, article, capitalize, typed
 
 pub(crate) struct StructInfo<'a> {
     pub(crate) decl: &'a ast::StructDecl,
+    /// For an instance of a generic structure: its type parameters and their types.
+    pub(crate) type_args: Vec<(String, Type)>,
     /// The file that declares it.
     pub(crate) module: usize,
     pub(crate) id: StructRef,
@@ -130,11 +132,26 @@ impl<'a> Checker<'a> {
             return;
         }
         self.tables.type_spans.insert(name.clone(), decl.name.span);
+        if !decl.type_params.is_empty() {
+            self.register_generic_structure(decl);
+            return;
+        }
         self.tables.struct_names.insert(name.clone(), self.structs.len());
         let qualified = self.qualified(name);
+        self.push_structure(decl, StructRef::new(&qualified), Vec::new());
+    }
+
+    /// A structure, or an instance of a generic one; returns its index.
+    pub(crate) fn push_structure(
+        &mut self,
+        decl: &'a ast::StructDecl,
+        id: StructRef,
+        type_args: Vec<(String, Type)>,
+    ) -> usize {
         self.structs.push(StructInfo {
             decl,
-            id: StructRef::new(&qualified),
+            type_args,
+            id,
             module: self.module,
             fields: Vec::new(),
             state: State::Unchecked,
@@ -145,6 +162,7 @@ impl<'a> Checker<'a> {
             validator: None,
             constructor: None,
         });
+        self.structs.len() - 1
     }
 
     pub(crate) fn resolve_fields(&mut self, index: usize) {
@@ -153,8 +171,10 @@ impl<'a> Checker<'a> {
         self.enter_module(previous);
     }
 
-    fn resolve_fields_here(&mut self, index: usize) {
+    pub(crate) fn resolve_fields_here(&mut self, index: usize) {
         let decl = self.structs[index].decl;
+        let depth = self.type_vars.len();
+        self.type_vars.extend(self.structs[index].type_args.iter().cloned());
         let mut fields: Vec<FieldInfo> = Vec::new();
         let mut valid = true;
         for line in &decl.lines {
@@ -179,6 +199,7 @@ impl<'a> Checker<'a> {
                 private: field.private.is_some(),
             });
         }
+        self.type_vars.truncate(depth);
         let info = &mut self.structs[index];
         info.fields = fields;
         info.valid = valid;
@@ -215,10 +236,13 @@ impl<'a> Checker<'a> {
                 let previous = self.enter_module(self.structs[index].module);
                 let interrupted =
                     std::mem::replace(&mut self.ctx, Context::new(ContextKind::Structure(index)));
+                let depth = self.type_vars.len();
+                self.type_vars.extend(self.structs[index].type_args.iter().cloned());
                 self.check_defaults(index);
                 // The validator starts from its own context: its first local is `self`.
                 self.ctx = Context::new(ContextKind::Structure(index));
                 self.check_conditions(index);
+                self.type_vars.truncate(depth);
                 self.ctx = interrupted;
                 self.enter_module(previous);
                 self.structs[index].state = State::Checked;
@@ -461,9 +485,18 @@ impl<'a> Checker<'a> {
 
     /// The values of the fields, in order, for the values given to build a structure
     /// (§12.2, D55, D70).
-    fn field_values(&mut self, index: usize, given: &[Given], span: Span) -> Option<Vec<ir::Expr>> {
+    /// The values of the fields, from the values given and the default values. The given
+    /// values may be checked already, for a generic structure (§15.1).
+    fn field_values(
+        &mut self,
+        index: usize,
+        given: &[Given],
+        span: Span,
+        mut checked: Option<Vec<Option<ir::Expr>>>,
+    ) -> Option<Vec<ir::Expr>> {
+        let unchecked = checked.is_none();
         if !self.ensure_structure(index, span) {
-            for value in given {
+            for value in given.iter().filter(|_| unchecked) {
                 self.expr(value.value);
             }
             return None;
@@ -497,14 +530,14 @@ impl<'a> Checker<'a> {
                     error.with_note("the last fields have a default value and can be left out (§12.2, D70)");
             }
             self.diagnostics.push(error);
-            for value in given {
+            for value in given.iter().filter(|_| unchecked) {
                 self.expr(value.value);
             }
             return None;
         }
         let mut values = Vec::new();
         let mut valid = true;
-        for (value, field) in given.iter().zip(&fields) {
+        for (position, (value, field)) in given.iter().zip(&fields).enumerate() {
             if let Some(var) = value.var {
                 self.diagnostics.push(
                     Diagnostic::error("a structure is built from values")
@@ -526,16 +559,19 @@ impl<'a> Checker<'a> {
                     .with_note("named values keep the order of the fields (§12.2)"),
                 );
                 // The value is probably meant for another field: its type is not checked.
-                self.expr(value.value);
+                if unchecked {
+                    self.expr(value.value);
+                }
                 valid = false;
                 continue;
             }
             let ty = field.ty.expect("the fields of a valid structure have a type");
             let context = (field.span, format!("the field `{}` is {}", field.name, article(ty)));
-            match self
-                .expr_expecting(value.value, ty)
-                .and_then(|checked| self.coerce(checked, ty, Some(context)))
-            {
+            let value = match &mut checked {
+                Some(values) => values[position].take(),
+                None => self.expr_expecting(value.value, ty),
+            };
+            match value.and_then(|checked| self.coerce(checked, ty, Some(context))) {
                 Some(checked) => values.push(checked),
                 None => valid = false,
             }
@@ -553,7 +589,18 @@ impl<'a> Checker<'a> {
     /// `Student(...)`, `(...) as Student`: the value, or a `Student or Error` when the
     /// conditions are checked at run time (§12.2, §12.3, D39).
     pub(crate) fn construct(&mut self, index: usize, given: &[Given], span: Span) -> Option<ir::Expr> {
-        let values = self.field_values(index, given, span)?;
+        self.construct_from(index, given, span, None)
+    }
+
+    /// The same, with the given values checked already.
+    pub(crate) fn construct_from(
+        &mut self,
+        index: usize,
+        given: &[Given],
+        span: Span,
+        checked: Option<Vec<Option<ir::Expr>>>,
+    ) -> Option<ir::Expr> {
+        let values = self.field_values(index, given, span, checked)?;
         let id = self.structs[index].id;
         let ty = Type::Struct(id);
         let built = |fields| typed(ir::ExprKind::Struct { structure: id, fields }, ty, span);
@@ -591,7 +638,7 @@ impl<'a> Checker<'a> {
         given: &[Given],
         span: Span,
     ) -> Option<ir::Expr> {
-        let values = self.field_values(index, given, span)?;
+        let values = self.field_values(index, given, span, None)?;
         let id = self.structs[index].id;
         let ty = Type::Struct(id);
         let valid = |value: bool| typed(ir::ExprKind::Bool(value), Type::Bool, span);

@@ -95,6 +95,9 @@ pub fn print_stmt(stmt: &Stmt) -> String {
 
 fn print_struct(decl: &StructDecl) -> String {
     let mut out = format!("(struct {}", decl.name.name);
+    for (name, set) in &decl.type_params {
+        out.push_str(&format!(" ({} in {})", name.name, print_type(set)));
+    }
     for line in &decl.lines {
         match line {
             StructLine::Field(field) => {

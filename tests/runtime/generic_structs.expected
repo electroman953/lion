@@ -1,0 +1,15 @@
+exit: 0
+----- stdout
+Pair(first: 1, second: "one")
+2
+one
+Pair(first: 2.5, second: [1, 2])
+2
+Box(value: 3, limit: 10)
+error("invalid Box: value = 12, limit = 10 does not satisfy value <= limit")
+invalid Box: value = 12, limit = 10 does not satisfy value <= limit
+6
+true
+{Pair(first: "a", second: 1), Pair(first: "b", second: 2)}
+["x", "y"]
+----- stderr

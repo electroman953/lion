@@ -1,0 +1,6 @@
+struct Bad of (A, B), A in Type:
+    x in A
+;
+struct Worse of T, U in Type:
+    x in T
+;

@@ -9,13 +9,13 @@ error: the structure `point` needs an uppercase name
    |
    = help: write `Point` (§4.2)
 
-error: not implemented yet: generic structures
-  --> tests/parser/struct_errors.lion:4:13
+error: the type parameter `A` needs its set of types
+  --> tests/parser/struct_errors.lion:4:16
    |
  4 | struct Pair of A:
-   |             ^^
+   |                ^
    |
-   = this part of Lion (spec §15.1) is not supported by this version of the implementation
+   = help: add `, A in Type` after the parameters (§15.2)
 
 error: the fields of a structure go on their own lines
   --> tests/parser/struct_errors.lion:7:14

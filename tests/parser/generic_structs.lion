@@ -1,0 +1,8 @@
+// A structure with type parameters (§15.1, D78).
+struct Pair of (A, B), A in Type, B in Comparable:
+    first in A
+    second in B
+;
+struct Box of T, T in Type:
+    value in T
+;

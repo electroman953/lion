@@ -120,6 +120,9 @@ impl Checker<'_> {
                 _ => Type::Task(lion_ir::TypeRef::new(element)),
             });
         }
+        if let Some(&template) = self.tables.generic_structs.get(&name.name) {
+            return self.generic_struct_type(template, args, ty.span);
+        }
         if let Some(&index) = self.tables.struct_names.get(&name.name) {
             if !args.is_empty() {
                 self.diagnostics.push(

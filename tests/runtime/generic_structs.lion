@@ -1,0 +1,47 @@
+// Generic structures (§15.1, D78): one structure per list of types (§15.3).
+struct Pair of (A, B), A in Type, B in Type:
+    first in A
+    second in B
+;
+let p = Pair(1, "one")
+show(p)
+show(p.first + 1)
+show(p.second)
+let q = (2.5, [1, 2]) in Pair of (Float, List of Int)
+show(q)
+show(q.second.size)
+
+struct Box of T, T in Comparable:
+    value in T
+    limit in T
+    value <= limit
+;
+let b = Box(3, 10)
+show(b)
+let big = 12
+let d = Box(value: big, limit: 10)
+show(d)
+match d:
+    in Error e: show(e.message()) ;
+    in Box of Int ok: show(ok.value) ;
+;
+
+struct Node of T, T in Type:
+    value in T
+    next in maybe Node of T = none
+;
+let list = Node(1, Node(2, Node(3)))
+fun total(n in Node of Int) in Int:
+    var sum = n.value
+    var current = n.next
+    while current != none:
+        sum += current.value
+        current = current.next
+    ;
+    return sum
+;
+show(total(list))
+show(Pair(1, 2) == Pair(1, 2))
+show({Pair("a", 1), Pair("a", 1), Pair("b", 2)})
+let words = [Pair("x", 1), Pair("y", 2)]
+show([w.first, w in words])

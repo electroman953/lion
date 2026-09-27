@@ -550,6 +550,63 @@ impl<'t> Parser<'t> {
         }
     }
 
+    /// `of (A, B), A in Type, B in Type`: each type parameter, with the set of types it
+    /// takes, which is always written (§15.1, §15.2, §26: `type_params`).
+    fn struct_type_params(&mut self) -> PResult<Vec<(Ident, TypeExpr)>> {
+        self.bump();
+        let mut names = Vec::new();
+        let parenthesized = self.eat(&TokenKind::LParen);
+        loop {
+            let span = self.span();
+            let TokenKind::UpperIdent(name) = self.peek() else {
+                return Err(self.expected("a type parameter such as `T`"));
+            };
+            names.push(Ident { name: name.clone(), span });
+            self.bump();
+            if !parenthesized || !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        if parenthesized {
+            self.expect(&TokenKind::RParen, "`)`")?;
+        }
+        let mut constraints: Vec<(Ident, TypeExpr)> = Vec::new();
+        while self.eat(&TokenKind::Comma) {
+            let span = self.span();
+            let TokenKind::UpperIdent(name) = self.peek() else {
+                return Err(self.expected("the set of types of a type parameter, such as `T in Type`"));
+            };
+            let name = Ident { name: name.clone(), span };
+            self.bump();
+            if !self.eat_keyword(Keyword::In) {
+                return Err(self.expected("`in` and the set of types of the type parameter"));
+            }
+            constraints.push((name, self.type_expr()?));
+        }
+        let mut params = Vec::new();
+        for name in names {
+            let Some(position) =
+                constraints.iter().position(|(constrained, _)| constrained.name == name.name)
+            else {
+                let error =
+                    Diagnostic::error(format!("the type parameter `{}` needs its set of types", name.name))
+                        .with_primary(name.span, "")
+                        .with_help(format!("add `, {} in Type` after the parameters (§15.2)", name.name));
+                return Err(self.error(error));
+            };
+            let (_, constraint) = constraints.remove(position);
+            params.push((name, constraint));
+        }
+        if let Some((name, _)) = constraints.first() {
+            let error =
+                Diagnostic::error(format!("`{}` is not a type parameter of the structure", name.name))
+                    .with_primary(name.span, "")
+                    .with_help(format!("list it after `of`: `of ({}, ...)`", name.name));
+            return Err(self.error(error));
+        }
+        Ok(params)
+    }
+
     /// `struct Name: fields and invariants ;`, one per line (§12.1, §26).
     fn struct_statement(&mut self) -> PResult<Stmt> {
         let index = self.pos;
@@ -569,9 +626,7 @@ impl<'t> Parser<'t> {
             }
             _ => return Err(self.expected("the name of the structure")),
         };
-        if self.at_keyword(Keyword::Of) {
-            return Err(self.not_implemented(self.span(), "generic structures", "§15.1"));
-        }
+        let type_params = if self.at_keyword(Keyword::Of) { self.struct_type_params()? } else { Vec::new() };
         if !self.eat(&TokenKind::Colon) {
             return Err(self.expected("`:` and the fields of the structure"));
         }
@@ -600,7 +655,7 @@ impl<'t> Parser<'t> {
             }
         }
         let end = self.close_block(opener)?;
-        Ok(Stmt { kind: StmtKind::Struct(StructDecl { name, lines }), span: start.to(end) })
+        Ok(Stmt { kind: StmtKind::Struct(StructDecl { name, type_params, lines }), span: start.to(end) })
     }
 
     /// `Color = {red, green}`, `Days = [mon, tue]` or `Shape = Circle or Rect` (§13, §26).

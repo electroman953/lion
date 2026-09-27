@@ -105,6 +105,9 @@ pub enum TypeDefKind {
 #[derive(Clone, Debug)]
 pub struct StructDecl {
     pub name: Ident,
+    /// `struct Pair of (A, B), A in Type, B in Type`: the type parameters, each with the
+    /// set of types it takes (§15.1, D78).
+    pub type_params: Vec<(Ident, TypeExpr)>,
     /// The fields and the invariants, in the order of the file.
     pub lines: Vec<StructLine>,
 }

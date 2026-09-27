@@ -1,0 +1,66 @@
+exit: 1
+----- stdout
+----- stderr
+error: `Pair` takes 2 type parameters: `Pair of (A, B)`
+  --> tests/errors/generic_structs.lion:8:19
+   |
+ 1 | struct Pair of (A, B), A in Type, B in Type:
+   |        ---- declared here
+  ...
+ 8 | let a = (1, 2) in Pair of Int
+   |                   ^^^^^^^^^^^
+   |
+   = the types of a generic structure are given with `of` (§15.1)
+
+error: `Pair` takes 2 type parameters: `Pair of (A, B)`
+  --> tests/errors/generic_structs.lion:9:19
+   |
+ 1 | struct Pair of (A, B), A in Type, B in Type:
+   |        ---- declared here
+  ...
+ 9 | let b = (1, 2) in Pair
+   |                   ^^^^
+   |
+   = the types of a generic structure are given with `of` (§15.1)
+
+error: not implemented yet: methods of generic types
+   --> tests/errors/generic_structs.lion:10:5
+    |
+ 10 | fun Pair.swap() = 1
+    |     ^^^^
+    |
+    = this part of Lion (spec §12.4, §15) is not supported by this version of the implementation
+
+error: not implemented yet: generic structures whose types are type variables
+   --> tests/errors/generic_structs.lion:11:17
+    |
+ 11 | fun firsts(p in Pair of (T, T)) in T, T in Type = p.first
+    |                 ^^^^^^^^^^^^^^
+    |
+    = this part of Lion (spec §15.1) is not supported by this version of the implementation
+
+error: the type `T` of this `Wrapper` is not known
+   --> tests/errors/generic_structs.lion:12:9
+    |
+  5 | struct Wrapper of T, T in Type:
+    |                   - type parameter declared here
+   ...
+ 12 | let w = Wrapper()
+    |         ^^^^^^^^^
+    |
+    = the types of a generic structure come from the values given for its fields (§15.1)
+    = help: write its types: `let x = (...) in Wrapper of T`
+
+error: mismatched types
+   --> tests/errors/generic_structs.lion:13:13
+    |
+  3 |     second in B
+    |     ------ the field `second` is a Text
+   ...
+ 13 | let x = (1, 2) in Pair of (Int, Text)
+    |             ^ this is an Int
+    |
+    = expected: Text
+    = found: Int
+
+6 errors found

@@ -261,6 +261,7 @@ impl<'a> Checker<'a> {
         }
         self.enter_module(0);
         self.conform_traits();
+        self.check_pending_constraints();
         self.register_tests();
         for module in (1..count).rev() {
             self.check_module_init(module);
@@ -445,7 +446,9 @@ impl<'a> Checker<'a> {
             kind: ast::TypeExprKind::Named { module: Vec::new(), name: receiver.clone(), args: Vec::new() },
             span: receiver.span,
         };
-        if matches!(receiver.name.as_str(), "List" | "Set" | "Domain" | "Map") {
+        if matches!(receiver.name.as_str(), "List" | "Set" | "Domain" | "Map")
+            || self.tables.generic_structs.contains_key(&receiver.name)
+        {
             self.not_implemented(receiver.span, "methods of generic types", "§12.4, §15");
             return None;
         }

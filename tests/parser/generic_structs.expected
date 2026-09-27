@@ -1,0 +1,5 @@
+exit: 0
+----- stdout
+(struct Pair (A in Type) (B in Comparable) (first : A) (second : B))
+(struct Box (T in Type) (value : T))
+----- stderr

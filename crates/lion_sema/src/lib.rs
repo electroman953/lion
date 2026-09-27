@@ -17,6 +17,7 @@ mod enums;
 mod expr;
 mod flow;
 mod functions;
+mod generic_structs;
 mod matching;
 mod methods;
 mod modules;
@@ -232,6 +233,12 @@ struct Checker<'a> {
     /// add a method of the same name to a type (§20.3).
     methods: HashMap<(Type, String), Vec<usize>>,
     structs: Vec<StructInfo<'a>>,
+    /// The structures with type parameters, whose instances are in `structs` (§15.1).
+    generic_structs: Vec<crate::generic_structs::GenericStruct<'a>>,
+    /// The types given to generic structures before the members of the traits were
+    /// known, checked afterwards.
+    pending_constraints: Vec<crate::generic_structs::PendingConstraint>,
+    trait_members_known: bool,
     traits: Vec<crate::traits::TraitInfo<'a>>,
     /// `Comparable`: the types that have an order (§15.2, C67).
     comparable: ir::TraitRef,
@@ -289,6 +296,9 @@ impl<'a> Checker<'a> {
             functions: Vec::new(),
             methods: HashMap::new(),
             structs: Vec::new(),
+            generic_structs: Vec::new(),
+            pending_constraints: Vec::new(),
+            trait_members_known: false,
             traits: Vec::new(),
             comparable: ir::TraitRef::new("Comparable"),
             error_trait: ir::TraitRef::new("Error"),

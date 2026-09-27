@@ -1229,6 +1229,9 @@ impl Checker<'_> {
         if let Some(&index) = self.tables.struct_names.get(name) {
             return self.construct(index, &Given::args(args), span);
         }
+        if let Some(&template) = self.tables.generic_structs.get(name) {
+            return self.construct_generic(template, args, span);
+        }
         let ty = ast::TypeExpr {
             kind: ast::TypeExprKind::Named {
                 module: Vec::new(),

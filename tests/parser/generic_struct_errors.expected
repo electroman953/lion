@@ -1,0 +1,20 @@
+exit: 1
+----- stdout
+----- stderr
+error: the type parameter `B` needs its set of types
+  --> tests/parser/generic_struct_errors.lion:1:19
+   |
+ 1 | struct Bad of (A, B), A in Type:
+   |                   ^
+   |
+   = help: add `, B in Type` after the parameters (§15.2)
+
+error: the type parameter `T` needs its set of types
+  --> tests/parser/generic_struct_errors.lion:4:17
+   |
+ 4 | struct Worse of T, U in Type:
+   |                 ^
+   |
+   = help: add `, T in Type` after the parameters (§15.2)
+
+2 errors found
