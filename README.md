@@ -4,7 +4,7 @@ Lion est un langage polyvalent, interprété ou compilé, dont l'écriture et la
 
 ## État
 
-L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 27.2 de la spec tournent tels quels (`tests/programs`). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
+Les étapes 2 à 4 de la feuille de route (§28) sont atteintes : les programmes 27.1 et 27.2 de la spec tournent tels quels (`tests/programs`). Le bilan détaillé, avec les limites connues et la prochaine étape (le compilateur natif), est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
 
 **Ce qui fonctionne aujourd'hui**
 
