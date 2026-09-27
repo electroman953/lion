@@ -172,10 +172,7 @@ fn recovery_skips_the_blocks_of_a_failed_statement() {
 
 #[test]
 fn unsupported_constructions_are_reported() {
-    let cases = [
-        ("parallel for f in files: show(f) ;", "not implemented yet: parallelism"),
-        ("trait S:\n;", "not implemented yet: traits"),
-    ];
+    let cases = [("trait S:\n;", "not implemented yet: traits")];
     for (text, message) in cases {
         assert_eq!(first_error(text), message, "for {text:?}");
     }
@@ -463,4 +460,10 @@ fn sets() {
     assert_eq!(ast("let s = {}"), "(let s (set))");
     assert_eq!(ast("let s = {x * 2, x in l, x > 1}"), "(let s (set (* x 2) (in x l) (> x 1)))");
     assert_eq!(ast("let u = a union b inter c"), "(let u (union a (inter b c)))");
+}
+
+#[test]
+fn parallel_parts() {
+    assert_eq!(ast("let r = parallel [f(x), x in l]"), "(let r (parallel (list (call f x) (in x l))))");
+    assert_eq!(ast("parallel for f in files: show(f) ;"), "(parallel-for f files [(call show f)])");
 }

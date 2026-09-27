@@ -48,7 +48,9 @@ impl Checker<'_> {
             },
             ast::StmtKind::If { branches, otherwise } => self.if_stmt(branches, otherwise.as_ref()),
             ast::StmtKind::While { cond, body } => self.while_stmt(cond, body),
-            ast::StmtKind::For { var, iterable, body } => self.for_stmt(var, iterable, body),
+            ast::StmtKind::For { parallel, var, iterable, body } => {
+                self.for_stmt(var, iterable, body, parallel.map(|_| stmt.span))
+            }
             ast::StmtKind::Match { scrutinee, cases } => self.match_stmt(scrutinee, cases, stmt.span),
             ast::StmtKind::Break => self.jump(stmt.span, true),
             ast::StmtKind::Continue => self.jump(stmt.span, false),
@@ -176,7 +178,8 @@ impl Checker<'_> {
                 if op != ast::AssignOp::Set && !self.check_has_value(local, target.span) {
                     return None;
                 }
-                let assignable = self.check_assignable(local, target.span);
+                let assignable = self.check_assignable(local, target.span)
+                    && !self.changes_outside_parallel(Some(local), name, target.span);
                 // Even a refused assignment gives the variable a value, to report it only once.
                 self.ctx.locals[local.index()].first_assignment.get_or_insert(target.span);
                 self.ctx.flow.set(local, Assigned::Yes);
@@ -187,7 +190,9 @@ impl Checker<'_> {
                 (ir::Place::Local(local), info.ty?, info.decl_span)
             }
             Resolved::Global(local) => {
-                if !self.check_global_assignment(local, target.span) {
+                if !self.check_global_assignment(local, target.span)
+                    || self.changes_outside_parallel(None, name, target.span)
+                {
                     return None;
                 }
                 if op != ast::AssignOp::Set {
@@ -325,7 +330,15 @@ impl Checker<'_> {
 
     /// `for x in values: ... ;` (§10.2). The loop variable is a constant of the body,
     /// which may run zero times.
-    fn for_stmt(&mut self, var: &ast::Ident, iterable: &ast::Expr, body: &ast::Block) -> Option<ir::Stmt> {
+    /// `for x in values: ... ;` (§10.2); with `parallel`, the turns run in parallel and
+    /// change nothing outside the body (§19.2).
+    fn for_stmt(
+        &mut self,
+        var: &ast::Ident,
+        iterable: &ast::Expr,
+        body: &ast::Block,
+        parallel: Option<Span>,
+    ) -> Option<ir::Stmt> {
         // `for d in Days` goes through the values of an enumeration (§13.1).
         let iterable = match &iterable.kind {
             ast::ExprKind::TypeName(name) if self.named_types.contains_key(name) => {
@@ -360,9 +373,15 @@ impl Checker<'_> {
         let head = self.ctx.flow.clone();
         self.ctx.loops.push(LoopExits::default());
         self.ctx.scopes.push(Scope::default());
-        let var = self.declare(var, element, false, true);
-        self.ctx.locals[var.index()].loop_variable = true;
-        let body = self.stmts(&body.stmts);
+        let turn = |checker: &mut Self| {
+            let var = checker.declare(var, element, false, true);
+            checker.ctx.locals[var.index()].loop_variable = true;
+            (var, checker.stmts(&body.stmts))
+        };
+        let (var, body) = match parallel {
+            Some(span) => self.in_parallel(span, turn),
+            None => turn(self),
+        };
         self.close_scope();
         let exits = self.ctx.loops.pop().expect("the loop is open");
         self.ctx.flow = exits.breaks.into_iter().fold(head, Flow::join);

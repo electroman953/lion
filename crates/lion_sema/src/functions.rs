@@ -956,7 +956,9 @@ impl<'a> Checker<'a> {
         let (place, ty, mutable, decl_span) = match self.resolve(name, span) {
             Resolved::Local(local) => {
                 // An argument of a `var` parameter must have a value (C8).
-                if !self.check_has_value(local, span) {
+                if !self.check_has_value(local, span)
+                    || self.changes_outside_parallel(Some(local), name, span)
+                {
                     return None;
                 }
                 // After the call, it may hold any value of its type.
@@ -966,7 +968,9 @@ impl<'a> Checker<'a> {
             }
             Resolved::Global(local) => {
                 // Giving a global to a `var` parameter changes it (C7).
-                if !self.check_global_assignment(local, span) {
+                if !self.check_global_assignment(local, span)
+                    || self.changes_outside_parallel(None, name, span)
+                {
                     return None;
                 }
                 self.ctx.reads.push(local);
@@ -1065,6 +1069,30 @@ impl<'a> Checker<'a> {
             call = typed(ir::ExprKind::Block { stmts: before, value: Box::new(call) }, ret, span);
         }
         call
+    }
+
+    /// A global that `instance` modifies, directly or through the instances it calls,
+    /// and the instance that modifies it directly (§11.5).
+    pub(crate) fn modified_global_of(&self, instance: usize) -> Option<(ir::LocalId, Option<usize>)> {
+        let mut seen = HashSet::new();
+        let mut queue = vec![instance];
+        while let Some(current) = queue.pop() {
+            if !seen.insert(current) {
+                continue;
+            }
+            let checked = &self.instances[current];
+            if checked.synthetic.is_none()
+                && let Some(&global) = self.functions[checked.function].modifies.first()
+            {
+                return Some((global, Some(current)));
+            }
+            queue.extend(checked.calls.iter().copied());
+        }
+        None
+    }
+
+    pub(crate) fn instance_display_name(&self, instance: usize) -> String {
+        self.instance_name(instance)
     }
 
     /// The name of an instance's function, for messages.

@@ -46,8 +46,9 @@ pub fn print_stmt(stmt: &Stmt) -> String {
             out + ")"
         }
         StmtKind::While { cond, body } => format!("(while {} {})", print_expr(cond), print_block(body)),
-        StmtKind::For { var, iterable, body } => {
-            format!("(for {} {} {})", var.name, print_expr(iterable), print_block(body))
+        StmtKind::For { parallel, var, iterable, body } => {
+            let keyword = if parallel.is_some() { "parallel-for" } else { "for" };
+            format!("({keyword} {} {} {})", var.name, print_expr(iterable), print_block(body))
         }
         StmtKind::Break => "break".to_string(),
         StmtKind::Continue => "continue".to_string(),
@@ -242,6 +243,7 @@ pub fn print_expr(expr: &Expr) -> String {
             }
             out + ")"
         }
+        ExprKind::Parallel(inner) => format!("(parallel {})", print_expr(inner)),
         ExprKind::Set(elements) => {
             let elements: Vec<String> = elements.iter().map(print_expr).collect();
             if elements.is_empty() { "(set)".to_string() } else { format!("(set {})", elements.join(" ")) }

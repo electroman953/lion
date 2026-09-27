@@ -54,6 +54,7 @@ impl Checker<'_> {
             ast::ExprKind::Match { scrutinee, cases } => self.match_expr(scrutinee, cases, span),
             ast::ExprKind::Set(elements) => self.collection(Collection::Set, elements, span),
             ast::ExprKind::Tuple(elements) => self.tuple(elements, span),
+            ast::ExprKind::Parallel(inner) => self.parallel_expr(inner, span),
         }
     }
 

@@ -42,8 +42,9 @@ pub enum StmtKind {
         cond: Expr,
         body: Block,
     },
-    /// `for x in values: ... ;` (§10.2).
+    /// `for x in values: ... ;` (§10.2), or `parallel for` (§19.2).
     For {
+        parallel: Option<Span>,
         var: Ident,
         iterable: Expr,
         body: Block,
@@ -282,6 +283,8 @@ pub enum ExprKind {
     },
     /// `("Léa", 12)`, `(x,)`, `(name: "Léa", grade: 12)` (§4.5, §12.2).
     Tuple(Vec<Element>),
+    /// `parallel [f(x), x in l]`: a comprehension computed in parallel (§19.2).
+    Parallel(Box<Expr>),
 }
 
 /// An element of a tuple, named or not (§26: `element`).

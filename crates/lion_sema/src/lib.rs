@@ -19,6 +19,7 @@ mod matching;
 mod methods;
 mod names;
 mod narrowing;
+mod parallel;
 mod places;
 mod standard;
 mod stmt;
@@ -49,6 +50,7 @@ pub fn check(module: &ast::Module) -> Checked {
     checker.ctx.body = body;
     checker.check_remaining_functions();
     checker.check_script_calls();
+    checker.check_parallel_regions();
     checker.finish()
 }
 
@@ -129,6 +131,8 @@ struct Context {
     failed_return: bool,
     /// How many `try` enclose the expression being checked (§18.3, D35).
     in_try: u32,
+    /// The part that runs in parallel around the code being checked (§19.2).
+    parallel: Option<crate::parallel::Parallel>,
     /// The globals read and the functions called, for the check of the calls made by
     /// the script (C3).
     reads: Vec<ir::LocalId>,
@@ -147,6 +151,7 @@ impl Context {
             returns: Vec::new(),
             failed_return: false,
             in_try: 0,
+            parallel: None,
             reads: Vec::new(),
             calls: Vec::new(),
             body: Vec::new(),
@@ -197,6 +202,8 @@ struct Checker<'a> {
     script_calls: Vec<ScriptCall>,
     /// The calls that required checking a function body early, innermost last.
     demands: Vec<Span>,
+    /// The parts that run in parallel, checked once every function is known (§19.3).
+    parallel_regions: Vec<crate::parallel::ParallelRegion>,
 }
 
 impl<'a> Checker<'a> {
@@ -217,6 +224,7 @@ impl<'a> Checker<'a> {
             instances: Vec::new(),
             script_calls: Vec::new(),
             demands: Vec::new(),
+            parallel_regions: Vec::new(),
         };
         checker.register_top_level(module);
         checker

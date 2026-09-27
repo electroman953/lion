@@ -1,19 +1,15 @@
-// The second half of program 27.2, without `parallel` and `isqrt`, which come later:
-// sets built by comprehension, and membership in a Set (§16).
+// The second half of program 27.2 (§27.2), on a smaller interval: sets built by
+// comprehension, in parallel, and membership in a Set (§16, §19.2).
 fun is_prime(n in Int) in Bool:
     if n < 2: return false ;
-    var d = 2
-    while d * d <= n:
+    for d in 2..isqrt(n):                   // pour n = 2 ou 3, 2..1 est vide
         if n mod d == 0: return false ;
-        d += 1
     ;
     return true
 ;
 
-let primes = {p in 2..10_000, is_prime(p)}
+let primes = parallel {p in 2..10_000, is_prime(p)}
 let twins = {(p, p + 2), p in primes, p + 2 in primes}
 show("Nombres premiers : {primes.size}")
 show("Couples de premiers jumeaux : {twins.size}")
 show([p, p in primes, p < 50])
-let small = {t, t in twins, (3, 5) == t or (5, 7) == t}
-show(small)

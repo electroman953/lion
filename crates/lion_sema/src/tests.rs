@@ -448,3 +448,16 @@ fn core_standard_functions() {
     // Nothing runs after `exit`: `x` has a value wherever it is read.
     assert!(check_text("let x in Int\nif true:\n    x = 1\nelse:\n    exit(1)\n;\nshow(x)").is_ok());
 }
+
+#[test]
+fn parallel_parts_change_nothing_outside() {
+    assert!(check_text("let r = parallel [x * 2, x in 1..3]").is_ok());
+    assert_eq!(
+        errors("var n = 0\nparallel for x in 1..3:\n    n += x\n;"),
+        ["a parallel part cannot change `n`, which is declared outside it"]
+    );
+    assert_eq!(
+        errors("var n = 0\nfun f() modifies n:\n    n += 1\n;\nparallel for x in 1..3:\n    f()\n;"),
+        ["`f` modifies `n`, so it cannot run in parallel"]
+    );
+}

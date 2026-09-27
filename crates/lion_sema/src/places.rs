@@ -121,12 +121,17 @@ impl Checker<'_> {
                     return None;
                 }
                 let in_method = name == "self" && info.by_reference;
+                if self.changes_outside_parallel(Some(local), name, span) {
+                    return None;
+                }
                 let ty = self.local_type(local)?;
                 self.ctx.flow.set(local, Assigned::Yes);
                 Some((ir::Place::Local(local), ty, in_method))
             }
             Resolved::Global(local) => {
-                if !self.check_global_assignment(local, span) {
+                if !self.check_global_assignment(local, span)
+                    || self.changes_outside_parallel(None, name, span)
+                {
                     return None;
                 }
                 self.ctx.reads.push(local);

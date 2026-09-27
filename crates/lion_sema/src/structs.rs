@@ -779,7 +779,7 @@ fn names_in(expr: &ast::Expr, names: &mut Vec<String>) {
                 }
             }
         }
-        Paren(inner) | Try(inner) => names_in(inner, names),
+        Paren(inner) | Try(inner) | Parallel(inner) => names_in(inner, names),
         List(elements) | Set(elements) => elements.iter().for_each(|element| names_in(element, names)),
         Tuple(elements) => elements.iter().for_each(|element| names_in(&element.value, names)),
         Unary { operand, .. } => names_in(operand, names),

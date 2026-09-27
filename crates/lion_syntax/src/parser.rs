@@ -90,6 +90,11 @@ impl<'t> Parser<'t> {
             TokenKind::Keyword(Keyword::If) => self.if_statement(),
             TokenKind::Keyword(Keyword::While) => self.while_statement(),
             TokenKind::Keyword(Keyword::For) => self.for_statement(),
+            TokenKind::Keyword(Keyword::Parallel)
+                if self.kind_at(self.pos + 1) == &TokenKind::Keyword(Keyword::For) =>
+            {
+                self.for_statement()
+            }
             TokenKind::Keyword(Keyword::Match) => self.match_statement(),
             TokenKind::Keyword(Keyword::Break) => Ok(Stmt { kind: StmtKind::Break, span: self.bump().span }),
             TokenKind::Keyword(Keyword::Continue) => {
@@ -125,7 +130,6 @@ impl<'t> Parser<'t> {
             Keyword::Private => ("`private`", "§20.3"),
             Keyword::Test | Keyword::Expect => ("tests", "§24.1"),
             Keyword::Foreign | Keyword::Unsafe => ("calling C code", "§21.2"),
-            Keyword::Parallel => ("parallelism", "§19"),
             _ => return None,
         })
     }
@@ -482,8 +486,10 @@ impl<'t> Parser<'t> {
 
     /// `for x in values: ... ;` (§10.2).
     fn for_statement(&mut self) -> PResult<Stmt> {
+        let start = self.span();
+        let parallel = if self.at_keyword(Keyword::Parallel) { Some(self.bump().span) } else { None };
         let index = self.pos;
-        let start = self.bump().span;
+        self.bump();
         let var = self.binding_name()?;
         if !self.eat_keyword(Keyword::In) {
             return Err(self.expected("`in` and the values to go through"));
@@ -492,7 +498,7 @@ impl<'t> Parser<'t> {
         let opener = Opener { keyword: "for", index, branch: index };
         let body = self.block(opener)?;
         let end = self.close_block(opener)?;
-        Ok(Stmt { kind: StmtKind::For { var, iterable, body }, span: start.to(end) })
+        Ok(Stmt { kind: StmtKind::For { parallel, var, iterable, body }, span: start.to(end) })
     }
 
     /// `match value:`, then one case per line, each `pattern: body ;`, then `;` (§10.3).
@@ -864,10 +870,14 @@ impl<'t> Parser<'t> {
                 let value = self.expr()?;
                 return Ok(Expr { span: start.to(value.span), kind: ExprKind::Try(Box::new(value)) });
             }
+            if *keyword == Keyword::Parallel {
+                let start = self.bump().span;
+                let value = self.expr()?;
+                return Ok(Expr { span: start.to(value.span), kind: ExprKind::Parallel(Box::new(value)) });
+            }
             let unsupported = match keyword {
                 Keyword::Fun => Some(("anonymous functions", "§11.1")),
                 Keyword::Task | Keyword::Wait => Some(("tasks", "§19.1")),
-                Keyword::Parallel => Some(("parallelism", "§19.2")),
                 Keyword::Compile => Some(("`compile`", "§21.1")),
                 Keyword::Shared | Keyword::Synced => Some(("shared values", "§17.2")),
                 _ => None,
