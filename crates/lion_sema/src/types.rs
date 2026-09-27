@@ -29,6 +29,7 @@ const PLANNED: &[(&str, &str, &str)] = &[
 
 /// Whether `name` is a type of Lion, which a structure cannot be named after.
 pub(crate) fn is_standard_type(name: &str) -> bool {
+    // `Bool = {true, false}` is an enumeration of the standard library (D45).
     name == "List"
         || SUPPORTED.iter().any(|(known, _)| *known == name)
         || PLANNED.iter().any(|(p, ..)| *p == name)
@@ -78,6 +79,16 @@ impl Checker<'_> {
             }
             return Some(Type::Struct(self.structs[index].id));
         }
+        if let Some(resolved) = self.defined_type(&name.name, name.span) {
+            if !args.is_empty() {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("`{}` does not take type parameters", name.name))
+                        .with_primary(ty.span, ""),
+                );
+                return None;
+            }
+            return resolved;
+        }
         if let Some(&(_, what, section)) = PLANNED.iter().find(|(planned, ..)| *planned == name.name) {
             self.not_implemented(ty.span, what, section);
             return None;
@@ -88,7 +99,7 @@ impl Checker<'_> {
                 .map(|(known, _)| *known)
                 .chain(PLANNED.iter().map(|(p, ..)| *p))
                 .chain(["List"])
-                .chain(self.struct_names.keys().map(String::as_str));
+                .chain(self.type_spans.keys().map(String::as_str));
             let mut error = Diagnostic::error(format!("cannot find the type `{}`", name.name))
                 .with_primary(name.span, "unknown type");
             if let Some(close) = closest(&name.name, known) {

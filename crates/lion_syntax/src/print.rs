@@ -62,6 +62,14 @@ pub fn print_stmt(stmt: &Stmt) -> String {
             format!("(match {} {})", print_expr(scrutinee), cases.join(" "))
         }
         StmtKind::Struct(decl) => print_struct(decl),
+        StmtKind::TypeDef(def) => match &def.kind {
+            TypeDefKind::Enum { ordered, values } => {
+                let values: Vec<&str> = values.iter().map(|value| value.name.as_str()).collect();
+                let kind = if *ordered { "ordered-enum" } else { "enum" };
+                format!("({kind} {} {})", def.name.name, values.join(" "))
+            }
+            TypeDefKind::Union(ty) => format!("(type {} {})", def.name.name, print_type(ty)),
+        },
     }
 }
 

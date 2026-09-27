@@ -133,8 +133,8 @@ pub enum Instr {
     /// Whether the kind of the value in `src` is one of the bits of `kinds`.
     TypeTest { dst: Reg, src: Reg, kinds: u16 },
     /// Whether the kind of the value in `src` is one of the bits of `kinds`, or the value
-    /// is a structure of one of the layouts in `Program::layout_sets[set]`.
-    TypeTestStruct { dst: Reg, src: Reg, kinds: u16, set: u32 },
+    /// is a structure or an enumeration of one of the types in `Program::type_sets[set]`.
+    TypeTestNamed { dst: Reg, src: Reg, kinds: u16, set: u32 },
     /// The value in `src`, unless it is an Error: then the function returns it, or the
     /// script stops (§18.3).
     Try { dst: Reg, src: Reg },
@@ -150,6 +150,10 @@ pub enum Instr {
     GetField { dst: Reg, object: Reg, field: u32 },
     /// The text of any value as a literal: a Text between quotes (C24).
     Literal { dst: Reg, a: Reg },
+    /// The value at position `value` of the enumeration `Program::enums[enumeration]`.
+    LoadEnum { dst: Reg, enumeration: u32, value: u32 },
+    /// The position of a value of an enumeration, as an Int (D33).
+    EnumPosition { dst: Reg, a: Reg },
     /// Stops with a bug: the structure named by the Text in `name` breaks one of its
     /// invariants, as the Text in `detail` says (§12.3, D40).
     Broken { name: Reg, detail: Reg },
@@ -197,8 +201,11 @@ pub struct Program {
     pub functions: Vec<Chunk>,
     /// The structures, by layout index.
     pub layouts: Vec<Rc<Layout>>,
-    /// Sets of layout indices, for the type tests that tell structures apart.
-    pub layout_sets: Vec<Vec<u32>>,
+    /// The enumerations; their type numbers follow those of the structures.
+    pub enums: Vec<Rc<EnumLayout>>,
+    /// Sets of type numbers, for the type tests that tell structures and enumerations
+    /// apart.
+    pub type_sets: Vec<Vec<u32>>,
     /// The script, which runs first.
     pub main: usize,
 }
@@ -206,9 +213,19 @@ pub struct Program {
 /// What a value of a structure needs to be shown and compared (§12).
 #[derive(Debug)]
 pub struct Layout {
+    /// Its type number.
     pub index: u32,
     pub name: String,
     pub fields: Vec<String>,
+}
+
+/// An enumeration, for its values to be shown and compared (§13.1).
+#[derive(Debug)]
+pub struct EnumLayout {
+    /// Its type number, after those of the structures.
+    pub index: u32,
+    pub name: String,
+    pub values: Vec<String>,
 }
 
 /// Compiled code for one function.

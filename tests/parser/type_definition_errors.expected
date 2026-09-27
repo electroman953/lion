@@ -1,0 +1,25 @@
+exit: 1
+----- stdout
+(let after 1)
+----- stderr
+error: the value `Red` needs a lowercase name
+  --> tests/parser/type_definition_errors.lion:1:10
+   |
+ 1 | Color = {Red, green}
+   |          ^^^ the values of an enumeration start with a lowercase letter
+   |
+   = help: write `red` (§13.1)
+
+error: expected `,` or `]`, found name `tue`
+  --> tests/parser/type_definition_errors.lion:2:13
+   |
+ 2 | Days = [mon tue]
+   |             ^^^
+
+error: expected a value of the enumeration, found `}`
+  --> tests/parser/type_definition_errors.lion:3:10
+   |
+ 3 | Empty = {}
+   |          ^
+
+3 errors found

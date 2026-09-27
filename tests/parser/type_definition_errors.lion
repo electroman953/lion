@@ -1,0 +1,4 @@
+Color = {Red, green}
+Days = [mon tue]
+Empty = {}
+let after = 1

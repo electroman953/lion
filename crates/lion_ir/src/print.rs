@@ -11,6 +11,14 @@ pub fn print_program(program: &Program) -> String {
         let fields: Vec<String> = def.fields.iter().map(|(name, ty)| format!("{name} in {ty}")).collect();
         out.push_str(&format!("struct {}({})\n", def.name, fields.join(", ")));
     }
+    for enumeration in &program.enums {
+        let (open, close) = if enumeration.is_ordered() { ("[", "]") } else { ("{", "}") };
+        out.push_str(&format!(
+            "enum {} = {open}{}{close}\n",
+            enumeration.name(),
+            enumeration.values().join(", ")
+        ));
+    }
     let main = program.function(program.main);
     out.push_str("script\n");
     print_function(program, main, &mut out);
@@ -170,6 +178,9 @@ impl Printer<'_> {
             ExprKind::Struct { structure, fields } => {
                 let fields: Vec<String> = fields.iter().map(print).collect();
                 format!("(struct {} {})", structure.name(), fields.join(" "))
+            }
+            ExprKind::Enum { enumeration, value } => {
+                format!("{}.{}", enumeration.name(), enumeration.values()[*value as usize])
             }
             ExprKind::Field { object, field } => {
                 format!("(field {} {})", self.field_name(object.ty, *field), print(object))

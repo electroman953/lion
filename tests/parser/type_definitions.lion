@@ -1,0 +1,15 @@
+// Enumerations and named unions (§13).
+Color = {red, green, blue}
+Days = [mon, tue, wed, thu, fri]
+Status = {
+    idle,
+    loading,
+    ready
+}
+Shape = Circle or Rect
+Answer = maybe Int or Error
+let c = Color.red
+match c:
+    red: show(1) ;
+    otherwise: show(2) ;
+;

@@ -1,0 +1,60 @@
+Color = {red, green, blue}
+Days = [mon, tue, wed, thu, fri]
+Status = {idle, loading, ready, failed}
+
+struct AppState:
+    students in List of Int = []
+    status in Status = idle
+    message in Text = ""
+;
+
+var state = AppState()
+show(state)
+state.status = loading
+show(state.status)
+let c = Color.green
+show(c)
+show(c == green)
+show(c != Color.red)
+let favourite = blue in Color
+show("favourite: {favourite}")
+fun paint(color in Color) in Text = "painted {color}"
+show(paint(red))
+for d in Days:
+    if d >= wed: show(d) ;
+;
+show(Days.mon < Days.fri)
+fun label(s in Status) in Text:
+    return match s:
+        idle then "Aucune donnée"
+        loading then "Chargement…"
+        ready then "Prêt"
+        failed then "Erreur"
+    ;
+;
+show(label(state.status))
+show([Color.red, Color.blue])
+let colors = [red, green] in List of Color
+show(colors)
+show(blue in colors)
+Shape = Circle or Rect
+struct Circle:
+    r in Float
+;
+struct Rect:
+    w in Float
+    h in Float
+;
+fun area(s in Shape) in Float:
+    return match s:
+        in Circle c then 3.14159 * c.r ^ 2
+        in Rect r then r.w * r.h
+    ;
+;
+show(area(Circle(1.0)))
+show(area(Rect(2, 3)))
+let shapes = [Circle(2.0), Rect(1, 1)] in List of Shape
+show([area(s), s in shapes])
+var x = idle in Status
+x = failed
+show(x)

@@ -115,8 +115,16 @@ impl Checker<'_> {
         }
         let mut error =
             Diagnostic::error(format!("cannot find `{name}` in this scope")).with_primary(span, "not found");
+        let enums = self.enums_with_value(name);
         if let Some(help) = other_language_help(name) {
             error = error.with_help(help);
+        } else if let Some(enumeration) = enums.first() {
+            let ty = enumeration.name();
+            error = error
+                .with_note(format!(
+                    "`{name}` is a value of `{ty}`: alone, it is known where a `{ty}` is expected (D32)"
+                ))
+                .with_help(format!("write `{ty}.{name}`"));
         } else if let Some(close) = closest(name, visible) {
             error = error.with_help(format!("a similar name exists: `{close}`"));
         }

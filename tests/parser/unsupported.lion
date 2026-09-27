@@ -2,7 +2,7 @@ fun square(x) = x * x
 for i in 1..3: show(i) ;
 trait Shape:
 ;
-Color = {red, green, blue}
+let twice = fun(x) = x * 2
 let l = [1, 2, 3]
 let s = {1, 2}
 let t = ("Léa", 12)

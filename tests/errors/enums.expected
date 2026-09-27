@@ -1,0 +1,123 @@
+exit: 1
+----- stdout
+----- stderr
+error: `red` is twice a value of `Color`
+  --> tests/errors/enums.lion:1:28
+   |
+ 1 | Color = {red, green, blue, red}
+   |          --- first here
+   |                            ^^^
+
+error: `Bool` is already a type of Lion
+  --> tests/errors/enums.lion:2:1
+   |
+ 2 | Bool = {yes, no}
+   | ^^^^
+   |
+   = help: give the new type another name
+
+error: the type `Loop` is defined by itself
+  --> tests/errors/enums.lion:3:8
+   |
+ 3 | Loop = Loop or Int
+   | ---- declared here
+   |        ^^^^
+   |
+   = a named union lists other types (§13.2)
+
+error: the type `A` is defined by itself
+  --> tests/errors/enums.lion:5:5
+   |
+ 4 | A = B
+   | - declared here
+ 5 | B = A
+   |     ^
+   |
+   = a named union lists other types (§13.2)
+
+error: the type `Color` is already declared
+  --> tests/errors/enums.lion:6:1
+   |
+ 1 | Color = {red, green, blue, red}
+   | ----- first declared here
+  ...
+ 6 | Color = [x, y]
+   | ^^^^^ declared again here
+
+error: the type `Color` is already declared
+  --> tests/errors/enums.lion:7:8
+   |
+ 1 | Color = {red, green, blue, red}
+   | ----- first declared here
+  ...
+ 7 | struct Color:
+   |        ^^^^^ declared again here
+
+error: `purple` is not a value of `Color`
+   --> tests/errors/enums.lion:12:12
+    |
+ 12 | show(Color.purple)
+    |            ^^^^^^
+    |
+    = the values of `Color`: red, green, blue
+
+error: `<` is not defined for Status values
+   --> tests/errors/enums.lion:13:8
+    |
+ 13 | show(s < Status.busy)
+    |        ^
+    |
+    = the values of `Status` have no order: it is declared with `{...}`
+    = help: declare it with brackets, `[...]`, to order its values (§13.1, D33)
+
+error: cannot find `red` in this scope
+   --> tests/errors/enums.lion:14:11
+    |
+ 14 | show(s == red)
+    |           ^^^ not found
+    |
+    = `red` is a value of `Color`: alone, it is known where a `Color` is expected (D32)
+    = help: write `Color.red`
+
+error: cannot find `idle` in this scope
+   --> tests/errors/enums.lion:15:9
+    |
+ 15 | let t = idle
+    |         ^^^^ not found
+    |
+    = `idle` is a value of `Status`: alone, it is known where a `Status` is expected (D32)
+    = help: write `Status.idle`
+
+error: this `match` has no case for `green`, `blue`
+   --> tests/errors/enums.lion:17:12
+    |
+ 17 |     return match c:
+    |            ^^^^^^^^
+    |
+    = help: add a case for each value, or `otherwise` at the end
+
+error: a type is declared at the top level of the file
+   --> tests/errors/enums.lion:22:5
+    |
+ 22 |     Inner = {a, b}
+    |     ^^^^^
+    |
+    = help: move this declaration out of the block
+
+error: `Int` is not an enumeration
+   --> tests/errors/enums.lion:24:6
+    |
+ 24 | show(Int.x)
+    |      ^^^
+    |
+    = `Type.value` names a value of an enumeration (§13.1)
+
+warning: this case can never be reached
+   --> tests/errors/enums.lion:28:5
+    |
+ 28 |     otherwise: show(3) ;
+    |     ^^^^^^^^^
+    |
+    = the cases above it already cover every value (§10.3)
+
+13 errors found

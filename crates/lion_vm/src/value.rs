@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use lion_runtime::format::{format_float, quote_text};
 
-use crate::bytecode::Layout;
+use crate::bytecode::{EnumLayout, Layout};
 
 /// A value in a register of the virtual machine.
 #[derive(Clone, Debug, Default)]
@@ -21,6 +21,8 @@ pub enum Value {
     Range(Rc<[i64; 2]>),
     /// A value of a structure, copied only when it is changed while shared (§12, §17.1).
     Struct(Rc<Record>),
+    /// A value of an enumeration, by its position (§13.1).
+    Enum(Rc<EnumLayout>, u32),
     /// A reference to a register of the stack, held by a `var` parameter (§11.2).
     Ref(u32),
 }
@@ -58,6 +60,7 @@ impl Value {
                     .collect();
                 format!("{}({})", record.layout.name, fields.join(", "))
             }
+            Value::Enum(enumeration, value) => enumeration.values[*value as usize].clone(),
             Value::Ref(_) => "<reference>".to_string(),
         }
     }
@@ -74,7 +77,15 @@ impl Value {
     /// Whether the value keeps memory alive, which a finished frame must release.
     #[inline]
     pub fn holds_memory(&self) -> bool {
-        matches!(self, Value::Text(_) | Value::List(_) | Value::Error(_) | Value::Range(_) | Value::Struct(_))
+        matches!(
+            self,
+            Value::Text(_)
+                | Value::List(_)
+                | Value::Error(_)
+                | Value::Range(_)
+                | Value::Struct(_)
+                | Value::Enum(..)
+        )
     }
 
     /// The kind of the value, as one bit, for type tests (§7.1).
@@ -89,6 +100,7 @@ impl Value {
             Value::List(_) => kinds::LIST,
             Value::Error(_) => kinds::ERROR,
             Value::Struct(_) => kinds::STRUCT,
+            Value::Enum(..) => kinds::ENUM,
             Value::Ref(_) => 0,
         }
     }
@@ -106,6 +118,7 @@ impl Value {
             (Value::List(a), Value::List(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals(y))
             }
+            (Value::Enum(a, x), Value::Enum(b, y)) => a.index == b.index && x == y,
             // Field by field (§12.5).
             (Value::Struct(a), Value::Struct(b)) => {
                 a.layout.index == b.layout.index && a.fields.iter().zip(&b.fields).all(|(x, y)| x.equals(y))
@@ -125,6 +138,7 @@ impl Value {
             Value::Error(_) => "Error",
             Value::List(_) => "List",
             Value::Struct(_) => "structure",
+            Value::Enum(..) => "enumeration",
             Value::Ref(_) => "reference",
         }
     }
@@ -142,4 +156,5 @@ pub mod kinds {
     pub const LIST: u16 = 1 << 6;
     pub const ERROR: u16 = 1 << 7;
     pub const STRUCT: u16 = 1 << 8;
+    pub const ENUM: u16 = 1 << 9;
 }

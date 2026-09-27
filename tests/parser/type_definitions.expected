@@ -1,0 +1,10 @@
+exit: 0
+----- stdout
+(enum Color red green blue)
+(ordered-enum Days mon tue wed thu fri)
+(enum Status idle loading ready)
+(type Shape (or Circle Rect))
+(type Answer (or (maybe Int) Error))
+(let c (. Color red))
+(match c (red [(call show 1)]) (otherwise [(call show 2)]))
+----- stderr

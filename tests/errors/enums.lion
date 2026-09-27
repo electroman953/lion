@@ -1,0 +1,29 @@
+Color = {red, green, blue, red}
+Bool = {yes, no}
+Loop = Loop or Int
+A = B
+B = A
+Color = [x, y]
+struct Color:
+    x in Int
+;
+Status = {idle, busy}
+let s = Status.idle
+show(Color.purple)
+show(s < Status.busy)
+show(s == red)
+let t = idle
+fun f(c in Color) in Text:
+    return match c:
+        red then "r"
+    ;
+;
+if true:
+    Inner = {a, b}
+;
+show(Int.x)
+match s:
+    idle: show(1) ;
+    busy: show(2) ;
+    otherwise: show(3) ;
+;

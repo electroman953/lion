@@ -447,12 +447,28 @@ impl Machine<'_> {
                     let kind = self.stack[self.base + src as usize].kind();
                     self.set(dst, Value::Bool(kind & kinds != 0));
                 }
-                Instr::TypeTestStruct { dst, src, kinds, set } => {
+                Instr::TypeTestNamed { dst, src, kinds, set } => {
                     let value = &self.stack[self.base + src as usize];
+                    let number = match value {
+                        Value::Struct(record) => Some(record.layout.index),
+                        Value::Enum(enumeration, _) => Some(enumeration.index),
+                        _ => None,
+                    };
                     let result = value.kind() & kinds != 0
-                        || matches!(value, Value::Struct(record)
-                            if self.program.layout_sets[set as usize].contains(&record.layout.index));
+                        || number
+                            .is_some_and(|number| self.program.type_sets[set as usize].contains(&number));
                     self.set(dst, Value::Bool(result));
+                }
+                Instr::LoadEnum { dst, enumeration, value } => {
+                    let enumeration = Rc::clone(&self.program.enums[enumeration as usize]);
+                    self.set(dst, Value::Enum(enumeration, value));
+                }
+                Instr::EnumPosition { dst, a } => {
+                    let position = match &self.stack[self.base + a as usize] {
+                        Value::Enum(_, value) => i64::from(*value),
+                        other => self.mismatch("enumeration", other),
+                    };
+                    self.set(dst, Value::Int(position));
                 }
                 Instr::MakeStruct { dst, layout, start, count } => {
                     let first = self.base + start as usize;

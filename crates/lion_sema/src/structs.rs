@@ -98,10 +98,13 @@ impl<'a> Checker<'a> {
     /// name any of them.
     pub(crate) fn register_structures(&mut self, module: &'a ast::Module) {
         for stmt in &module.stmts {
-            if let ast::StmtKind::Struct(decl) = &stmt.kind {
-                self.register_structure(decl);
+            match &stmt.kind {
+                ast::StmtKind::Struct(decl) => self.register_structure(decl),
+                ast::StmtKind::TypeDef(decl) => self.register_type_definition(decl),
+                _ => {}
             }
         }
+        self.resolve_type_definitions();
         for index in 0..self.structs.len() {
             self.resolve_fields(index);
         }
@@ -109,22 +112,10 @@ impl<'a> Checker<'a> {
 
     fn register_structure(&mut self, decl: &'a ast::StructDecl) {
         let name = &decl.name.name;
-        if crate::types::is_standard_type(name) {
-            self.diagnostics.push(
-                Diagnostic::error(format!("`{name}` is already a type of Lion"))
-                    .with_primary(decl.name.span, "")
-                    .with_help("give the structure another name"),
-            );
+        if !self.check_type_name(&decl.name) {
             return;
         }
-        if let Some(&previous) = self.struct_names.get(name) {
-            self.diagnostics.push(
-                Diagnostic::error(format!("the structure `{name}` is already declared"))
-                    .with_primary(decl.name.span, "declared again here")
-                    .with_secondary(self.structs[previous].decl.name.span, "first declared here"),
-            );
-            return;
-        }
+        self.type_spans.insert(name.clone(), decl.name.span);
         self.struct_names.insert(name.clone(), self.structs.len());
         self.structs.push(StructInfo {
             decl,
@@ -733,6 +724,9 @@ impl<'a> Checker<'a> {
                 let element = list.element().expect("a list has elements");
                 let elements = elements.iter().map(|value| self.const_expr(value, element, span)).collect();
                 (ir::ExprKind::List(elements), list)
+            }
+            Const::Enum(enumeration, value) => {
+                (ir::ExprKind::Enum { enumeration: *enumeration, value: *value }, Type::Enum(*enumeration))
             }
             Const::Struct(structure, values) => {
                 let fields = &self.structs[self.struct_index(*structure)].fields;

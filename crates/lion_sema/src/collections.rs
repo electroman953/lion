@@ -76,9 +76,47 @@ impl Checker<'_> {
 
     /// Checks an expression where a value of type `expected` is required.
     pub(crate) fn expr_expecting(&mut self, expr: &ast::Expr, expected: Type) -> Option<ir::Expr> {
-        match self.empty_list(expr, expected) {
-            Some(empty) => Some(empty),
-            None => self.expr(expr),
+        if let Some(empty) = self.empty_list(expr, expected) {
+            return Some(empty);
+        }
+        if let Some(value) = self.expected_enum_value(expr, expected) {
+            return Some(value);
+        }
+        match &expr.kind {
+            ast::ExprKind::Paren(inner) => {
+                self.expr_expecting(inner, expected).map(|value| ir::Expr { span: expr.span, ..value })
+            }
+            // The elements of a list expect the type of the elements: `[red, blue] in List of Color`.
+            ast::ExprKind::List(elements)
+                if !elements.is_empty() && !self.generators(elements).contains(&true) =>
+            {
+                let Some(Type::List(element)) =
+                    expected.members().into_iter().find(|member| matches!(member, Type::List(_)))
+                else {
+                    return self.expr(expr);
+                };
+                let element = element.get();
+                let values: Vec<Option<ir::Expr>> = elements
+                    .iter()
+                    .map(|value| {
+                        let checked = self.expr_expecting(value, element)?;
+                        self.coerce(checked, element, None)
+                    })
+                    .collect();
+                let values = values.into_iter().collect::<Option<Vec<_>>>()?;
+                Some(typed(ir::ExprKind::List(values), Type::list(element), expr.span))
+            }
+            _ => self.expr(expr),
+        }
+    }
+
+    /// A name that designates nothing here: maybe a value of an enumeration, whose type
+    /// the context gives (D32).
+    pub(crate) fn is_bare_unknown_name(&self, expr: &ast::Expr) -> bool {
+        match &expr.kind {
+            ast::ExprKind::Name(name) => !self.is_known(name) && !self.enums_with_value(name).is_empty(),
+            ast::ExprKind::Paren(inner) => self.is_bare_unknown_name(inner),
+            _ => false,
         }
     }
 

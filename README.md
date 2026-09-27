@@ -14,6 +14,7 @@ L'implémentation est au début de l'étape 2 de la feuille de route (§28). Ell
 - **Listes** (§16) : `[1, 2, 3]`, `List of T`, indices à partir de 1 et extraits `l[2..4]` (bug hors limites), `size`, `first`, `last`, `add`, `l[i] = v`, `x in l`, égalité par contenu, `for x in l`, compréhensions `[f(x), x in l, condition]`, `sum`, avec la sémantique de valeur (§17.1). Les Text s'indexent aussi par caractère.
 - **Unions et erreurs** (§7.3, §7.4, §18) : `maybe T`, `A or B`, tests de type `x in T`, affinage après un test ou une sortie anticipée, `if … then` sans `else`, `Error`, `error("…")`, `e.message()`, `"12" as Int` qui donne `Int or Error`, `try` dans une fonction ou au niveau du script, `match` en instruction et en expression (motifs de valeur, de type `in Int g`, d'appartenance `in 1..9`, conditions, `otherwise`, exhaustivité vérifiée).
 - **Structures** (§12) : `struct` avec champs, valeurs par défaut, conditions et invariants, construction `T(...)`, avec noms, `(...) as T` et `let x = (...) in T`, champs finaux omis. Une construction avec des constantes est vérifiée à la compilation, sinon elle donne `T or Error`. Modifier un champ qui viole un invariant est un bug. Égalité champ par champ, méthodes (`fun Student.passes()`, `var self`, y compris sur `Int` ou `Text`), structures récursives (`maybe Node`), structures dans les unions et les `match`.
+- **Énumérations et unions nommées** (§13) : `Color = {red, green}`, `Days = [mon, tue]` ordonnée (`<`, parcours avec `for`), `Color.red` ou `red` seul quand le type est connu, `match` exhaustif sur les valeurs, `Shape = Circle or Rect`.
 - **Types** : `Int` (64 bits, débordement = bug), `Float` (IEEE 754), `Bool`, `Text`, `None`, avec conversion automatique Int → Float.
 - **Opérateurs** :
   - `+ - * /` ;
@@ -27,7 +28,7 @@ L'implémentation est au début de l'étape 2 de la feuille de route (§28). Ell
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, exposant négatif, conversion Float → Int impossible, récursion sans fin (plus de 100 000 appels imbriqués). Chacun est signalé avec l'emplacement, les appels en cours, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 
-**Pas encore implémenté** : variables de type (`T in Comparable`), fonctions comme valeurs, closures et curryfication, méthodes détachées et méthodes d'opérateurs, n-uplets comme valeurs, ensembles et `Map`, énumérations et unions nommées, traits, modules, concurrence, compilateur natif, formateur, tests intégrés, mode interactif.
+**Pas encore implémenté** : variables de type (`T in Comparable`), fonctions comme valeurs, closures et curryfication, méthodes détachées et méthodes d'opérateurs, n-uplets comme valeurs, ensembles et `Map`, traits, modules, concurrence, compilateur natif, formateur, tests intégrés, mode interactif.
 
 ## Construire et utiliser
 

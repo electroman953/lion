@@ -98,6 +98,9 @@ impl<'t> Parser<'t> {
             TokenKind::Keyword(Keyword::Return) => self.return_statement(),
             TokenKind::Keyword(Keyword::Fun | Keyword::Infix) => self.fun_statement(),
             TokenKind::Keyword(Keyword::Struct) => self.struct_statement(),
+            TokenKind::UpperIdent(_) if self.kind_at(self.pos + 1) == &TokenKind::Assign => {
+                self.type_definition()
+            }
             TokenKind::Keyword(keyword @ (Keyword::Elif | Keyword::Else)) => {
                 let error = Diagnostic::error(format!("`{}` without `if`", keyword.as_str()))
                     .with_primary(start, "")
@@ -115,11 +118,6 @@ impl<'t> Parser<'t> {
     }
 
     fn unsupported_statement(&self) -> Option<(&'static str, &'static str)> {
-        if let TokenKind::UpperIdent(_) = self.peek()
-            && self.kind_at(self.pos + 1) == &TokenKind::Assign
-        {
-            return Some(("type definitions (enumerations and named unions)", "§13"));
-        }
         let TokenKind::Keyword(keyword) = self.peek() else { return None };
         Some(match keyword {
             Keyword::Trait => ("traits", "§14"),
@@ -358,6 +356,54 @@ impl<'t> Parser<'t> {
         }
         let end = self.close_block(opener)?;
         Ok(Stmt { kind: StmtKind::Struct(StructDecl { name, lines }), span: start.to(end) })
+    }
+
+    /// `Color = {red, green}`, `Days = [mon, tue]` or `Shape = Circle or Rect` (§13, §26).
+    fn type_definition(&mut self) -> PResult<Stmt> {
+        let start = self.span();
+        let TokenKind::UpperIdent(name) = self.peek() else { unreachable!("checked by the caller") };
+        let name = Ident { name: name.clone(), span: start };
+        self.bump();
+        self.bump();
+        let (ordered, close) = match self.peek() {
+            TokenKind::LBrace => (false, TokenKind::RBrace),
+            TokenKind::LBracket => (true, TokenKind::RBracket),
+            _ => {
+                let ty = self.type_expr()?;
+                let span = start.to(ty.span);
+                return Ok(Stmt {
+                    kind: StmtKind::TypeDef(TypeDef { name, kind: TypeDefKind::Union(ty) }),
+                    span,
+                });
+            }
+        };
+        self.bump();
+        let values = self.nested(|parser| {
+            let mut values = Vec::new();
+            loop {
+                let span = parser.span();
+                match parser.peek() {
+                    TokenKind::LowerIdent(value) => {
+                        values.push(Ident { name: value.clone(), span });
+                        parser.bump();
+                    }
+                    TokenKind::UpperIdent(value) => {
+                        let error = Diagnostic::error(format!("the value `{value}` needs a lowercase name"))
+                            .with_primary(span, "the values of an enumeration start with a lowercase letter")
+                            .with_help(format!("write `{}` (§13.1)", lowercase_first(value)));
+                        return Err(parser.error(error));
+                    }
+                    _ => return Err(parser.expected("a value of the enumeration")),
+                }
+                if !parser.eat(&TokenKind::Comma) {
+                    return Ok(values);
+                }
+            }
+        })?;
+        let what = if ordered { "`,` or `]`" } else { "`,` or `}`" };
+        let end = self.expect(&close, what)?;
+        let kind = TypeDefKind::Enum { ordered, values };
+        Ok(Stmt { kind: StmtKind::TypeDef(TypeDef { name, kind }), span: start.to(end) })
     }
 
     /// A keyword that starts a declaration or a statement, never a line of a structure.

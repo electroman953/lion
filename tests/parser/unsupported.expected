@@ -15,13 +15,13 @@ error: not implemented yet: traits
    |
    = this part of Lion (spec §14) is not supported by this version of the implementation
 
-error: not implemented yet: type definitions (enumerations and named unions)
-  --> tests/parser/unsupported.lion:5:1
+error: not implemented yet: anonymous functions
+  --> tests/parser/unsupported.lion:5:13
    |
- 5 | Color = {red, green, blue}
-   | ^^^^^
+ 5 | let twice = fun(x) = x * 2
+   |             ^^^
    |
-   = this part of Lion (spec §13) is not supported by this version of the implementation
+   = this part of Lion (spec §11.1) is not supported by this version of the implementation
 
 error: not implemented yet: sets and comprehensions
   --> tests/parser/unsupported.lion:7:9

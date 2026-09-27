@@ -7,7 +7,7 @@ error: `Int` is already a type of Lion
  3 | struct Int:
    |        ^^^
    |
-   = help: give the structure another name
+   = help: give the new type another name
 
 error: the field `x` is declared twice
   --> tests/errors/struct_declarations.lion:8:5
@@ -53,7 +53,7 @@ error: `try` has no function to leave in the conditions of a structure
     |
     = help: handle the error with `if x in Error`, or `match` (§18.3)
 
-error: the structure `B` is already declared
+error: the type `B` is already declared
    --> tests/errors/struct_declarations.lion:17:8
     |
  11 | struct B:
@@ -70,7 +70,7 @@ error: the default value of a field is a constant
     |
     = a default value is written with literals, lists and structures built from constants (C48)
 
-error: a structure is declared at the top level of the file
+error: a type is declared at the top level of the file
    --> tests/errors/struct_declarations.lion:25:12
     |
  25 |     struct D:

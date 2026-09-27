@@ -370,3 +370,50 @@ fn conditions_of_structures() {
         ["the default value of a field is a constant"]
     );
 }
+
+const COLOR: &str = "Color = {red, green, blue}\nDays = [mon, tue, wed]\n";
+
+#[test]
+fn values_of_enumerations() {
+    assert_eq!(body(&format!("{COLOR}let c = Color.red")), "c#0 = Color.red");
+    // Alone, a value needs a type that expects it (D32).
+    assert_eq!(body(&format!("{COLOR}let c = red in Color")), "c#0 = Color.red");
+    assert_eq!(
+        body(&format!("{COLOR}let c = Color.red\nlet b = c == blue")),
+        "c#0 = Color.red\nb#1 = (eq_value c#0 Color.blue)"
+    );
+    assert_eq!(errors(&format!("{COLOR}let c = red")), ["cannot find `red` in this scope"]);
+    assert_eq!(errors(&format!("{COLOR}let c = Color.purple")), ["`purple` is not a value of `Color`"]);
+    assert_eq!(body(&format!("{COLOR}fun f(c in Color) = 1\nshow(f(green))")), "(show (call f Color.green))");
+}
+
+#[test]
+fn order_of_enumerations() {
+    assert_eq!(
+        body(&format!("{COLOR}let d = Days.mon\nlet b = d < tue")),
+        "d#0 = Days.mon\nb#1 = (lt_int (enum_position d#0) (enum_position Days.tue))"
+    );
+    assert_eq!(
+        errors(&format!("{COLOR}let c = Color.red\nlet b = c < blue")),
+        ["`<` is not defined for Color values"]
+    );
+}
+
+#[test]
+fn matches_on_enumerations() {
+    let text = format!(
+        "{COLOR}fun f(c in Color) in Int:\n    return match c:\n        red then 1\n        green then 2\n    ;\n;"
+    );
+    assert_eq!(errors(&text), ["this `match` has no case for `blue`"]);
+    let text = format!(
+        "{COLOR}fun f(c in Color) in Int:\n    return match c:\n        red then 1\n        green then 2\n        blue then 3\n    ;\n;"
+    );
+    assert!(check_text(&text).is_ok());
+}
+
+#[test]
+fn named_unions() {
+    let text = "struct Circle:\n    r in Float\n;\nstruct Rect:\n    w in Float\n;\nShape = Circle or Rect\nfun f(s in Shape) = 1\nshow(f(Circle(1.0)))";
+    assert!(check_text(text).is_ok());
+    assert_eq!(errors("A = B\nB = A"), ["the type `A` is defined by itself"]);
+}

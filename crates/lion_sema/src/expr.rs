@@ -17,6 +17,8 @@ struct Comparison {
     op: ir::BinaryOp,
     /// Int operands are converted to Float first.
     on_floats: bool,
+    /// Values of an ordered enumeration are compared by their positions (D33).
+    on_positions: bool,
 }
 
 impl Checker<'_> {
@@ -39,7 +41,10 @@ impl Checker<'_> {
             ast::ExprKind::Compare { first, rest } => self.compare(first, rest, span),
             ast::ExprKind::As { value, ty } => self.convert(value, ty, span),
             ast::ExprKind::Call { callee, args } => self.call(callee, args, span),
-            ast::ExprKind::Field { object, name } => self.property(object, name, span),
+            ast::ExprKind::Field { object, name } => match &object.kind {
+                ast::ExprKind::TypeName(type_name) => self.enum_member(type_name, object.span, name),
+                _ => self.property(object, name, span),
+            },
             ast::ExprKind::Index { object, index } => self.index(object, index, span),
             ast::ExprKind::List(elements) => self.list(elements, span),
             ast::ExprKind::If { branches, otherwise } => self.if_expr(branches, otherwise.as_deref(), span),
@@ -228,8 +233,17 @@ impl Checker<'_> {
             self.ctx.flow = outside;
             return self.logical(op, lhs?, rhs?, span);
         }
-        let lhs = self.expr(lhs);
-        let rhs = self.expr(rhs);
+        // `blue in colors`: a value alone takes the type of the elements (D32, C54).
+        let (lhs, rhs) = if op == In && self.is_bare_unknown_name(lhs) {
+            let rhs = self.expr(rhs);
+            let lhs = match rhs.as_ref().and_then(|set| set.ty.element()) {
+                Some(element) => self.expr_expecting(lhs, element),
+                None => self.expr(lhs),
+            };
+            (lhs, rhs)
+        } else {
+            (self.expr(lhs), self.expr(rhs))
+        };
         let (lhs, rhs) = (lhs?, rhs?);
         match op {
             And | Or => unreachable!("handled above"),
@@ -503,9 +517,24 @@ impl Checker<'_> {
 
     /// One comparison, or a chain such as `0 <= grade <= 20` (§9.3).
     fn compare(&mut self, first: &ast::Expr, rest: &[ast::Comparison], span: Span) -> Option<ir::Expr> {
-        let mut operands = vec![self.expr(first)];
-        for comparison in rest {
-            operands.push(self.expr(&comparison.rhs));
+        // `status == idle`: a value of an enumeration written alone takes the type of
+        // the operand beside it (D32, C54).
+        let asts: Vec<&ast::Expr> = std::iter::once(first).chain(rest.iter().map(|c| &c.rhs)).collect();
+        let bare: Vec<bool> = asts.iter().map(|expr| self.is_bare_unknown_name(expr)).collect();
+        let mut operands: Vec<Option<ir::Expr>> =
+            asts.iter().zip(&bare).map(|(expr, &bare)| if bare { None } else { self.expr(expr) }).collect();
+        for index in 0..asts.len() {
+            if !bare[index] {
+                continue;
+            }
+            let neighbour = [index.checked_sub(1), Some(index + 1)]
+                .into_iter()
+                .flatten()
+                .find_map(|other| operands.get(other).and_then(|value| value.as_ref().map(|value| value.ty)));
+            operands[index] = match neighbour {
+                Some(ty) => self.expr_expecting(asts[index], ty),
+                None => self.expr(asts[index]),
+            };
         }
         let mut comparisons = Vec::new();
         for (index, comparison) in rest.iter().enumerate() {
@@ -544,26 +573,40 @@ impl Checker<'_> {
         let float_ops = [B::EqFloat, B::NeFloat, B::LtFloat, B::LeFloat, B::GtFloat, B::GeFloat];
         let (lty, rty) = (lhs.ty, rhs.ty);
         let equality_op = |eq: B, ne: B| if op == Eq { eq } else { ne };
+        let plain = |op| Comparison { op, on_floats: false, on_positions: false };
         let checked = match (lty, rty) {
-            (Type::Int, Type::Int) => Comparison { op: pick(int_ops), on_floats: false },
-            _ if lty.is_numeric() && rty.is_numeric() => Comparison { op: pick(float_ops), on_floats: true },
-            (Type::Bool, Type::Bool) if equality => {
-                Comparison { op: equality_op(B::EqBool, B::NeBool), on_floats: false }
+            (Type::Int, Type::Int) => plain(pick(int_ops)),
+            _ if lty.is_numeric() && rty.is_numeric() => {
+                Comparison { op: pick(float_ops), on_floats: true, on_positions: false }
             }
-            (Type::Text, Type::Text) if equality => {
-                Comparison { op: equality_op(B::EqText, B::NeText), on_floats: false }
+            (Type::Bool, Type::Bool) if equality => plain(equality_op(B::EqBool, B::NeBool)),
+            (Type::Text, Type::Text) if equality => plain(equality_op(B::EqText, B::NeText)),
+            (Type::None, Type::None) if equality => plain(equality_op(B::EqNone, B::NeNone)),
+            // An ordered enumeration compares the positions of its values (D33).
+            (Type::Enum(enumeration), _) if !equality && lty == rty && enumeration.is_ordered() => {
+                Comparison { op: pick(int_ops), on_floats: false, on_positions: true }
             }
-            (Type::None, Type::None) if equality => {
-                Comparison { op: equality_op(B::EqNone, B::NeNone), on_floats: false }
+            (Type::Enum(enumeration), _) if !equality && lty == rty => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("`{}` is not defined for {lty} values", op.as_str()))
+                        .with_primary(op_span, "")
+                        .with_note(format!(
+                            "the values of `{enumeration:?}` have no order: it is declared with `{{...}}`"
+                        ))
+                        .with_help("declare it with brackets, `[...]`, to order its values (§13.1, D33)"),
+                );
+                return None;
             }
             // Collections compare their content, structures their fields (§9.4, §12.5).
-            (Type::List(_) | Type::Range | Type::Union(_) | Type::Struct(_), _) if equality && lty == rty => {
-                Comparison { op: equality_op(B::EqValue, B::NeValue), on_floats: false }
+            (Type::List(_) | Type::Range | Type::Union(_) | Type::Struct(_) | Type::Enum(_), _)
+                if equality && lty == rty =>
+            {
+                plain(equality_op(B::EqValue, B::NeValue))
             }
             // A value of a union compares with a value of one of its members, as in
             // `x == none` (§7.4).
             _ if equality && (lty.is_subset_of(rty) || rty.is_subset_of(lty)) => {
-                Comparison { op: equality_op(B::EqValue, B::NeValue), on_floats: false }
+                plain(equality_op(B::EqValue, B::NeValue))
             }
             _ if lty == rty => {
                 self.diagnostics.push(
@@ -915,6 +958,8 @@ impl Checker<'_> {
 
 fn compare_pair(comparison: Comparison, lhs: ir::Expr, rhs: ir::Expr, span: Span) -> ir::Expr {
     let (lhs, rhs) = if comparison.on_floats { (to_float(lhs), to_float(rhs)) } else { (lhs, rhs) };
+    let position = |value: ir::Expr| convert(ir::Conversion::EnumPosition, value, Type::Int);
+    let (lhs, rhs) = if comparison.on_positions { (position(lhs), position(rhs)) } else { (lhs, rhs) };
     let kind = ir::ExprKind::Binary { op: comparison.op, lhs: Box::new(lhs), rhs: Box::new(rhs) };
     typed(kind, Type::Bool, span)
 }

@@ -11,7 +11,7 @@ use std::rc::Rc;
 use lion_diagnostics::Span;
 use lion_ir::{self as ir, BinaryOp, Builtin, Conversion, ExprKind, UnaryOp};
 
-use crate::bytecode::{Chunk, Cmp, Instr, Layout, Program, Reg, Target};
+use crate::bytecode::{Chunk, Cmp, EnumLayout, Instr, Layout, Program, Reg, Target};
 
 pub fn compile(program: &ir::Program) -> Program {
     let layouts: Vec<Rc<Layout>> = program
@@ -26,9 +26,29 @@ pub fn compile(program: &ir::Program) -> Program {
             })
         })
         .collect();
+    let first_enum = program.structs.len();
+    let enums: Vec<Rc<EnumLayout>> = program
+        .enums
+        .iter()
+        .enumerate()
+        .map(|(index, enumeration)| {
+            Rc::new(EnumLayout {
+                index: (first_enum + index) as u32,
+                name: enumeration.name(),
+                values: enumeration.values(),
+            })
+        })
+        .collect();
     let mut shared = Shared {
         layouts: program.structs.iter().enumerate().map(|(index, def)| (def.id, index as u32)).collect(),
-        layout_sets: Vec::new(),
+        enums: program
+            .enums
+            .iter()
+            .enumerate()
+            .map(|(index, enumeration)| (*enumeration, index as u32))
+            .collect(),
+        first_enum: first_enum as u32,
+        type_sets: Vec::new(),
     };
     let functions = program
         .functions
@@ -36,14 +56,18 @@ pub fn compile(program: &ir::Program) -> Program {
         .enumerate()
         .map(|(index, function)| compile_function(function, index == program.main.index(), &mut shared))
         .collect();
-    Program { functions, layouts, layout_sets: shared.layout_sets, main: program.main.index() }
+    Program { functions, layouts, enums, type_sets: shared.type_sets, main: program.main.index() }
 }
 
 /// What the functions of a program share while they are compiled.
 struct Shared {
     /// The layout index of each structure.
     layouts: HashMap<ir::StructRef, u32>,
-    layout_sets: Vec<Vec<u32>>,
+    /// The index of each enumeration in `Program::enums`.
+    enums: HashMap<ir::EnumRef, u32>,
+    /// The type number of the first enumeration.
+    first_enum: u32,
+    type_sets: Vec<Vec<u32>>,
 }
 
 fn compile_function(function: &ir::Function, is_script: bool, shared: &mut Shared) -> Chunk {
@@ -429,6 +453,7 @@ impl Compiler<'_> {
                     Conversion::TextToInt => Instr::TextToInt { dst, a },
                     Conversion::TextToFloat => Instr::TextToFloat { dst, a },
                     Conversion::Literal => Instr::Literal { dst, a },
+                    Conversion::EnumPosition => Instr::EnumPosition { dst, a },
                 };
                 self.emit(instr, span);
             }
@@ -527,6 +552,10 @@ impl Compiler<'_> {
                 let layout = self.shared.layouts[structure];
                 self.emit(Instr::MakeStruct { dst, layout, start, count: fields.len() as u32 }, span);
             }
+            ExprKind::Enum { enumeration, value } => {
+                let enumeration = self.shared.enums[enumeration];
+                self.emit(Instr::LoadEnum { dst, enumeration, value: *value }, span);
+            }
             ExprKind::Field { object, field } => {
                 let object = self.operand(object);
                 self.emit(Instr::GetField { dst, object, field: *field }, span);
@@ -545,32 +574,45 @@ impl Compiler<'_> {
     }
 
     /// The test that a value of type `whole` is of type `part`. A value carries its kind;
-    /// a structure carries its layout, needed when `whole` has other structures (§7.1).
+    /// a structure or an enumeration also carries its type, needed when `whole` has
+    /// several of them (§7.1).
     fn type_test(&mut self, whole: ir::Type, part: ir::Type, dst: Reg, src: Reg) -> Instr {
-        let structures = |ty: ir::Type| -> Vec<ir::StructRef> {
-            ty.members()
-                .into_iter()
-                .filter_map(|member| match member {
-                    ir::Type::Struct(structure) => Some(structure),
-                    _ => None,
-                })
-                .collect()
-        };
-        let tested = structures(part);
+        use crate::value::kinds;
         let kinds = kinds_of(part);
-        if tested.is_empty() || tested.len() == structures(whole).len() {
+        let (tested, all) = (self.named_types(part), self.named_types(whole));
+        let needed = |kind: u16| {
+            kinds & kind != 0
+                && tested.iter().filter(|(k, _)| *k == kind).count()
+                    < all.iter().filter(|(k, _)| *k == kind).count()
+        };
+        if !needed(kinds::STRUCT) && !needed(kinds::ENUM) {
             return Instr::TypeTest { dst, src, kinds };
         }
-        let mut set: Vec<u32> = tested.iter().map(|structure| self.shared.layouts[structure]).collect();
+        let mut set: Vec<u32> = tested.iter().map(|(_, number)| *number).collect();
         set.sort_unstable();
-        let set = match self.shared.layout_sets.iter().position(|known| *known == set) {
+        let set = match self.shared.type_sets.iter().position(|known| *known == set) {
             Some(index) => index,
             None => {
-                self.shared.layout_sets.push(set);
-                self.shared.layout_sets.len() - 1
+                self.shared.type_sets.push(set);
+                self.shared.type_sets.len() - 1
             }
         };
-        Instr::TypeTestStruct { dst, src, kinds: kinds & !crate::value::kinds::STRUCT, set: set as u32 }
+        Instr::TypeTestNamed { dst, src, kinds: kinds & !(kinds::STRUCT | kinds::ENUM), set: set as u32 }
+    }
+
+    /// The structures and enumerations among the members of `ty`: their kind and number.
+    fn named_types(&self, ty: ir::Type) -> Vec<(u16, u32)> {
+        use crate::value::kinds;
+        ty.members()
+            .into_iter()
+            .filter_map(|member| match member {
+                ir::Type::Struct(structure) => Some((kinds::STRUCT, self.shared.layouts[&structure])),
+                ir::Type::Enum(enumeration) => {
+                    Some((kinds::ENUM, self.shared.first_enum + self.shared.enums[&enumeration]))
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// A register holding the value of `expr`: the register of a local, or a new
@@ -693,6 +735,7 @@ fn calls_function(expr: &ir::Expr) -> bool {
         ExprKind::CallBuiltin { args, .. } => args.iter().any(calls_function),
         ExprKind::Struct { fields, .. } => fields.iter().any(calls_function),
         ExprKind::Field { object, .. } => calls_function(object),
+        ExprKind::Enum { .. } => false,
     }
 }
 
@@ -711,6 +754,7 @@ fn kinds_of(ty: ir::Type) -> u16 {
             ir::Type::List(_) => kinds::LIST,
             ir::Type::Error => kinds::ERROR,
             ir::Type::Struct(_) => kinds::STRUCT,
+            ir::Type::Enum(_) => kinds::ENUM,
             ir::Type::Union(_) => unreachable!("the members of a union are not unions"),
         })
         .fold(0, |all, kind| all | kind)

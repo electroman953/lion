@@ -1,0 +1,10 @@
+// Values of enumerations are positions; an ordered one compares them (§13.1, D33).
+Days = [mon, tue, wed]
+Light = {on, off}
+let d = Days.tue
+let late = d >= wed
+let l = on in Light
+let equal = l == off
+for day in Days:
+    show(day)
+;

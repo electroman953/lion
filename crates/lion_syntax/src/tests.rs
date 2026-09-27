@@ -175,7 +175,6 @@ fn unsupported_constructions_are_reported() {
     let cases = [
         ("parallel for f in files: show(f) ;", "not implemented yet: parallelism"),
         ("trait S:\n;", "not implemented yet: traits"),
-        ("Color = {red, green}", "not implemented yet: type definitions (enumerations and named unions)"),
         ("let s = {1, 2}", "not implemented yet: sets and comprehensions"),
     ];
     for (text, message) in cases {
@@ -448,4 +447,13 @@ fn methods_and_tuples() {
     assert_eq!(ast("let t = (1)"), "(let t (paren 1))");
     assert_eq!(ast("let s = (\"a\", 1) in Student"), "(let s (tuple \"a\" 1) : Student)");
     assert_eq!(first_error("let t = (name: 1)"), "a tuple of one element ends with a comma");
+}
+
+#[test]
+fn type_definitions() {
+    assert_eq!(ast("Color = {red, green}"), "(enum Color red green)");
+    assert_eq!(ast("Days = [mon, tue]"), "(ordered-enum Days mon tue)");
+    assert_eq!(ast("Shape = Circle or Rect"), "(type Shape (or Circle Rect))");
+    assert_eq!(ast("let c = Color.red"), "(let c (. Color red))");
+    assert_eq!(first_error("Color = {Red}"), "the value `Red` needs a lowercase name");
 }

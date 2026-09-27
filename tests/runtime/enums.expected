@@ -1,0 +1,22 @@
+exit: 0
+----- stdout
+AppState(students: [], status: idle, message: "")
+loading
+green
+true
+true
+favourite: blue
+painted red
+wed
+thu
+fri
+true
+Chargement…
+[red, blue]
+[red, green]
+false
+3.14159
+6.0
+[12.56636, 1.0]
+failed
+----- stderr

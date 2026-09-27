@@ -23,6 +23,8 @@ pub enum Type {
     Union(UnionRef),
     /// A structure declared by the program (§12).
     Struct(StructRef),
+    /// An enumeration declared by the program (§13.1).
+    Enum(EnumRef),
 }
 
 impl Type {
@@ -110,6 +112,7 @@ impl fmt::Display for Type {
             },
             Type::Error => f.write_str("Error"),
             Type::Struct(structure) => f.write_str(&structure.name()),
+            Type::Enum(enumeration) => f.write_str(&enumeration.name()),
             Type::Union(union) => {
                 let members = union.members();
                 // `maybe T` reads better than `T or None` (§7.3).
@@ -146,6 +149,49 @@ impl StructRef {
 }
 
 impl fmt::Debug for StructRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.name())
+    }
+}
+
+/// An enumeration declared by a program: its name and its values, in order.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EnumRef(u32);
+
+struct EnumData {
+    name: String,
+    values: Vec<String>,
+    ordered: bool,
+}
+
+impl EnumRef {
+    pub fn new(name: &str, values: Vec<String>, ordered: bool) -> EnumRef {
+        let mut interner = interner().lock().expect("the type interner is never poisoned");
+        interner.enums.push(EnumData { name: name.to_string(), values, ordered });
+        EnumRef(interner.enums.len() as u32 - 1)
+    }
+
+    pub fn name(self) -> String {
+        interner().lock().expect("the type interner is never poisoned").enums[self.0 as usize].name.clone()
+    }
+
+    pub fn values(self) -> Vec<String> {
+        interner().lock().expect("the type interner is never poisoned").enums[self.0 as usize].values.clone()
+    }
+
+    /// Declared with `[...]`: its values compare with `<` (D33).
+    pub fn is_ordered(self) -> bool {
+        interner().lock().expect("the type interner is never poisoned").enums[self.0 as usize].ordered
+    }
+
+    /// The position of the value `name`, from 0.
+    pub fn position(self, name: &str) -> Option<u32> {
+        let interner = interner().lock().expect("the type interner is never poisoned");
+        interner.enums[self.0 as usize].values.iter().position(|value| value == name).map(|at| at as u32)
+    }
+}
+
+impl fmt::Debug for EnumRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.name())
     }
@@ -190,6 +236,7 @@ struct Interner {
     unions: Vec<Vec<Type>>,
     union_ids: HashMap<Vec<Type>, u32>,
     structs: Vec<String>,
+    enums: Vec<EnumData>,
 }
 
 fn interner() -> &'static Mutex<Interner> {

@@ -10,7 +10,7 @@ mod print;
 mod types;
 
 pub use print::print_program;
-pub use types::{StructRef, Type, TypeRef, UnionRef};
+pub use types::{EnumRef, StructRef, Type, TypeRef, UnionRef};
 
 use lion_diagnostics::Span;
 
@@ -19,6 +19,8 @@ pub struct Program {
     pub functions: Vec<Function>,
     /// The structures, for the names of their fields.
     pub structs: Vec<StructDef>,
+    /// The enumerations, for the names of their values.
+    pub enums: Vec<EnumRef>,
     /// The top-level statements of the file that is run (§20.1). The locals declared
     /// at its top level are the globals, which other functions reach with `Global`.
     pub main: FunctionId,
@@ -266,6 +268,11 @@ pub enum ExprKind {
         object: Box<Expr>,
         field: u32,
     },
+    /// A value of an enumeration, by its position (§13.1).
+    Enum {
+        enumeration: EnumRef,
+        value: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -358,6 +365,8 @@ pub enum Conversion {
     /// The text of any value as a literal: a Text is written between quotes, as in a
     /// shown collection (C24). For the messages about invariants.
     Literal,
+    /// The position of a value of an ordered enumeration, from 0: its order (D33).
+    EnumPosition,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -435,6 +444,7 @@ impl Conversion {
             Conversion::TextToInt => "text_to_int",
             Conversion::TextToFloat => "text_to_float",
             Conversion::Literal => "literal",
+            Conversion::EnumPosition => "enum_position",
         }
     }
 }

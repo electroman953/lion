@@ -1,0 +1,20 @@
+exit: 0
+----- stdout
+enum Days = [mon, tue, wed]
+enum Light = {on, off}
+script
+  locals
+    d#0 let Days
+    late#1 let Bool
+    l#2 let Light
+    equal#3 let Bool
+    day#4 let Days
+  body
+    d#0 = Days.tue
+    late#1 = (ge_int (enum_position d#0) (enum_position Days.wed))
+    l#2 = Light.on
+    equal#3 = (eq_value l#2 Light.off)
+    for day#4 in (list Days.mon Days.tue Days.wed)
+      (show day#4)
+    end
+----- stderr

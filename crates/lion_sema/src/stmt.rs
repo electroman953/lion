@@ -62,16 +62,17 @@ impl Checker<'_> {
                 );
                 None
             }
-            // Structures are registered beforehand, from the top level only.
-            ast::StmtKind::Struct(_)
+            // Types are registered beforehand, from the top level only.
+            ast::StmtKind::Struct(_) | ast::StmtKind::TypeDef(_)
                 if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 =>
             {
                 None
             }
-            ast::StmtKind::Struct(decl) => {
+            ast::StmtKind::Struct(ast::StructDecl { name, .. })
+            | ast::StmtKind::TypeDef(ast::TypeDef { name, .. }) => {
                 self.diagnostics.push(
-                    Diagnostic::error("a structure is declared at the top level of the file")
-                        .with_primary(decl.name.span, "")
+                    Diagnostic::error("a type is declared at the top level of the file")
+                        .with_primary(name.span, "")
                         .with_help("move this declaration out of the block"),
                 );
                 None
@@ -154,7 +155,8 @@ impl Checker<'_> {
         };
         // An empty list takes the type of the variable, known once it is resolved.
         let value_ast = value;
-        let value = if is_empty_list(value) { None } else { self.expr(value) };
+        let deferred = is_empty_list(value) || self.is_bare_unknown_name(value);
+        let value = if deferred { None } else { self.expr(value) };
         if !self.is_known(name) {
             let error = self
                 .unknown_name_error(name, target.span)
@@ -198,7 +200,7 @@ impl Checker<'_> {
             }
             Resolved::Nothing => return None,
         };
-        let value = if is_empty_list(value_ast) { self.expr_expecting(value_ast, ty) } else { value };
+        let value = if deferred { self.expr_expecting(value_ast, ty) } else { value };
         let value = value?;
         let value = match compound_operator(op) {
             None => value,
@@ -317,7 +319,22 @@ impl Checker<'_> {
     /// `for x in values: ... ;` (§10.2). The loop variable is a constant of the body,
     /// which may run zero times.
     fn for_stmt(&mut self, var: &ast::Ident, iterable: &ast::Expr, body: &ast::Block) -> Option<ir::Stmt> {
-        let iterable = self.expr(iterable);
+        // `for d in Days` goes through the values of an enumeration (§13.1).
+        let iterable = match &iterable.kind {
+            ast::ExprKind::TypeName(name) if self.named_types.contains_key(name) => {
+                self.enum_values(name, iterable.span).or_else(|| {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!("`for` cannot go through the type `{name}`"))
+                            .with_primary(iterable.span, "")
+                            .with_note(
+                                "`for` goes through an interval, a list or an enumeration (§10.2, §13.1)",
+                            ),
+                    );
+                    None
+                })
+            }
+            _ => self.expr(iterable),
+        };
         let element = match &iterable {
             Some(iterable) => match iterable.ty.element() {
                 Some(element) => Some(element),

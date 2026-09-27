@@ -61,6 +61,22 @@ pub enum StmtKind {
     },
     /// `struct Name: fields and invariants ;` (§12.1).
     Struct(StructDecl),
+    /// `Color = {red, green}`, `Days = [mon, tue]`, `Shape = Circle or Rect` (§13).
+    TypeDef(TypeDef),
+}
+
+#[derive(Clone, Debug)]
+pub struct TypeDef {
+    pub name: Ident,
+    pub kind: TypeDefKind,
+}
+
+#[derive(Clone, Debug)]
+pub enum TypeDefKind {
+    /// An enumeration: `{...}`, or `[...]` when its values are ordered (§13.1, D33).
+    Enum { ordered: bool, values: Vec<Ident> },
+    /// A named union: a closed list of types (§13.2).
+    Union(TypeExpr),
 }
 
 #[derive(Clone, Debug)]

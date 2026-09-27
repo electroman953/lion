@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use lion_ir::{self as ir, BinaryOp, Conversion, StructRef, UnaryOp};
+use lion_ir::{self as ir, BinaryOp, Conversion, EnumRef, StructRef, UnaryOp};
 use lion_runtime::format::{format_float, quote_text};
 use lion_runtime::ops;
 
@@ -22,6 +22,7 @@ pub(crate) enum Const {
     None,
     List(Vec<Const>),
     Struct(StructRef, Vec<Const>),
+    Enum(EnumRef, u32),
 }
 
 impl Const {
@@ -33,6 +34,7 @@ impl Const {
             (Const::Bool(a), Const::Bool(b)) => a == b,
             (Const::Text(a), Const::Text(b)) => a == b,
             (Const::None, Const::None) => true,
+            (Const::Enum(a, x), Const::Enum(b, y)) => a == b && x == y,
             (Const::List(a), Const::List(b)) => {
                 a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.equals(y))
             }
@@ -49,6 +51,7 @@ impl Const {
             Const::Bool(value) => value.to_string(),
             Const::Text(text) => quote_text(text),
             Const::None => "none".to_string(),
+            Const::Enum(enumeration, value) => enumeration.values()[*value as usize].clone(),
             Const::List(elements) => {
                 let elements: Vec<String> = elements.iter().map(|element| element.literal(fields)).collect();
                 format!("[{}]", elements.join(", "))
@@ -78,6 +81,7 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
         ir::ExprKind::Bool(value) => Const::Bool(*value),
         ir::ExprKind::Text(text) => Const::Text(text.clone()),
         ir::ExprKind::None => Const::None,
+        ir::ExprKind::Enum { enumeration, value } => Const::Enum(*enumeration, *value),
         ir::ExprKind::Local(local) => env.get(local)?.clone(),
         ir::ExprKind::Let { local, value, body } => {
             let value = eval(value, env)?;
@@ -108,6 +112,10 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
             (Conversion::ToText, Const::Float(value)) => Const::Text(format_float(value)),
             (Conversion::ToText, Const::Text(text)) => Const::Text(text),
             (Conversion::ToText, Const::Bool(value)) => Const::Text(value.to_string()),
+            (Conversion::ToText | Conversion::Literal, Const::Enum(enumeration, value)) => {
+                Const::Text(enumeration.values()[value as usize].clone())
+            }
+            (Conversion::EnumPosition, Const::Enum(_, value)) => Const::Int(i64::from(value)),
             _ => return None,
         },
         ir::ExprKind::If { cond, then, otherwise } => match eval(cond, env)? {

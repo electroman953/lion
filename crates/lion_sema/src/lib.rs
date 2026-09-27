@@ -11,6 +11,7 @@
 
 mod collections;
 mod consteval;
+mod enums;
 mod expr;
 mod flow;
 mod functions;
@@ -29,6 +30,7 @@ use lion_diagnostics::{Diagnostic, Span};
 use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
+use crate::enums::NamedType;
 use crate::flow::{Assigned, Flow};
 use crate::functions::{FunctionInfo, Instance, ScriptCall};
 use crate::structs::StructInfo;
@@ -182,6 +184,11 @@ struct Checker<'a> {
     methods: HashMap<(Type, String), usize>,
     structs: Vec<StructInfo<'a>>,
     struct_names: HashMap<String, usize>,
+    /// The types defined with `=` (§13), and the enumerations among them.
+    named_types: HashMap<String, NamedType<'a>>,
+    enums: Vec<ir::EnumRef>,
+    /// Where each type of the file is declared.
+    type_spans: HashMap<String, Span>,
     /// The checked versions of the functions: one per function, or one per set of
     /// argument types for a generic function (C1).
     instances: Vec<Instance>,
@@ -203,6 +210,9 @@ impl<'a> Checker<'a> {
             methods: HashMap::new(),
             structs: Vec::new(),
             struct_names: HashMap::new(),
+            named_types: HashMap::new(),
+            enums: Vec::new(),
+            type_spans: HashMap::new(),
             instances: Vec::new(),
             script_calls: Vec::new(),
             demands: Vec::new(),
@@ -350,7 +360,8 @@ impl<'a> Checker<'a> {
             self.instances.into_iter().map(|instance| instance.into_ir(&functions)).collect();
         functions.push(main);
         let main = ir::FunctionId(functions.len() as u32 - 1);
-        Checked { program: Some(ir::Program { functions, structs, main }), diagnostics }
+        let enums = self.enums;
+        Checked { program: Some(ir::Program { functions, structs, enums, main }), diagnostics }
     }
 }
 

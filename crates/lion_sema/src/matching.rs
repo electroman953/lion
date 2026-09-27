@@ -3,6 +3,8 @@
 //! narrower type `T`. Every possible value must have a case: the types left after the
 //! cases without conditions must be none, or `otherwise` must end the list.
 
+use std::collections::HashMap;
+
 use lion_diagnostics::{Diagnostic, Severity, Span};
 use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
@@ -36,6 +38,22 @@ struct Coverage {
     remaining: Option<Type>,
     /// For a Bool value: which of `true` and `false` are covered.
     booleans: [bool; 2],
+    /// For each enumeration among the types: which of its values are covered.
+    values: HashMap<ir::EnumRef, Vec<bool>>,
+}
+
+impl Coverage {
+    fn new(ty: Type) -> Coverage {
+        let values = ty
+            .members()
+            .into_iter()
+            .filter_map(|member| match member {
+                Type::Enum(enumeration) => Some((enumeration, vec![false; enumeration.values().len()])),
+                _ => None,
+            })
+            .collect();
+        Coverage { remaining: Some(ty), booleans: [false; 2], values }
+    }
 }
 
 impl Checker<'_> {
@@ -47,7 +65,7 @@ impl Checker<'_> {
         span: Span,
     ) -> Option<ir::Stmt> {
         let (subject, value) = self.subject(scrutinee)?;
-        let mut coverage = Coverage { remaining: Some(subject.ty), booleans: [false; 2] };
+        let mut coverage = Coverage::new(subject.ty);
         let before = self.ctx.flow.clone();
         let mut ends = Vec::new();
         let mut checked = Vec::new();
@@ -104,7 +122,7 @@ impl Checker<'_> {
         span: Span,
     ) -> Option<ir::Expr> {
         let (subject, value) = self.subject(scrutinee)?;
-        let mut coverage = Coverage { remaining: Some(subject.ty), booleans: [false; 2] };
+        let mut coverage = Coverage::new(subject.ty);
         let before = self.ctx.flow.clone();
         let mut checked = Vec::new();
         let mut valid = true;
@@ -195,7 +213,7 @@ impl Checker<'_> {
                 (None, None, None)
             }
             ast::Pattern::Value(value) => {
-                let value = self.expr(value)?;
+                let value = self.expr_expecting(value, subject.ty)?;
                 if unconditional {
                     self.cover_value(coverage, &value);
                 }
@@ -298,6 +316,14 @@ impl Checker<'_> {
                         coverage.remaining.and_then(|remaining| remaining.without(Type::Bool));
                 }
             }
+            ir::ExprKind::Enum { enumeration, value } => {
+                let Some(covered) = coverage.values.get_mut(&enumeration) else { return };
+                covered[value as usize] = true;
+                if covered.iter().all(|&covered| covered) {
+                    let ty = Type::Enum(enumeration);
+                    coverage.remaining = coverage.remaining.and_then(|remaining| remaining.without(ty));
+                }
+            }
             _ => {}
         }
     }
@@ -327,17 +353,28 @@ impl Checker<'_> {
             Type::Bool if coverage.booleans[1] => "`false`".to_string(),
             Type::Bool if coverage.booleans[0] => "`true`".to_string(),
             Type::None => "`none`".to_string(),
+            Type::Enum(enumeration) if coverage.values[&enumeration].contains(&true) => {
+                let values = enumeration.values();
+                let missing: Vec<String> = coverage.values[&enumeration]
+                    .iter()
+                    .zip(&values)
+                    .filter(|(covered, _)| !**covered)
+                    .map(|(_, value)| format!("`{value}`"))
+                    .collect();
+                missing.join(", ")
+            }
             _ if remaining == subject.ty && !matches!(remaining, Type::Union(_)) => {
                 format!("some values of {}", article(remaining))
             }
             _ => article(remaining),
         };
+        let help = match remaining {
+            Type::Enum(_) => "add a case for each value, or `otherwise` at the end".to_string(),
+            _ => format!("add a case such as `in {} ...`, or `otherwise` at the end", remaining.members()[0]),
+        };
         let mut error = Diagnostic::error(format!("this `match` has no case for {missing}"))
             .with_primary(span, "")
-            .with_help(format!(
-                "add a case such as `in {} ...`, or `otherwise` at the end",
-                remaining.members()[0]
-            ));
+            .with_help(help);
         if has_otherwise {
             error = error.with_note("the case `otherwise` has conditions, so it does not cover every value");
         }
