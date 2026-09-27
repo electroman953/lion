@@ -1,0 +1,13 @@
+exit: 0
+----- stdout
+Pair(first: "one", second: 1)
+(one, 1)
+Pair(first: false, second: 2.5)
+[Box(item: 1), Box(item: 2), Box(item: 3)]
+Box(item: 9)
+true
+2
+failed with -3
+5.0
+true
+----- stderr

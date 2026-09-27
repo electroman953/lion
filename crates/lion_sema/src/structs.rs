@@ -118,8 +118,13 @@ impl<'a> Checker<'a> {
     /// The name of a type of the module being checked, as messages and values show it:
     /// qualified by the module, except in the script.
     pub(crate) fn qualified(&self, name: &str) -> String {
+        self.qualified_in(self.module, name)
+    }
+
+    /// `name`, declared in `module`, as the messages write it.
+    pub(crate) fn qualified_in(&self, module: usize, name: &str) -> String {
         // A module is reached by the last part of its path (C61).
-        match self.module {
+        match module {
             0 => name.to_string(),
             module => {
                 let path = &self.modules[module].name;

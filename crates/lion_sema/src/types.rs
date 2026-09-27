@@ -59,8 +59,15 @@ impl Checker<'_> {
                     );
                     return None;
                 };
+                // `geometry.Pair of (Int, Text)` (§15.1, §20.2).
+                if let Some(&template) = self.table_of(found).generic_structs.get(&name.name) {
+                    return self.generic_struct_type(template, args, ty.span);
+                }
                 if !args.is_empty() {
-                    self.not_implemented(ty.span, "generic types of modules", "§15.1");
+                    self.diagnostics.push(
+                        Diagnostic::error(format!("`{}` does not take type parameters", name.name))
+                            .with_primary(ty.span, ""),
+                    );
                     return None;
                 }
                 self.module_type(found, name)

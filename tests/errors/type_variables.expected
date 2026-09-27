@@ -7,7 +7,7 @@ warning: `biggest` is never called, so it is not checked
  2 | fun biggest(a in T, b in T) in T, T in Comparable:
    |     ^^^^^^^
    |
-   = a function with parameters without a type is checked for the types of each call (§15.3)
+   = a function with type variables is checked for the types of each call (§15.3)
 
 error: `Int` is not a trait
   --> tests/errors/type_variables.lion:5:30
@@ -51,7 +51,7 @@ warning: `hello` is never called, so it is not checked
  12 | fun hello(x in T) in Text, T in Named = "hello {x.name()}"
     |     ^^^^^
     |
-    = a function with parameters without a type is checked for the types of each call (§15.3)
+    = a function with type variables is checked for the types of each call (§15.3)
 
 error: An Int is not Named
    --> tests/errors/type_variables.lion:13:6

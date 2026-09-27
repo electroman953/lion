@@ -25,7 +25,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
 - **Structures** (§12) : `struct` avec champs, valeurs par défaut, conditions et invariants, construction `T(...)`, avec noms, `(...) as T` et `let x = (...) in T`, champs finaux omis. Une construction avec des constantes est vérifiée à la compilation, sinon elle donne `T or Error`. Modifier un champ qui viole un invariant est un bug. Égalité champ par champ, méthodes (`fun Student.passes()`, `var self`, y compris sur `Int` ou `Text`) qui suivent les valeurs de leur type dans les autres modules, structures récursives (`maybe Node`), structures dans les unions et les `match`.
 - **Énumérations et unions nommées** (§13) : `Color = {red, green}`, `Days = [mon, tue]` ordonnée (`<`, parcours avec `for`), `Color.red` ou `red` seul quand le type est connu, `match` exhaustif sur les valeurs, `Shape = Circle or Rect`.
 - **Types** : `Int` (64 bits, débordement = bug), `Float` (IEEE 754), `Rational` (fractions exactes `1 over 3`, toujours simplifiées), `Bool`, `Text`, `None`, avec conversion automatique Int → Float.
-- **Structures génériques** (§15.1) : `struct Pair of (A, B), A in Type, B in Type`, `Pair(1, "one")` qui déduit les types, `Pair of (Int, Text)`, structures récursives `Node of T`.
+- **Structures génériques** (§15.1) : `struct Pair of (A, B), A in Type, B in Type`, `Pair(1, "one")` qui déduit les types, `Pair of (Int, Text)`, structures récursives `Node of T`, méthodes (`fun Pair.swap() in Pair of (B, A)`), variables de type dans les fonctions génériques (`p in Pair of (T, U)`), structures génériques d'un autre module (`geometry.Pair of (Int, Text)`).
 - **Traits et variables de type** (§14, §15.2) : conformité structurelle, méthodes par défaut, `List of Shape` avec appel choisi à l'exécution, `x in Shape` ; `fun biggest(a in T, b in T) in T, T in Comparable`.
 - **Opérateurs définis par les types** (§9.5) : méthodes `plus`, `subtract`, `times`, `divide`, `power`, `negate`, `less`, et fonctions `infix` (`u dot v`) ; `equals` (§12.5), qui sert aussi à `x in l` et aux Sets.
 - **Opérateurs** :
@@ -50,7 +50,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 - **Mode compilé** (§22) : `lion build f.lion` produit un exécutable natif, par Rust et LLVM, qui donne exactement la même sortie, les mêmes bugs et le même code de sortie que `lion run`, sans les alertes. Il va de 3 à 13 fois plus vite que la machine virtuelle sur nos mesures.
 
-**Pas encore implémenté** : traits génériques, méthodes d'une structure générique, types et fonctions standard comme valeurs, lecture des éléments d'un n-uplet, modules `json`, `net` et `ui`, débogueur. La bibliothèque `ui` attend une décision de l'auteur : voir la [proposition](docs/design/ui.md). La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+**Pas encore implémenté** : traits génériques, méthodes de List, Set et Map, types et fonctions standard comme valeurs, lecture des éléments d'un n-uplet, modules `json`, `net` et `ui`, débogueur. La bibliothèque `ui` attend une décision de l'auteur : voir la [proposition](docs/design/ui.md). La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ## Construire et utiliser
 

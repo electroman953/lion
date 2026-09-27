@@ -1,0 +1,54 @@
+exit: 1
+----- stdout
+----- stderr
+error: the method `Pair.swap` is already declared
+  --> tests/errors/generic_methods.lion:7:10
+   |
+ 6 | fun Pair.swap() in Pair of (B, A) = Pair(self.second, self.first)
+   |          ---- first declared here
+ 7 | fun Pair.swap() = 1
+   |          ^^^^ declared again here
+
+error: `Pair` already has a field `first`
+  --> tests/errors/generic_methods.lion:8:10
+   |
+ 3 |     first in A
+   |     ----- field declared here
+  ...
+ 8 | fun Pair.first() = 2
+   |          ^^^^^
+   |
+   = help: give the method another name
+
+error: cannot find the type `C`
+  --> tests/errors/generic_methods.lion:9:21
+   |
+ 9 | fun Pair.wrong() in C = self.first
+   |                     ^ unknown type
+
+warning: `twin` is never called, so it is not checked
+   --> tests/errors/generic_methods.lion:11:5
+    |
+ 11 | fun twin(p in Pair of (T, T)) in Bool, T in Type = p.first == p.second
+    |     ^^^^
+    |
+    = a function with type variables is checked for the types of each call (§15.3)
+
+error: the parameter `p` is Pair of (T, T), which does not fit a Pair of (Int, Text)
+   --> tests/errors/generic_methods.lion:12:6
+    |
+ 11 | fun twin(p in Pair of (T, T)) in Bool, T in Type = p.first == p.second
+    |          - parameter declared here
+ 12 | show(twin(Pair(1, "x")))
+    |      ^^^^
+
+error: `Pair of (Int, Int)` has no field `missing`
+   --> tests/errors/generic_methods.lion:13:24
+    |
+  2 | struct Pair of (A, B), A in Type, B in Type:
+    |        ---- declared here
+   ...
+ 13 | show(Pair(1, 2).swap().missing)
+    |                        ^^^^^^^
+
+5 errors found

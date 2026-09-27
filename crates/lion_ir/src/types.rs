@@ -48,6 +48,10 @@ pub enum Type {
     /// T, T in Comparable` (§15.2). It appears only in signatures: each instance
     /// replaces it.
     Var(VarRef),
+    /// A generic structure written with type variables, as `Pair of (T, U)` in the
+    /// signature of a generic function (§15.1). Like `Var`, it appears only in
+    /// signatures: each instance replaces it with the structure made for its types.
+    Applied(AppliedRef),
 }
 
 impl Type {
@@ -206,6 +210,10 @@ impl fmt::Display for Type {
             Type::Enum(enumeration) => f.write_str(&enumeration.name()),
             Type::Trait(set) => f.write_str(&set.name()),
             Type::Var(var) => f.write_str(&var.name()),
+            Type::Applied(applied) => {
+                let data = applied.get();
+                write!(f, "{} of {}", data.name, type_list(&data.args))
+            }
             Type::Fun(function) => {
                 let data = function.get();
                 let params: Vec<String> = data
@@ -269,6 +277,69 @@ impl StructRef {
     /// A number that identifies the structure while the program runs.
     pub fn id(self) -> u32 {
         self.0
+    }
+
+    /// Records that the structure is the instance of the generic structure `template`
+    /// for the types `args` (§15.3).
+    pub fn set_origin(self, template: u32, args: Vec<Type>) {
+        interner()
+            .lock()
+            .expect("the type interner is never poisoned")
+            .struct_origins
+            .insert(self.0, (template, args));
+    }
+
+    /// For an instance of a generic structure: the generic structure and its types.
+    pub fn origin(self) -> Option<(u32, Vec<Type>)> {
+        interner().lock().expect("the type interner is never poisoned").struct_origins.get(&self.0).cloned()
+    }
+}
+
+/// A generic structure written with type variables (§15.1): the generic structure, as
+/// numbered by the checker, its name, and the types given to it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AppliedData {
+    pub template: u32,
+    pub name: String,
+    pub args: Vec<Type>,
+}
+
+/// A generic structure written with type variables, stored once for the whole process.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AppliedRef(u32);
+
+impl AppliedRef {
+    pub fn new(data: AppliedData) -> AppliedRef {
+        let mut interner = interner().lock().expect("the type interner is never poisoned");
+        if let Some(&id) = interner.applied_ids.get(&data) {
+            return AppliedRef(id);
+        }
+        let id = interner.applied.len() as u32;
+        interner.applied.push(data.clone());
+        interner.applied_ids.insert(data, id);
+        AppliedRef(id)
+    }
+
+    pub fn get(self) -> AppliedData {
+        interner().lock().expect("the type interner is never poisoned").applied[self.0 as usize].clone()
+    }
+}
+
+impl fmt::Debug for AppliedRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.get())
+    }
+}
+
+/// The types after `of`, as they are written: `Int`, `(maybe Int)`, `(Int, Text)`.
+pub fn type_list(types: &[Type]) -> String {
+    match types {
+        [single @ Type::Union(_)] => format!("({single})"),
+        [single] => single.to_string(),
+        _ => {
+            let types: Vec<String> = types.iter().map(Type::to_string).collect();
+            format!("({})", types.join(", "))
+        }
     }
 }
 
@@ -357,6 +428,7 @@ impl Type {
                 let data = function.get();
                 data.ret.has_vars() || data.params.into_iter().any(Type::has_vars)
             }
+            Type::Applied(applied) => applied.get().args.into_iter().any(Type::has_vars),
             _ => false,
         }
     }
@@ -381,8 +453,42 @@ impl Type {
                 let params = data.params.into_iter().map(|ty| ty.substitute(bindings)).collect();
                 Type::function(params, data.required as usize, data.ret.substitute(bindings))
             }
+            // Still a pattern: the checker makes the structure for the types (§15.3).
+            Type::Applied(applied) => {
+                let data = applied.get();
+                let args = data.args.into_iter().map(|ty| ty.substitute(bindings)).collect();
+                Type::Applied(AppliedRef::new(AppliedData { args, ..data }))
+            }
             other => other,
         }
+    }
+
+    /// The type with each generic structure written with types replaced by `make`,
+    /// innermost first; `None` when `make` fails.
+    pub fn make_applied(self, make: &mut dyn FnMut(AppliedData) -> Option<Type>) -> Option<Type> {
+        let each = |types: Vec<Type>, make: &mut dyn FnMut(AppliedData) -> Option<Type>| {
+            types.into_iter().map(|ty| ty.make_applied(make)).collect::<Option<Vec<Type>>>()
+        };
+        Some(match self {
+            Type::List(inner) => Type::list(inner.get().make_applied(make)?),
+            Type::Set(inner) => Type::set(inner.get().make_applied(make)?),
+            Type::Task(inner) => Type::Task(TypeRef::new(inner.get().make_applied(make)?)),
+            Type::Domain(inner) => Type::domain(inner.get().make_applied(make)?),
+            Type::Tuple(tuple) => Type::tuple(each(tuple.elements(), make)?),
+            Type::Map(parts) => Type::Map(TupleRef::new(each(parts.elements(), make)?)),
+            Type::Union(union) => Type::union(each(union.members(), make)?),
+            Type::Fun(function) => {
+                let data = function.get();
+                let params = each(data.params, make)?;
+                Type::function(params, data.required as usize, data.ret.make_applied(make)?)
+            }
+            Type::Applied(applied) => {
+                let data = applied.get();
+                let args = each(data.args, make)?;
+                make(AppliedData { args, ..data })?
+            }
+            other => other,
+        })
     }
 
     /// Binds the variables of `self`, a pattern, so that it becomes `actual`; false when
@@ -417,6 +523,22 @@ impl Type {
                         .zip(actual.params)
                         .all(|(pattern, actual)| pattern.unify(actual, bindings))
                     && pattern.ret.unify(actual.ret, bindings)
+            }
+            // `Pair of (T, U)` and the instance `Pair of (Int, Text)` (§15.1).
+            (Type::Applied(pattern), Type::Struct(actual)) => {
+                let pattern = pattern.get();
+                match actual.origin() {
+                    Some((template, args))
+                        if template == pattern.template && args.len() == pattern.args.len() =>
+                    {
+                        pattern
+                            .args
+                            .into_iter()
+                            .zip(args)
+                            .all(|(pattern, actual)| pattern.unify(actual, bindings))
+                    }
+                    _ => false,
+                }
             }
             (pattern, actual) if !pattern.has_vars() => {
                 actual.is_subset_of(pattern) || actual == Type::Int && pattern == Type::Float
@@ -568,6 +690,10 @@ struct Interner {
     function_ids: HashMap<FunData, u32>,
     traits: Vec<(String, Vec<Type>)>,
     vars: Vec<String>,
+    /// The instances of generic structures: their generic structure and types (§15.3).
+    struct_origins: HashMap<u32, (u32, Vec<Type>)>,
+    applied: Vec<AppliedData>,
+    applied_ids: HashMap<AppliedData, u32>,
 }
 
 fn interner() -> &'static Mutex<Interner> {
@@ -611,6 +737,26 @@ mod tests {
         assert_eq!(a.to_string(), "List of List of Int");
         assert_eq!(a.element(), Some(Type::list(Type::Int)));
         assert_eq!(Type::Range.element(), Some(Type::Int));
+    }
+
+    #[test]
+    fn a_generic_structure_with_variables_binds_them() {
+        let (t, u) = (VarRef::new("T"), VarRef::new("U"));
+        let pattern = Type::Applied(AppliedRef::new(AppliedData {
+            template: 7,
+            name: "Pair".to_string(),
+            args: vec![Type::Var(t), Type::Var(u)],
+        }));
+        assert_eq!(pattern.to_string(), "Pair of (T, U)");
+        assert!(pattern.has_vars());
+        let instance = StructRef::new("Pair of (Int, Text)");
+        instance.set_origin(7, vec![Type::Int, Type::Text]);
+        let mut bindings = HashMap::new();
+        assert!(pattern.unify(Type::Struct(instance), &mut bindings));
+        assert_eq!(bindings[&t], Type::Int);
+        assert_eq!(bindings[&u], Type::Text);
+        let other = StructRef::new("Other");
+        assert!(!pattern.unify(Type::Struct(other), &mut HashMap::new()));
     }
 
     #[test]

@@ -1,0 +1,10 @@
+exit: 0
+----- stdout
+Pair(first: "one", second: 1)
+true
+false
+[1, 3]
+true
+Pair(first: 6, second: 8)
+7
+----- stderr

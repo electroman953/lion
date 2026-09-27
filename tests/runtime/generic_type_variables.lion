@@ -1,0 +1,22 @@
+// A generic structure written with type variables in a generic function (§15.1, §15.2):
+// each call makes the structure for the types of its variables (§15.3).
+struct Pair of (A, B), A in Type, B in Type:
+    first in A
+    second in B
+;
+
+fun swap(p in Pair of (T, U)) in Pair of (U, T), T in Type, U in Type = Pair(p.second, p.first)
+fun twin(p in Pair of (T, T)) in Bool, T in Type = p.first == p.second
+fun firsts(l in List of Pair of (T, U)) in List of T, T in Type, U in Type = [p.first, p in l]
+fun apply(p in Pair of (T, T), f in fun(T) in T) in Pair of (T, T), T in Type = Pair(f(p.first), f(p.second))
+fun biggest(a in T, b in T) in T, T in Comparable = if b > a then b else a
+
+show(swap(Pair(1, "one")))
+show(twin(Pair(2, 2)))
+show(twin(Pair("a", "b")))
+show(firsts([Pair(1, 2.5), Pair(3, 4.5)]))
+let w = swap(swap(Pair(true, 1)))
+show(w.first)
+fun double(n in Int) in Int = n * 2
+show(apply(Pair(3, 4), double))
+show(biggest(Pair(1, 2).second, 7))

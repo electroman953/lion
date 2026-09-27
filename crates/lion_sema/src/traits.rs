@@ -130,31 +130,11 @@ impl<'a> Checker<'a> {
         candidates.extend(self.structs.iter().map(|info| Type::Struct(info.id)));
         candidates.extend(self.enums.iter().map(|&enumeration| Type::Enum(enumeration)));
         // `Comparable`: the numbers, the ordered enumerations and the types with `less` (C67).
-        let comparable: Vec<Type> = candidates
-            .iter()
-            .copied()
-            .filter(|&ty| match ty {
-                Type::Int | Type::Float | Type::Rational => true,
-                Type::Enum(enumeration) => enumeration.is_ordered(),
-                _ => self.methods.get(&(ty, "less".to_string())).is_some_and(|methods| {
-                    methods.iter().any(|&method| self.functions[method].declared_ret == Some(Type::Bool))
-                }),
-            })
-            .collect();
+        let comparable: Vec<Type> = candidates.iter().copied().filter(|&ty| self.is_comparable(ty)).collect();
         self.comparable.set_members(comparable);
         // `Error`: the simple error, and the types with `message() in Text` (§18.2, D17).
         let mut errors = vec![Type::Error];
-        errors.extend(candidates.iter().copied().filter(|&ty| {
-            ty != Type::Error
-                && self.methods.get(&(ty, "message".to_string())).is_some_and(|methods| {
-                    methods.iter().any(|&method| {
-                        let function = &self.functions[method];
-                        function.declared_ret == Some(Type::Text)
-                            && !function.var_self
-                            && function.signature.as_ref().is_some_and(|params| params.len() == 1)
-                    })
-                })
-        }));
+        errors.extend(candidates.iter().copied().filter(|&ty| ty != Type::Error && self.is_error(ty)));
         self.error_trait.set_members(errors);
         // The defaults given to each type, to find two traits that give the same one.
         let mut given: HashMap<(Type, String), usize> = HashMap::new();
@@ -168,41 +148,101 @@ impl<'a> Checker<'a> {
                 candidates.iter().copied().filter(|&ty| self.satisfies(index, ty)).collect();
             self.traits[index].id.set_members(members.clone());
             for &member in &members {
-                let defaults: Vec<(String, Rc<ast::FunDecl>, Span)> = self.traits[index]
-                    .requirements
-                    .iter()
-                    .filter_map(|requirement| {
-                        let default = requirement.default.clone()?;
-                        Some((requirement.name.clone(), default, requirement.span))
-                    })
-                    .collect();
-                for (name, decl, span) in defaults {
-                    let own = self.methods.get(&(member, name.clone())).is_some_and(|methods| {
-                        methods.iter().any(|&method| !given.values().any(|&function| function == method))
-                    });
-                    if own {
-                        continue;
-                    }
-                    if let Some(&first) = given.get(&(member, name.clone())) {
-                        let other = self.functions[first].decl.name.span;
-                        if !reported.insert((other, span)) {
-                            continue;
-                        }
-                        self.diagnostics.push(
-                            Diagnostic::error(format!("two traits give `{member}` a method `{name}`"))
-                                .with_primary(span, "")
-                                .with_secondary(other, "the other one")
-                                .with_note(
-                                    "a type receives the default methods of the traits it satisfies (§14.2)",
-                                )
-                                .with_help(format!("declare `fun {member}.{name}(...)` to choose")),
-                        );
-                        continue;
-                    }
-                    let function = self.register_default_method(decl, member, self.traits[index].module);
-                    given.insert((member, name), function);
-                }
+                self.give_defaults(index, member, &mut given, &mut reported);
             }
+        }
+    }
+
+    /// A structure made once the traits are known, as an instance of a generic structure
+    /// first met in a body: it joins the traits that it satisfies (C67, C90).
+    pub(crate) fn conform_late(&mut self, ty: Type) {
+        let join = |set: TraitRef| {
+            let mut members = set.members();
+            members.push(ty);
+            set.set_members(members);
+        };
+        if self.is_comparable(ty) {
+            join(self.comparable);
+        }
+        if self.is_error(ty) {
+            join(self.error_trait);
+        }
+        let mut joined = self.is_comparable(ty) || self.is_error(ty);
+        let mut given = HashMap::new();
+        let mut reported = std::collections::HashSet::new();
+        for index in 0..self.traits.len() {
+            if self.traits[index].valid && self.satisfies(index, ty) {
+                join(self.traits[index].id);
+                self.give_defaults(index, ty, &mut given, &mut reported);
+                joined = true;
+            }
+        }
+        if joined {
+            self.late_instances.push(ty);
+        }
+    }
+
+    fn is_comparable(&self, ty: Type) -> bool {
+        match ty {
+            Type::Int | Type::Float | Type::Rational => true,
+            Type::Enum(enumeration) => enumeration.is_ordered(),
+            _ => self.methods.get(&(ty, "less".to_string())).is_some_and(|methods| {
+                methods.iter().any(|&method| self.functions[method].declared_ret == Some(Type::Bool))
+            }),
+        }
+    }
+
+    fn is_error(&self, ty: Type) -> bool {
+        self.methods.get(&(ty, "message".to_string())).is_some_and(|methods| {
+            methods.iter().any(|&method| {
+                let function = &self.functions[method];
+                function.declared_ret == Some(Type::Text)
+                    && !function.var_self
+                    && function.signature.as_ref().is_some_and(|params| params.len() == 1)
+            })
+        })
+    }
+
+    /// Gives `member` the default methods of the trait `index` that it does not have
+    /// (§14.2); two traits that give it the same one are an error.
+    fn give_defaults(
+        &mut self,
+        index: usize,
+        member: Type,
+        given: &mut HashMap<(Type, String), usize>,
+        reported: &mut std::collections::HashSet<(Span, Span)>,
+    ) {
+        let defaults: Vec<(String, Rc<ast::FunDecl>, Span)> = self.traits[index]
+            .requirements
+            .iter()
+            .filter_map(|requirement| {
+                let default = requirement.default.clone()?;
+                Some((requirement.name.clone(), default, requirement.span))
+            })
+            .collect();
+        for (name, decl, span) in defaults {
+            let own = self.methods.get(&(member, name.clone())).is_some_and(|methods| {
+                methods.iter().any(|&method| !given.values().any(|&function| function == method))
+            });
+            if own {
+                continue;
+            }
+            if let Some(&first) = given.get(&(member, name.clone())) {
+                let other = self.functions[first].decl.name.span;
+                if !reported.insert((other, span)) {
+                    continue;
+                }
+                self.diagnostics.push(
+                    Diagnostic::error(format!("two traits give `{member}` a method `{name}`"))
+                        .with_primary(span, "")
+                        .with_secondary(other, "the other one")
+                        .with_note("a type receives the default methods of the traits it satisfies (§14.2)")
+                        .with_help(format!("declare `fun {member}.{name}(...)` to choose")),
+                );
+                continue;
+            }
+            let function = self.register_default_method(decl, member, self.traits[index].module);
+            given.insert((member, name), function);
         }
     }
 

@@ -211,6 +211,7 @@ impl Checker<'_> {
             | Type::Domain(_)
             | Type::Task(_)
             | Type::Var(_)
+            | Type::Applied(_)
             | Type::Trait(_)
             | Type::Union(_) => false,
         })

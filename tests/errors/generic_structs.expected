@@ -23,21 +23,13 @@ error: `Pair` takes 2 type parameters: `Pair of (A, B)`
    |
    = the types of a generic structure are given with `of` (§15.1)
 
-error: not implemented yet: methods of generic types
-   --> tests/errors/generic_structs.lion:10:5
-    |
- 10 | fun Pair.swap() = 1
-    |     ^^^^
-    |
-    = this part of Lion (spec §12.4, §15) is not supported by this version of the implementation
-
-error: not implemented yet: generic structures whose types are type variables
-   --> tests/errors/generic_structs.lion:11:17
+warning: `firsts` is never called, so it is not checked
+   --> tests/errors/generic_structs.lion:11:5
     |
  11 | fun firsts(p in Pair of (T, T)) in T, T in Type = p.first
-    |                 ^^^^^^^^^^^^^^
+    |     ^^^^^^
     |
-    = this part of Lion (spec §15.1) is not supported by this version of the implementation
+    = a function with type variables is checked for the types of each call (§15.3)
 
 error: the type `T` of this `Wrapper` is not known
    --> tests/errors/generic_structs.lion:12:9
@@ -63,4 +55,4 @@ error: mismatched types
     = expected: Text
     = found: Int
 
-6 errors found
+4 errors found

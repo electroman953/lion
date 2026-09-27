@@ -1832,7 +1832,7 @@ fn kinds_of(ty: Type) -> u16 {
             Type::Fun(_) | Type::Domain(_) => kinds::FUN,
             // A trait without members has no values.
             Type::Trait(_) => 0,
-            Type::Var(_) => unreachable!("an instance has no type variables"),
+            Type::Var(_) | Type::Applied(_) => unreachable!("an instance has no type variables"),
             Type::Union(_) => unreachable!("the members of a union are not unions"),
         })
         .fold(0, |all, kind| all | kind)

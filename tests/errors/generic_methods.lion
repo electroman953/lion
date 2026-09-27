@@ -1,0 +1,13 @@
+// Methods and type variables of generic structures (§15.1, C90).
+struct Pair of (A, B), A in Type, B in Type:
+    first in A
+    second in B
+;
+fun Pair.swap() in Pair of (B, A) = Pair(self.second, self.first)
+fun Pair.swap() = 1
+fun Pair.first() = 2
+fun Pair.wrong() in C = self.first
+
+fun twin(p in Pair of (T, T)) in Bool, T in Type = p.first == p.second
+show(twin(Pair(1, "x")))
+show(Pair(1, 2).swap().missing)

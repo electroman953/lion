@@ -35,6 +35,9 @@ pub(crate) struct FunctionInfo {
     /// A method of a structure or an enumeration, declared in the file of its type: it
     /// goes wherever the values of the type go (C87).
     pub(crate) own_method: bool,
+    /// For a method of an instance of a generic structure: the types of the parameters of
+    /// the structure, known in its signature and its body (§15.1, C90).
+    pub(crate) struct_args: Vec<(String, Type)>,
     /// A method whose declaration does not write `self`: its first parameter is added.
     implicit_self: bool,
     /// A method declared with `var self`, which changes its object (§12.4).
@@ -254,6 +257,7 @@ impl<'a> Checker<'a> {
                 self.modules[module].init = Some(self.synthetic_instance(name, span, Type::None));
             }
         }
+        self.signatures_started = true;
         for index in 0..self.functions.len() {
             let previous = self.enter_module(self.functions[index].module);
             self.resolve_signature(index);
@@ -266,6 +270,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.enter_module(0);
+        self.make_seeds();
         self.register_equalities();
         self.conform_traits();
         self.check_pending_constraints();
@@ -340,6 +345,7 @@ impl<'a> Checker<'a> {
             prefix: self.qualified(""),
             receiver: None,
             own_method: false,
+            struct_args: Vec::new(),
             implicit_self: false,
             var_self: false,
             native: None,
@@ -372,6 +378,7 @@ impl<'a> Checker<'a> {
             prefix: String::new(),
             receiver: Some(receiver),
             own_method: false,
+            struct_args: Vec::new(),
             implicit_self: false,
             var_self: false,
             native: None,
@@ -421,6 +428,7 @@ impl<'a> Checker<'a> {
             prefix: self.qualified(""),
             receiver: None,
             own_method: false,
+            struct_args: Vec::new(),
             implicit_self: false,
             var_self: false,
             native: None,
@@ -436,6 +444,10 @@ impl<'a> Checker<'a> {
             instance: None,
         };
         if let Some(receiver) = &decl.receiver {
+            if let Some(&template) = self.tables.generic_structs.get(&receiver.name) {
+                self.register_template_method(template, info.decl);
+                return;
+            }
             let Some(ty) = self.receiver_type(receiver) else { return };
             if !self.check_method_name(ty, decl) {
                 return;
@@ -467,13 +479,93 @@ impl<'a> Checker<'a> {
             kind: ast::TypeExprKind::Named { module: Vec::new(), name: receiver.clone(), args: Vec::new() },
             span: receiver.span,
         };
-        if matches!(receiver.name.as_str(), "List" | "Set" | "Domain" | "Map")
-            || self.tables.generic_structs.contains_key(&receiver.name)
-        {
+        if matches!(receiver.name.as_str(), "List" | "Set" | "Domain" | "Map") {
             self.not_implemented(receiver.span, "methods of generic types", "§12.4, §15");
             return None;
         }
         self.resolve_type(&ty)
+    }
+
+    /// `fun Pair.swap()`: a method of a generic structure, given to each of its instances,
+    /// those made so far and those to come (§12.4, §15.3, C90).
+    fn register_template_method(&mut self, template: usize, decl: Rc<ast::FunDecl>) {
+        let name = &decl.name.name;
+        let structure = self.generic_structs[template].decl;
+        if let Some(previous) =
+            self.generic_structs[template].methods.iter().find(|method| &method.name.name == name)
+        {
+            self.diagnostics.push(
+                Diagnostic::error(format!("the method `{}.{name}` is already declared", structure.name.name))
+                    .with_primary(decl.name.span, "declared again here")
+                    .with_secondary(previous.name.span, "first declared here"),
+            );
+            return;
+        }
+        let field = structure.lines.iter().find_map(|line| match line {
+            ast::StructLine::Field(field) if &field.name.name == name => Some(field.name.span),
+            _ => None,
+        });
+        if let Some(field) = field {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`{}` already has a field `{name}`", structure.name.name))
+                    .with_primary(decl.name.span, "")
+                    .with_secondary(field, "field declared here")
+                    .with_help("give the method another name"),
+            );
+            return;
+        }
+        self.generic_structs[template].methods.push(Rc::clone(&decl));
+        let mut instances: Vec<usize> = self.generic_structs[template].instances.values().copied().collect();
+        instances.sort_unstable();
+        for index in instances {
+            self.register_method_instance(Rc::clone(&decl), template, index);
+        }
+    }
+
+    /// The method `decl` of a generic structure, for its instance `index`.
+    pub(crate) fn register_method_instance(&mut self, decl: Rc<ast::FunDecl>, template: usize, index: usize) {
+        let module = self.generic_structs[template].module;
+        let ty = Type::Struct(self.structs[index].id);
+        let function = self.functions.len();
+        self.methods.entry((ty, decl.name.name.clone())).or_default().push(function);
+        let equals = decl.name.name == "equals";
+        self.functions.push(FunctionInfo {
+            decl,
+            module,
+            prefix: self.qualified_in(module, ""),
+            receiver: Some(ty),
+            own_method: true,
+            struct_args: self.structs[index].type_args.clone(),
+            implicit_self: false,
+            var_self: false,
+            native: None,
+            foreign: None,
+            closure: None,
+            expected: None,
+            type_params: Vec::new(),
+            test: None,
+            signature: None,
+            declared_ret: None,
+            modifies: Vec::new(),
+            instances: HashMap::new(),
+            instance: None,
+        });
+        // Before the pass over the signatures, that pass resolves it.
+        if !self.signatures_started {
+            return;
+        }
+        let previous = self.enter_module(module);
+        self.resolve_signature(function);
+        self.enter_module(previous);
+        let info = &self.functions[function];
+        if info.signature.is_some() && !info.is_generic() {
+            let ret = info.declared_ret.map_or(Ret::Unknown, Ret::Declared);
+            let instance = self.new_instance(function, Vec::new(), None, ret);
+            self.functions[function].instance = Some(instance);
+        }
+        if equals && self.equalities_registered {
+            self.register_equality(function);
+        }
     }
 
     /// A method has its own name among the methods and the fields of its type.
@@ -560,6 +652,11 @@ impl<'a> Checker<'a> {
             );
             supported = false;
         }
+        // In a method of an instance of a generic structure, its type parameters are the
+        // types of the instance (C90); a method sees no other type variable.
+        let struct_args = self.functions[index].struct_args.clone();
+        let saved_vars =
+            (!struct_args.is_empty()).then(|| std::mem::replace(&mut self.type_vars, struct_args));
         // `T in Comparable`, `T in Type`: the type variables of the signature (§15.2).
         let outer_vars = self.type_vars.len();
         let mut type_params = Vec::new();
@@ -721,6 +818,9 @@ impl<'a> Checker<'a> {
             .filter_map(|name| self.modified_global(name))
             .collect();
         self.type_vars.truncate(outer_vars);
+        if let Some(saved) = saved_vars {
+            self.type_vars = saved;
+        }
         let function = &mut self.functions[index];
         function.declared_ret = declared_ret;
         function.modifies = modifies;
@@ -778,10 +878,18 @@ impl<'a> Checker<'a> {
             let nested = function.closure.is_some();
             if function.is_generic() && function.instances.is_empty() && !standard && !nested {
                 let name = &function.decl.name.name;
+                let note = if function.decl.type_params.is_empty() {
+                    "a function with parameters without a type is checked for the types of each call (§15.3)"
+                } else {
+                    "a function with type variables is checked for the types of each call (§15.3)"
+                };
                 self.diagnostics.push(
-                    Diagnostic::new(lion_diagnostics::Severity::Warning, format!("`{name}` is never called, so it is not checked"))
-                        .with_primary(function.decl.name.span, "")
-                        .with_note("a function with parameters without a type is checked for the types of each call (§15.3)"),
+                    Diagnostic::new(
+                        lion_diagnostics::Severity::Warning,
+                        format!("`{name}` is never called, so it is not checked"),
+                    )
+                    .with_primary(function.decl.name.span, "")
+                    .with_note(note),
                 );
             }
         }
@@ -801,8 +909,8 @@ impl<'a> Checker<'a> {
         let previous = self.enter_module(self.functions[function].module);
         let interrupted = std::mem::replace(&mut self.ctx, Context::new(ContextKind::Function(instance)));
         // In the body, a type variable is the type it takes for this instance (§15.2).
-        let bindings: Vec<(String, Type)> =
-            self.instances[instance].bindings.iter().map(|(var, ty)| (var.name(), *ty)).collect();
+        let mut bindings = self.functions[function].struct_args.clone();
+        bindings.extend(self.instances[instance].bindings.iter().map(|(var, ty)| (var.name(), *ty)));
         let outer_vars = std::mem::replace(&mut self.type_vars, bindings);
         let (body, defaults, param_types) = self.function_body(instance, &params);
         self.type_vars = outer_vars;
@@ -1226,9 +1334,10 @@ impl<'a> Checker<'a> {
             return Some(instance);
         }
         let bindings = self.bind_type_variables(function, &arg_types, call)?;
-        let ret = self.functions[function]
-            .declared_ret
-            .map_or(Ret::Unknown, |ret| Ret::Declared(ret.substitute(&bindings)));
+        let ret = match self.functions[function].declared_ret {
+            Some(ret) => Ret::Declared(self.make_applied(ret.substitute(&bindings), call)?),
+            None => Ret::Unknown,
+        };
         let instance = self.new_instance(function, arg_types.clone(), Some(call), ret);
         self.instances[instance].bindings = bindings;
         self.functions[function].instances.insert(arg_types, instance);

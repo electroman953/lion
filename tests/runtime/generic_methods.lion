@@ -1,0 +1,67 @@
+// The methods of a generic structure (§12.4, §15.1, C90): each instance receives them,
+// with the types of its parameters.
+use sets
+
+struct Pair of (A, B), A in Type, B in Type:
+    first in A
+    second in B
+;
+fun Pair.swap() in Pair of (B, A) = Pair(self.second, self.first)
+fun Pair.describe() in Text = "({self.first}, {self.second})"
+fun Pair.set_first(var self, value in A):
+    self.first = value
+;
+
+let p = Pair(1, "one")
+show(p.swap())
+show(p.swap().describe())
+var q = Pair(true, 2.5)
+q.set_first(false)
+show(q)
+
+// `less` gives the order (§9.5), `equals` the equality (§12.5).
+struct Box of T, T in Comparable:
+    item in T
+;
+fun Box.less(other in Box of T) in Bool = self.item < other.item
+fun Box.bigger(other in Box of T) in Box of T = if self < other then other else self
+show(sets.sorted([Box(3), Box(1), Box(2)]))
+show(Box(4).bigger(Box(9)))
+
+struct Fraction of T, T in Type:
+    top in T
+    bottom in T
+;
+fun Fraction.equals(other in Fraction of T) in Bool = self.top * other.bottom == other.top * self.bottom
+show(Fraction(1, 2) == Fraction(2, 4))
+show({Fraction(1, 2), Fraction(3, 6), Fraction(1, 3)}.size)
+
+// An instance first made in a body joins the traits it satisfies: here `Error`
+// (§18.2), and a trait of the program (§14).
+struct Failure of T, T in Type:
+    detail in T
+;
+fun Failure.message() in Text = "failed with {self.detail}"
+fun check(n in Int) in Int or Error:
+    if n < 0: return Failure(n) ;
+    return n
+;
+match check(-3):
+    in Error e: show(e.message()) ;
+    in Int n: show(n) ;
+;
+
+trait Shape:
+    fun area() in Float
+;
+struct Square of T, T in Type:
+    side in Float
+    label in T
+;
+fun Square.area() in Float = self.side * self.side
+fun total(shapes in List of Shape) in Float = sum([s.area(), s in shapes])
+fun report():
+    show(total([Square(2.0, "a"), Square(1.0, 3)]))
+    show(Square(3.0, true) in Shape)
+;
+report()

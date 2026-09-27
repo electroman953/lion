@@ -19,48 +19,53 @@ impl Checker<'_> {
             })
             .collect();
         for method in methods {
-            let function = &self.functions[method];
-            let decl = std::rc::Rc::clone(&function.decl);
-            let Some(Type::Struct(structure)) = function.receiver else {
-                let ty = function.receiver.expect("a method");
-                self.diagnostics.push(
-                    Diagnostic::error(format!("the equality of {ty} cannot be redefined"))
-                        .with_primary(decl.name.span, "")
-                        .with_note("a structure defines its equality with `equals` (§12.5, C76)"),
-                );
-                continue;
-            };
-            let index = self.struct_index(structure);
-            let ty = Type::Struct(structure);
-            let fits = !function.var_self
-                && function.declared_ret == Some(Type::Bool)
-                && function.signature.as_ref().is_some_and(|params| {
-                    params.len() == 2 && !params[1].by_reference && params[1].ty == Some(ty)
-                });
-            if !fits {
-                self.diagnostics.push(
-                    Diagnostic::error(format!(
-                        "`equals` is declared `fun {ty}.equals(other in {ty}) in Bool`"
-                    ))
+            self.register_equality(method);
+        }
+        self.equalities_registered = true;
+    }
+
+    /// The method `equals` becomes the equality of its structure, if it has the right
+    /// signature and is declared in the file of the structure (C76).
+    pub(crate) fn register_equality(&mut self, method: usize) {
+        let function = &self.functions[method];
+        let decl = std::rc::Rc::clone(&function.decl);
+        let Some(Type::Struct(structure)) = function.receiver else {
+            let ty = function.receiver.expect("a method");
+            self.diagnostics.push(
+                Diagnostic::error(format!("the equality of {ty} cannot be redefined"))
+                    .with_primary(decl.name.span, "")
+                    .with_note("a structure defines its equality with `equals` (§12.5, C76)"),
+            );
+            return;
+        };
+        let index = self.struct_index(structure);
+        let ty = Type::Struct(structure);
+        let fits = !function.var_self
+            && function.declared_ret == Some(Type::Bool)
+            && function.signature.as_ref().is_some_and(|params| {
+                params.len() == 2 && !params[1].by_reference && params[1].ty == Some(ty)
+            });
+        if !fits {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`equals` is declared `fun {ty}.equals(other in {ty}) in Bool`"))
                     .with_primary(decl.name.span, "")
                     .with_note(
                         "it gives the equality of the structure, used by `==`, `in` and the Sets (§12.5)",
                     ),
-                );
-                continue;
-            }
-            if function.module != self.structs[index].module {
-                self.diagnostics.push(
-                    Diagnostic::error(format!("the equality of `{ty}` is declared in its file"))
-                        .with_primary(decl.name.span, "")
-                        .with_secondary(self.structs[index].decl.name.span, "the structure is declared here")
-                        .with_note("a value has one equality everywhere (§12.5, C76)"),
-                );
-                continue;
-            }
-            structure.set_custom_equality();
-            self.structs[index].equals = Some(method);
+            );
+            return;
         }
+        if function.module != self.structs[index].module {
+            self.diagnostics.push(
+                Diagnostic::error(format!("the equality of `{ty}` is declared in its file"))
+                    .with_primary(decl.name.span, "")
+                    .with_secondary(self.structs[index].decl.name.span, "the structure is declared here")
+                    .with_note("a value has one equality everywhere (§12.5, C76)"),
+            );
+            return;
+        }
+        structure.set_custom_equality();
+        self.structs[index].equals = Some(method);
     }
 
     /// An equality reads no variable of the script: it runs wherever values are

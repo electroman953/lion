@@ -1,0 +1,10 @@
+// A module with generic structures, used by `generic_modules.lion`.
+
+struct Pair of (A, B), A in Type, B in Type:
+    first in A
+    second in B
+;
+struct Box of T, T in Comparable:
+    item in T
+;
+fun swap(p in Pair of (T, U)) in Pair of (U, T), T in Type, U in Type = Pair(p.second, p.first)

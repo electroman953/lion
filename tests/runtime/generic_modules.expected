@@ -1,0 +1,9 @@
+exit: 0
+----- stdout
+Pair(first: 1, second: "one")
+two
+1: one
+Pair(first: "one", second: 1)
+["a", "b"]
+Box(item: 3)
+----- stderr

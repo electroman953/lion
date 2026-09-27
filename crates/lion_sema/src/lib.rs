@@ -62,8 +62,26 @@ pub fn check(module: &ast::Module) -> Checked {
 
 /// Checks a program: the script first, then the modules that the files use (§20).
 pub fn check_program(files: &[Source]) -> Checked {
+    // An instance of a generic structure made in a body, once the traits are known, may
+    // join a trait that code checked before it relied on: the program is then checked
+    // again, with that instance made before the traits (C90).
+    let mut seeds = Vec::new();
+    for _ in 0..3 {
+        let (checked, late) = check_once(files, &seeds);
+        if late.is_empty() {
+            return checked;
+        }
+        seeds.extend(late);
+    }
+    check_once(files, &seeds).0
+}
+
+/// One check of the program, with the instances of generic structures `seeds`, found
+/// by a previous check, made before the traits; also gives the instances that joined a
+/// trait late.
+fn check_once(files: &[Source], seeds: &[Type]) -> (Checked, Vec<Type>) {
     let module = files[0].module;
-    let mut checker = Checker::new(files);
+    let mut checker = Checker::new(files, seeds);
     // The declarations of globals with a value also run before each test (C68).
     let mut body = Vec::new();
     for stmt in &module.stmts {
@@ -81,7 +99,8 @@ pub fn check_program(files: &[Source]) -> Checked {
     checker.check_parallel_regions();
     checker.check_compile_regions();
     checker.check_synced();
-    checker.finish()
+    let late = std::mem::take(&mut checker.late_instances);
+    (checker.finish(), late)
 }
 
 /// What the checker knows about a local.
@@ -250,6 +269,17 @@ struct Checker<'a> {
     /// known, checked afterwards.
     pending_constraints: Vec<crate::generic_structs::PendingConstraint>,
     trait_members_known: bool,
+    /// Whether the pass over the signatures has started: a function registered later
+    /// resolves its own (C90).
+    signatures_started: bool,
+    /// Whether the `equals` methods have been registered (C76).
+    equalities_registered: bool,
+    /// Instances of generic structures, found by a previous check, to make before the
+    /// traits (C90).
+    seeds: Vec<Type>,
+    /// The instances of generic structures that joined a trait once the traits were
+    /// known (C90).
+    late_instances: Vec<Type>,
     traits: Vec<crate::traits::TraitInfo<'a>>,
     /// `Comparable`: the types that have an order (§15.2, C67).
     comparable: ir::TraitRef,
@@ -288,7 +318,7 @@ struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
-    fn new(files: &'a [Source<'a>]) -> Checker<'a> {
+    fn new(files: &'a [Source<'a>], seeds: &[Type]) -> Checker<'a> {
         let modules = files
             .iter()
             .map(|file| ModuleInfo {
@@ -314,6 +344,10 @@ impl<'a> Checker<'a> {
             generic_structs: Vec::new(),
             pending_constraints: Vec::new(),
             trait_members_known: false,
+            signatures_started: false,
+            equalities_registered: false,
+            seeds: seeds.to_vec(),
+            late_instances: Vec::new(),
             traits: Vec::new(),
             comparable: ir::TraitRef::new("Comparable"),
             error_trait: ir::TraitRef::new("Error"),

@@ -18,6 +18,8 @@ pub(crate) struct GenericStruct<'a> {
     pub(crate) module: usize,
     /// The instances made so far, by their types, as indices of structures.
     pub(crate) instances: HashMap<Vec<Type>, usize>,
+    /// Its methods, which each instance receives (C90).
+    pub(crate) methods: Vec<std::rc::Rc<ast::FunDecl>>,
 }
 
 /// A type that a type parameter must belong to, checked once the members of the traits
@@ -32,7 +34,12 @@ pub(crate) struct PendingConstraint {
 impl<'a> Checker<'a> {
     pub(crate) fn register_generic_structure(&mut self, decl: &'a ast::StructDecl) {
         self.tables.generic_structs.insert(decl.name.name.clone(), self.generic_structs.len());
-        self.generic_structs.push(GenericStruct { decl, module: self.module, instances: HashMap::new() });
+        self.generic_structs.push(GenericStruct {
+            decl,
+            module: self.module,
+            instances: HashMap::new(),
+            methods: Vec::new(),
+        });
     }
 
     /// `Pair of (Int, Text)`: the instance of a generic structure for these types.
@@ -61,9 +68,15 @@ impl<'a> Checker<'a> {
         }
         let types: Vec<Option<Type>> = args.iter().map(|arg| self.resolve_type(arg)).collect();
         let types: Vec<Type> = types.into_iter().collect::<Option<_>>()?;
+        // `Pair of (T, U)` in a generic signature: each instance of the function makes the
+        // structure for the types of its variables (§15.1, §15.3).
         if types.iter().any(|ty| ty.has_vars()) {
-            self.not_implemented(span, "generic structures whose types are type variables", "§15.1");
-            return None;
+            let name = self.qualified_in(self.generic_structs[template].module, &decl.name.name);
+            return Some(Type::Applied(ir::AppliedRef::new(ir::AppliedData {
+                template: template as u32,
+                name,
+                args: types,
+            })));
         }
         let index = self.instantiate_structure(template, types, span)?;
         Some(Type::Struct(self.structs[index].id))
@@ -101,15 +114,97 @@ impl<'a> Checker<'a> {
             self.enter_module(previous);
             return None;
         }
-        let name = format!("{} of {}", self.qualified(&decl.name.name), type_list(&types));
+        let name = format!("{} of {}", self.qualified(&decl.name.name), ir::type_list(&types));
         let type_args =
             decl.type_params.iter().map(|(param, _)| param.name.clone()).zip(types.iter().copied()).collect();
-        let index = self.push_structure(decl, StructRef::new(&name), type_args);
+        let id = StructRef::new(&name);
+        id.set_origin(template as u32, types.clone());
+        let index = self.push_structure(decl, id, type_args);
         // Registered before its fields, which may name it: `next in maybe Node of T`.
         self.generic_structs[template].instances.insert(types, index);
         self.resolve_fields_here(index);
         self.enter_module(previous);
+        for method in self.generic_structs[template].methods.clone() {
+            self.register_method_instance(method, template, index);
+        }
+        // Made once the traits are known: it joins those it satisfies now (C67).
+        if self.trait_members_known {
+            self.conform_late(Type::Struct(self.structs[index].id));
+        }
         Some(index)
+    }
+
+    /// `ty` with each generic structure written with types, as `Pair of (Int, Text)` once
+    /// the variables of `Pair of (T, U)` are known, replaced by its structure (§15.3).
+    pub(crate) fn make_applied(&mut self, ty: Type, span: Span) -> Option<Type> {
+        ty.make_applied(&mut |applied| {
+            let index = self.instantiate_structure(applied.template as usize, applied.args, span)?;
+            Some(Type::Struct(self.structs[index].id))
+        })
+    }
+
+    /// Makes the instances found by a previous check, before the traits (C90).
+    pub(crate) fn make_seeds(&mut self) {
+        for seed in std::mem::take(&mut self.seeds) {
+            self.translate(seed);
+        }
+    }
+
+    /// The type of this check that stands for `ty`, a type of a previous check: the
+    /// structures, enumerations and traits are found by their names, which are unique,
+    /// and the instances of generic structures are made again.
+    fn translate(&mut self, ty: Type) -> Option<Type> {
+        let each = |checker: &mut Self, types: Vec<Type>| {
+            types.into_iter().map(|ty| checker.translate(ty)).collect::<Option<Vec<Type>>>()
+        };
+        Some(match ty {
+            Type::List(inner) => Type::list(self.translate(inner.get())?),
+            Type::Set(inner) => Type::set(self.translate(inner.get())?),
+            Type::Domain(inner) => Type::domain(self.translate(inner.get())?),
+            Type::Task(inner) => Type::Task(ir::TypeRef::new(self.translate(inner.get())?)),
+            Type::Tuple(tuple) => Type::tuple(each(self, tuple.elements())?),
+            Type::Map(parts) => {
+                let parts = each(self, parts.elements())?;
+                Type::map(parts[0], parts[1])
+            }
+            Type::Union(union) => Type::union(each(self, union.members())?),
+            Type::Fun(function) => {
+                let data = function.get();
+                let params = each(self, data.params)?;
+                Type::function(params, data.required as usize, self.translate(data.ret)?)
+            }
+            Type::Struct(structure) => match structure.origin() {
+                Some((template, args)) => {
+                    let args = each(self, args)?;
+                    let span = self.generic_structs[template as usize].decl.name.span;
+                    let index = self.instantiate_structure(template as usize, args, span)?;
+                    Type::Struct(self.structs[index].id)
+                }
+                None => {
+                    let name = structure.name();
+                    let found = self
+                        .structs
+                        .iter()
+                        .find(|info| info.type_args.is_empty() && info.id.name() == name)?;
+                    Type::Struct(found.id)
+                }
+            },
+            Type::Enum(enumeration) => {
+                let name = enumeration.name();
+                Type::Enum(self.enums.iter().copied().find(|found| found.name() == name)?)
+            }
+            Type::Trait(set) => {
+                let name = set.name();
+                if name == self.comparable.name() {
+                    Type::Trait(self.comparable)
+                } else if name == self.error_trait.name() {
+                    Type::Trait(self.error_trait)
+                } else {
+                    Type::Trait(self.traits.iter().find(|info| info.id.name() == name)?.id)
+                }
+            }
+            other => other,
+        })
     }
 
     /// The constraints met before the members of the traits were known.
@@ -206,8 +301,8 @@ impl<'a> Checker<'a> {
                     bindings.entry(name.name.clone()).or_insert(actual);
                 }
             }
-            ast::TypeExprKind::Named { module, name, args } if module.is_empty() => {
-                match (name.name.as_str(), args.as_slice(), actual) {
+            ast::TypeExprKind::Named { module, name, args } => {
+                match (if module.is_empty() { name.name.as_str() } else { "" }, args.as_slice(), actual) {
                     ("List", [element], Type::List(inner))
                     | ("Set", [element], Type::Set(inner))
                     | ("Domain", [element], Type::Domain(inner))
@@ -249,7 +344,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            ast::TypeExprKind::Named { .. } | ast::TypeExprKind::Union(_) => {}
+            ast::TypeExprKind::Union(_) => {}
         }
     }
 }
@@ -258,16 +353,4 @@ impl<'a> Checker<'a> {
 fn is_all_types(set: &ast::TypeExpr) -> bool {
     matches!(&set.kind, ast::TypeExprKind::Named { module, name, args }
         if module.is_empty() && args.is_empty() && name.name == "Type")
-}
-
-/// The types after `of`, as they are written: `Int`, `(Int, Text)`.
-fn type_list(types: &[Type]) -> String {
-    match types {
-        [single @ Type::Union(_)] => format!("({single})"),
-        [single] => single.to_string(),
-        _ => {
-            let types: Vec<String> = types.iter().map(Type::to_string).collect();
-            format!("({})", types.join(", "))
-        }
-    }
 }

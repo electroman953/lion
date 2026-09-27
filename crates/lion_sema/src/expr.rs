@@ -1236,6 +1236,9 @@ impl Checker<'_> {
         if !name.name.starts_with(char::is_uppercase) {
             return self.module_call(module, name, args, span);
         }
+        if let Some(&template) = self.table_of(module).generic_structs.get(&name.name) {
+            return self.construct_generic(template, args, span);
+        }
         let Some(&index) = self.table_of(module).struct_names.get(&name.name) else {
             let module_name = self.modules[module].name.clone();
             self.diagnostics.push(
