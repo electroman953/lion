@@ -1,0 +1,13 @@
+// A method added to a base type is seen only where its file is used (§20.3), and a
+// private method only in its file (C46, C87).
+use visibility.rank
+
+fun Text.describe() in Text = "text {self}"
+show(rank.describe_all(["a"]))
+
+struct Card:
+    value in Int
+;
+private fun Card.describe() in Text = "card {self.value}"
+show(rank.describe_all([Card(1)]))
+show(Card(2).describe())

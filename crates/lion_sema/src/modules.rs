@@ -109,6 +109,13 @@ impl<'a> Checker<'a> {
         (!self.is_known(name)).then_some(module)
     }
 
+    /// Whether the file `source` is a module of the standard library.
+    pub(crate) fn is_standard_source(&self, source: lion_diagnostics::SourceId) -> bool {
+        self.modules.iter().any(|module| {
+            module.standard && module.ast.stmts.first().is_some_and(|stmt| stmt.span.source == source)
+        })
+    }
+
     /// Whether a module may see the functions, the globals and the methods of `owner`.
     pub(crate) fn sees(&self, owner: usize) -> bool {
         owner == self.module || self.modules[self.module].imports.values().any(|&module| module == owner)

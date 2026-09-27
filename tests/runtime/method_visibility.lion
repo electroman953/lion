@@ -1,0 +1,16 @@
+// The methods of a type, declared in its own file, go with its values: the generic
+// functions of another module use them too (C87).
+use visibility.rank
+
+struct Card:
+    value in Int
+;
+fun Card.less(other in Card) in Bool = self.value < other.value
+fun Card.describe() in Text = "card {self.value}"
+
+Suit = {hearts, spades}
+fun Suit.describe() in Text = if self == hearts then "♥" else "♠"
+
+show(rank.best([Card(3), Card(9), Card(5)]))
+show(rank.describe_all([Card(1), Card(2)]))
+show(rank.describe_all([Suit.spades]))

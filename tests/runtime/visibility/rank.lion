@@ -1,0 +1,11 @@
+// Generic functions, in a module that does not know the types they receive.
+
+fun best(values):
+    var top = values[1]
+    for v in values:
+        if top < v: top = v ;
+    ;
+    return top
+;
+
+fun describe_all(values) = [v.describe(), v in values]

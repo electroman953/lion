@@ -1,0 +1,51 @@
+// The module `sets` (§23, C86): advanced operations on Sets.
+use sets
+
+show(sets.sorted({3, 1, 2}))
+show(sets.sorted([5, 3, 9, 1, 3]))
+show(sets.sorted(1..4))
+show(sets.sorted({2.5, -1.0, 0.5}))
+show(sets.sorted([] as List of Int))
+
+// A structure is ordered by its `less` (§9.5); equal elements keep their order.
+struct Student:
+    name in Text
+    grade in Int
+;
+fun Student.less(other in Student) in Bool = self.grade < other.grade
+let class = [Student("Léa", 14), Student("Tom", 8), Student("Ana", 14), Student("Bob", 8)]
+show([s.name, s in sets.sorted(class)])
+show(sets.min(class))
+show(sets.max(class))
+
+Days = [mon, tue, wed]
+show(sets.sorted({Days.wed, Days.mon, Days.tue}))
+show(sets.sorted({1 over 2, 1 over 3}))
+
+show(sets.min({4, 2, 8}))
+show(sets.max(1..9))
+show(sets.min({} as Set of Float))
+let smallest = sets.min({7, 3})
+if smallest != none: show(smallest + 1) ;
+
+show(sets.powerset({1, 2, 3}))
+show(sets.powerset({} as Set of Text))
+show(sets.powerset({"a", "b", "c", "d"}).size)
+
+show(sets.disjoint({1, 2}, {3, 4}))
+show(sets.disjoint({1, 2}, [2]))
+let positives = {x in Int, x > 0}
+show(sets.disjoint({-2, -1}, positives))
+
+fun even(n in Int) = n mod 2 == 0
+show(sets.any({1, 3, 4}, even))
+show(sets.any({} as Set of Int, even))
+show(sets.all({2, 4}, even))
+show(sets.all({} as Set of Int, even))
+show(sets.count(1..10, even))
+show(sets.all(class, fun(s in Student) = s.grade >= 8))
+
+fun parity(n in Int) in Text = if even(n) then "even" else "odd"
+show(sets.group({1, 2, 3, 4, 5}, parity))
+let by_grade = sets.group({s, s in class}, fun(s in Student) = s.grade)
+show(by_grade[14])

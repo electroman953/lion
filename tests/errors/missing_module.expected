@@ -8,6 +8,6 @@ error: cannot find the module `missing.thing`
    |     ^^^^^^^^^^^^^
    |
    = there is no file `tests/errors/missing/thing.lion`
-   = the modules of the standard library are csv, files, math, random, text
+   = the modules of the standard library are csv, files, math, random, sets, text
 
 1 error found

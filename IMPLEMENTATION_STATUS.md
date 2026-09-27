@@ -1,9 +1,10 @@
 # État de l'implémentation de Lion
 
-Mis à jour le 2026-09-27, avec le compilateur natif (étape 5) et le parallélisme sur plusieurs cœurs, parties parallèles et tâches (étape 6). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
+Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélisme sur plusieurs cœurs (étape 6), le module `sets` et la proposition de la bibliothèque `ui` (étape 7). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C85) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C87) ;
+- [`docs/design/ui.md`](docs/design/ui.md) : la proposition de la bibliothèque `ui`, en attente des réponses de l'auteur ;
 - [`README.md`](README.md) : la présentation et l'usage.
 
 ## 1. Vérification faite pour ce bilan
@@ -13,21 +14,21 @@ Mis à jour le 2026-09-27, avec le compilateur natif (étape 5) et le paralléli
 | `cargo build` | OK |
 | `cargo clippy --all-targets` | 0 avertissement |
 | `cargo fmt --check` | OK |
-| `cargo test` (tout le workspace) | OK : 143 tests unitaires, 176 programmes golden, et les 82 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
+| `cargo test` (tout le workspace) | OK : 143 tests unitaires, 180 programmes golden, et les 84 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
 | Programmes du §27 de la spec | 27.1 (CSV, structures) et 27.2 (hasard, parallèle, ensembles) tournent sans modification, dans les deux modes ; Sur 12 cœurs, 27.2 prend 0,67 s interprété (`--release`) et 0,19 s compilé ; avec `LION_THREADS=1`, 3,2 s et 0,65 s. 27.3 dépend du module `ui`, imaginaire |
 
-L'arbre de travail est propre, sans fichier non commité.
+L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié en privé sur GitHub : <https://github.com/electroman953/lion> (remote `origin`).
 
 ## 2. Où en est la feuille de route (§28 de la spec)
 
 | Étape | État |
 | --- | --- |
 | 1–2. Frontend complet et mode interprété | **Atteinte** |
-| 3. Bibliothèque standard | **Atteinte** pour `files`, `text`, `math`, `random`, `csv` et le noyau. Manquent `sets`, `json`, `dates`, `time`, `net` |
+| 3. Bibliothèque standard | **Atteinte** pour `files`, `text`, `math`, `random`, `csv`, `sets` et le noyau. Manquent `json`, `dates`, `time`, `net` |
 | 4. Outillage | **Atteinte** : `lion test`, `lion fmt`, mode interactif |
 | 5. Compilateur natif `lion build` | **Atteinte** : les deux modes donnent les mêmes résultats sur tous les programmes de test (C81, C82) |
 | 6. Parallélisme et tâches | **Atteinte** : les parties parallèles utilisent tous les cœurs, dans les deux modes, avec le résultat du calcul séquentiel (C83, C84) ; les tâches tournent sur leur propre fil quand rien de ce qu'elles lisent ne peut changer (C85) |
-| 7. Bibliothèque `ui` | Pas commencée |
+| 7. Bibliothèque `ui` | **Proposition écrite** ([`docs/design/ui.md`](docs/design/ui.md)) : 27.3 passe déjà le vérificateur avec un module `ui` factice ; le backend reste à choisir par l'auteur |
 
 ## 3. Architecture
 
@@ -144,7 +145,7 @@ Principes :
 
 **`lion_runtime`** : `ops.rs` (arithmétique vérifiée, rationnels, conversions), `bug.rs` (les `BugKind` et leurs messages), `format.rs` (affichage des Float et des rationnels), `stdlib.rs`.
 
-**`lion_std/std/*.lion`** : `csv`, `files`, `math`, `random`, `text`.
+**`lion_std/std/*.lion`** : `csv`, `files`, `math`, `random`, `sets`, `text`.
 
 **`lion_cli`** :
 - `main.rs` : les commandes ;
@@ -218,7 +219,8 @@ Chacun de ces cas donne une erreur « not implemented yet » ou un refus explici
 | Types comme valeurs (`let t = Int`) | §7.1 |
 | Fonctions standard comme valeurs (`let f = show`) | §11, §23 |
 | Lire un élément de n-uplet : la spec ne dit pas comment (C53) | §16 |
-| Modules `sets`, `json`, `dates`, `time`, `net`, `ui` de la bibliothèque standard | §23 |
+| Modules `json`, `dates`, `time`, `net`, `ui` de la bibliothèque standard | §23 |
+| Retirer un élément d'un Set (`s.remove(x)`) : une méthode du langage, laissée à l'auteur | C86 |
 | Écriture littérale d'une Map, que la spec laisse ouverte (§29) | C79 |
 
 ## 6. Tests
@@ -295,14 +297,17 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
 
 ## 9. Prochaine étape recommandée
 
-Les étapes 2 à 6 de la feuille de route sont atteintes. Les deux suivantes demandent d'abord une conception qui touche au langage, et que l'auteur voudra sans doute voir :
-- l'étape 7, la bibliothèque `ui`, dont l'API est un point ouvert de la spec (§B.2) ;
-- l'étape 8, le gestionnaire de paquets, avec le fichier de projet et les éditions (§25).
+Les étapes 2 à 6 de la feuille de route sont atteintes. Les deux suivantes attendent l'auteur :
+- **l'étape 7**, la bibliothèque `ui`. La proposition est écrite ([`docs/design/ui.md`](docs/design/ui.md)) : 27.3 passe déjà le vérificateur avec un module `ui` factice, donc le langage ne bloque pas. L'auteur doit choisir le backend (fenêtre X11 native, terminal, navigateur ou FFI généralisée), puis valider le modèle d'événements et la liste des éléments ;
+- **l'étape 8**, le gestionnaire de paquets, avec le fichier de projet et les éditions (§25), à concevoir.
 
-Il est recommandé de proposer d'abord à l'auteur une API de `ui` écrite dans l'esprit du programme 27.3, avant de coder.
+Questions posées à l'auteur le 2026-09-27, en attente :
+- le backend de `ui` et les trois autres questions de la proposition ;
+- `json` : une lecture en lignes, comme `csv` (D37 : `r.get("col")` donne `Text or Error`), ou un arbre de valeurs imbriquées ;
+- une méthode `s.remove(x)` pour les Sets, sur le modèle de `m.remove(k)` (C79, C86).
 
-En attendant, ou en parallèle, voici ce qui manque encore de la spec actuelle et peut se faire sans nouvelle conception :
-1. **Bibliothèque standard (§23, étape 3)** : les modules `sets`, `json`, `dates` et `time`. `csv` et `json` suivent D37 (`r.get("col")` donne `Text or Error`). L'API détaillée reste à choisir (§B.2), selon la politique des choix délégués.
+Ce qui peut se faire sans nouvelle règle de langage :
+1. **Bibliothèque standard (§23, étape 3)** : les modules `time` et `dates`, dont l'API est déléguée (§B.2). `json` attend la réponse de l'auteur.
 2. **Génériques (§15.1)** :
    - traits génériques ;
    - méthodes d'une structure générique ;
@@ -313,10 +318,17 @@ En attendant, ou en parallèle, voici ce qui manque encore de la spec actuelle e
    - une réserve de fils, plutôt qu'une création de fils par boucle parallèle ;
    - un verrou plus fin pour `shared synced` (C84).
 5. **Outils** : un nettoyage du cache de `lion build`, et le débogueur pas à pas du §24.2 (D25).
+6. **VS Code et LSP**, à préparer dans l'architecture :
+   - sortir le pipeline de `lion_cli/src/driver.rs` dans une bibliothèque qui rend les diagnostics au lieu de les afficher, avec un fournisseur de fichiers pour les tampons non sauvegardés ;
+   - convertir les `Span` (octets) en positions LSP (ligne, colonne UTF-16) dans `lion_diagnostics` ;
+   - faire produire par `lion_sema` un index (définitions, références, type de chaque nom) même pour un programme avec des erreurs, puisque l'IR n'existe que pour un programme valide ; tenir compte des versions des fonctions génériques (C1) ;
+   - dans un processus long : `catch_unwind` autour de chaque analyse, un cache des modules standard vérifiés, et l'interner de types global, qui ne se vide jamais ;
+   - un petit JSON en Rust pour JSON-RPC, sans dépendance, qui pourra servir aussi au module `json` ;
+   - une sous-commande `lion lsp` (outil unique, D30), et une extension dans `editors/vscode` : grammaire TextMate, indentation (`:` ouvre, `;`, `elif` et `else` ferment), formatage par `lion fmt` ; plus tard, un adaptateur de débogage (DAP).
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C86**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26).
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C88**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README et des notes, puis un commit Conventional Commits. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

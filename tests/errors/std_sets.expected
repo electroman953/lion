@@ -1,0 +1,52 @@
+exit: 1
+----- stdout
+----- stderr
+error: `<` is not defined for Text values
+   --> tests/errors/std_sets.lion:3:11
+    |
+  3 | show(sets.sorted({"b", "a"}))
+    |           ^^^^^^ `sorted` is checked for (Set of Text) because of this call
+   ::: <std>/sets.lion:21:63
+    |
+ 21 |                 if j >= stop or (i < middle and not source[j] < source[i]):
+    |                                                               -
+    |
+    = `<`, `>`, `<=` and `>=` compare numbers
+    = Lion 0.1 does not define an order on Text
+
+error: a generator cannot go through a Domain of Int
+   --> tests/errors/std_sets.lion:5:11
+    |
+  5 | show(sets.min(positives))
+    |           ^^^ `min` is checked for (Domain of Int) because of this call
+   ::: <std>/sets.lion:42:21
+    |
+ 42 |     let items = [x, x in s]
+    |                     ------
+    |
+    = a generator goes through an interval or a list (§16.4)
+
+error: the parameter `s` is Set of T, which does not fit a List of Int
+   --> tests/errors/std_sets.lion:6:11
+    |
+  6 | show(sets.powerset([1, 2]))
+    |           ^^^^^^^^
+   ::: <std>/sets.lion:63:14
+    |
+ 63 | fun powerset(s in Set of T) in Set of Set of T, T in Type:
+    |              - parameter declared here
+
+error: `p` is not a function
+   --> tests/errors/std_sets.lion:7:11
+    |
+  7 | show(sets.any({1, 2}, 3))
+    |           ^^^ `any` is checked for (Set of Int, Int) because of this call
+   ::: <std>/sets.lion:84:12
+    |
+ 82 | fun any(s, p) in Bool:
+    |            - declared here
+   ...
+ 84 |         if p(x): return true ;
+    |            - `p` is an Int
+
+4 errors found

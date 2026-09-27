@@ -1,0 +1,7 @@
+// The functions of `sets` check their arguments at the call (C86).
+use sets
+show(sets.sorted({"b", "a"}))
+let positives = {x in Int, x > 0}
+show(sets.min(positives))
+show(sets.powerset([1, 2]))
+show(sets.any({1, 2}, 3))

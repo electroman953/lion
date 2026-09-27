@@ -32,6 +32,9 @@ pub(crate) struct FunctionInfo {
     prefix: String,
     /// For a method, the type of `self` (§12.4).
     pub(crate) receiver: Option<Type>,
+    /// A method of a structure or an enumeration, declared in the file of its type: it
+    /// goes wherever the values of the type go (C87).
+    pub(crate) own_method: bool,
     /// A method whose declaration does not write `self`: its first parameter is added.
     implicit_self: bool,
     /// A method declared with `var self`, which changes its object (§12.4).
@@ -336,6 +339,7 @@ impl<'a> Checker<'a> {
             module: self.module,
             prefix: self.qualified(""),
             receiver: None,
+            own_method: false,
             implicit_self: false,
             var_self: false,
             native: None,
@@ -367,6 +371,7 @@ impl<'a> Checker<'a> {
             module,
             prefix: String::new(),
             receiver: Some(receiver),
+            own_method: false,
             implicit_self: false,
             var_self: false,
             native: None,
@@ -415,6 +420,7 @@ impl<'a> Checker<'a> {
             module: self.module,
             prefix: self.qualified(""),
             receiver: None,
+            own_method: false,
             implicit_self: false,
             var_self: false,
             native: None,
@@ -435,7 +441,8 @@ impl<'a> Checker<'a> {
                 return;
             }
             self.methods.entry((ty, decl.name.name.clone())).or_default().push(self.functions.len());
-            self.functions.push(FunctionInfo { receiver: Some(ty), ..info });
+            let own_method = matches!(ty, Type::Struct(_) | Type::Enum(_));
+            self.functions.push(FunctionInfo { receiver: Some(ty), own_method, ..info });
             return;
         }
         if let Some(&previous) = self.tables.function_names.get(&decl.name.name) {
@@ -806,12 +813,17 @@ impl<'a> Checker<'a> {
             let name = &self.functions[function].decl.name.name;
             let types: Vec<String> = param_types.iter().map(Type::to_string).collect();
             let label = format!("`{name}` is checked for ({}) because of this call", types.join(", "));
+            // An error in the standard library is shown at the call of the program (C64).
+            let at_call = self.modules[self.functions[function].module].standard
+                && !self.is_standard_source(origin.source);
             for diagnostic in &mut self.diagnostics[first_diagnostic..] {
-                diagnostic.labels.push(lion_diagnostics::Label {
-                    span: origin,
-                    message: label.clone(),
-                    primary: false,
-                });
+                let call = lion_diagnostics::Label { span: origin, message: label.clone(), primary: at_call };
+                if at_call {
+                    diagnostic.labels.iter_mut().for_each(|label| label.primary = false);
+                    diagnostic.labels.insert(0, call);
+                } else {
+                    diagnostic.labels.push(call);
+                }
             }
         }
         let checked = &mut self.instances[instance];

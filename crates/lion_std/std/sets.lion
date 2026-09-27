@@ -1,0 +1,118 @@
+// Sets (§23): advanced operations on Sets. The basic ones are part of the language:
+// `in`, `union`, `inter`, `minus`, `subset` and comprehensions (§16). The functions
+// without a written type also accept a List or a Range, read in their order.
+
+// The elements in increasing order (`<`); equal elements keep the order in which they
+// come. A merge sort, in O(n log n) steps.
+fun sorted(s):
+    var source = [x, x in s]
+    var target = source
+    let n = source.size
+    var width = 1
+    while width < n:
+        var start = 1
+        while start <= n:
+            let middle = if start + width <= n then start + width else n + 1
+            let stop = if start + 2 * width <= n then start + 2 * width else n + 1
+            var i = start
+            var j = middle
+            var k = start
+            while k < stop:
+                if j >= stop or (i < middle and not source[j] < source[i]):
+                    target[k] = source[i]
+                    i += 1
+                else:
+                    target[k] = source[j]
+                    j += 1
+                ;
+                k += 1
+            ;
+            start = stop
+        ;
+        let merged = target
+        target = source
+        source = merged
+        width *= 2
+    ;
+    return source
+;
+
+// The smallest element, or `none` when there is none.
+fun min(s):
+    let items = [x, x in s]
+    if items.size == 0: return none ;
+    var best = items[1]
+    for x in items:
+        if x < best: best = x ;
+    ;
+    return best
+;
+
+// The largest element, or `none` when there is none.
+fun max(s):
+    let items = [x, x in s]
+    if items.size == 0: return none ;
+    var best = items[1]
+    for x in items:
+        if best < x: best = x ;
+    ;
+    return best
+;
+
+// Every subset of `s`, from the empty set to `s` itself: 2 ^ s.size sets.
+fun powerset(s in Set of T) in Set of Set of T, T in Type:
+    var result = {{} as Set of T}
+    for x in s:
+        for part in result:
+            result.add(part union {x})
+        ;
+    ;
+    return result
+;
+
+// Whether `a` and `b` have no element in common. `b` can be a Domain.
+fun disjoint(a, b) in Bool:
+    for x in a:
+        if x in b: return false ;
+    ;
+    return true
+;
+
+// Whether `p` holds for at least one element (∃).
+fun any(s, p) in Bool:
+    for x in s:
+        if p(x): return true ;
+    ;
+    return false
+;
+
+// Whether `p` holds for every element (∀); true for an empty collection.
+fun all(s, p) in Bool:
+    for x in s:
+        if not p(x): return false ;
+    ;
+    return true
+;
+
+// The number of elements for which `p` holds.
+fun count(s, p) in Int:
+    var n = 0
+    for x in s:
+        if p(x): n += 1 ;
+    ;
+    return n
+;
+
+// The elements, grouped by the value that `key` gives them.
+fun group(s in Set of T, key in fun(T) in K) in Map of (K, Set of T), T in Type, K in Type:
+    var groups = {} in Map of (K, Set of T)
+    for x in s:
+        let k = key(x)
+        if k in groups:
+            groups[k].add(x)
+        else:
+            groups[k] = {x}
+        ;
+    ;
+    return groups
+;

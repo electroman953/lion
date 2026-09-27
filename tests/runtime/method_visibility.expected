@@ -1,0 +1,6 @@
+exit: 0
+----- stdout
+Card(value: 9)
+["card 1", "card 2"]
+["♠"]
+----- stderr

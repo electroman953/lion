@@ -1,0 +1,35 @@
+exit: 1
+----- stdout
+----- stderr
+error: A Text has no method `describe`
+  --> tests/errors/visibility/rank.lion:3:31
+   |
+ 3 | fun describe_all(values) = [v.describe(), v in values]
+   |                             - this is a Text
+   |                               ^^^^^^^^
+  ::: tests/errors/method_visibility.lion:5:10
+   |
+ 5 | fun Text.describe() in Text = "text {self}"
+   |          -------- declared here
+ 6 | show(rank.describe_all(["a"]))
+   |           ------------ `describe_all` is checked for (List of Text) because of this call
+   |
+   = `Text.describe` is declared in the script
+   = a method added to a type of another file is seen only in its file and in the files that use it (§20.3)
+
+error: A Card has no method `describe`
+   --> tests/errors/visibility/rank.lion:3:31
+    |
+  3 | fun describe_all(values) = [v.describe(), v in values]
+    |                             - this is a Card
+    |                               ^^^^^^^^
+   ::: tests/errors/method_visibility.lion:11:18
+    |
+ 11 | private fun Card.describe() in Text = "card {self.value}"
+    |                  -------- declared here
+ 12 | show(rank.describe_all([Card(1)]))
+    |           ------------ `describe_all` is checked for (List of Card) because of this call
+    |
+    = `Card.describe` is private to its file (C46)
+
+2 errors found

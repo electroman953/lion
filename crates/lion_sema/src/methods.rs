@@ -142,6 +142,24 @@ impl Checker<'_> {
         {
             error =
                 error.with_note(format!("`{0}` is a field: write `.{0}`, without parentheses", name.name));
+        } else if let Some(&hidden) =
+            self.methods.get(&(ty, name.name.clone())).and_then(|methods| methods.first())
+        {
+            let function = &self.functions[hidden];
+            error = error.with_secondary(function.decl.name.span, "declared here");
+            error = if function.decl.private.is_some() {
+                error.with_note(format!("`{ty}.{}` is private to its file (C46)", name.name))
+            } else {
+                let module = &self.modules[function.module].name;
+                let place = if module.is_empty() {
+                    "in the script".to_string()
+                } else {
+                    format!("in the module `{module}`, which this file does not use")
+                };
+                error.with_note(format!("`{ty}.{}` is declared {place}", name.name)).with_note(
+                    "a method added to a type of another file is seen only in its file and in the files that use it (§20.3)",
+                )
+            };
         } else {
             error = error.with_note(format!("a method is declared `fun {ty}.{}(...)` (§12.4)", name.name));
         }
@@ -154,11 +172,21 @@ impl Checker<'_> {
         self.place_type(object).is_some_and(|ty| self.visible_method(ty, "add").is_some())
     }
 
-    /// The method `name` of the type `ty` that the module being checked sees: one of
-    /// its own, or of a module it uses (§20.3).
+    /// The method `name` of the type `ty` that the module being checked sees: a method
+    /// of the type from its own file, or one of this module or of a module it uses
+    /// (§20.3, C87).
     pub(crate) fn visible_method(&self, ty: Type, name: &str) -> Option<usize> {
         let methods = self.methods.get(&(ty, name.to_string()))?;
-        methods.iter().copied().find(|&method| self.sees(self.functions[method].module))
+        methods.iter().copied().find(|&method| {
+            let function = &self.functions[method];
+            if function.decl.private.is_some() {
+                return function.module == self.module;
+            }
+            // A method added to a type of another file, such as `Text`, is seen where its
+            // file is used (§20.3); the methods of a type from its own file go with its
+            // values, into the generic functions of other modules too (C87).
+            function.own_method || self.sees(function.module)
+        })
     }
 
     /// The type of `expr` when it is a variable or a part of one, found without checking

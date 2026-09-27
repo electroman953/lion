@@ -1,0 +1,3 @@
+// A generic function, in a module that does not know the types it receives.
+
+fun describe_all(values) = [v.describe(), v in values]
