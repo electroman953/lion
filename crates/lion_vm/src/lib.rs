@@ -7,6 +7,7 @@
 
 mod bytecode;
 mod compile;
+mod constants;
 mod machine;
 mod natives;
 mod set;
@@ -14,6 +15,7 @@ mod value;
 
 pub use bytecode::{Chunk, Cmp, Instr, Program, Reg, Target, disassemble};
 pub use compile::compile;
+pub use constants::evaluate_compile;
 pub use machine::{Alert, AlertKind, Failure, Session, Trap, run, run_from, run_test};
 pub use value::Value;
 

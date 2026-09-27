@@ -450,7 +450,14 @@ fn check_files(sources: &mut SourceMap, id: SourceId) -> (Option<ir::Program>, V
             .collect();
         let checked = lion_sema::check_program(&files);
         diagnostics.extend(checked.diagnostics);
-        checked.program
+        // The values of `compile` are part of the program (§21.1).
+        checked.program.and_then(|mut program| match lion_vm::evaluate_compile(&mut program) {
+            Ok(()) => Some(program),
+            Err(errors) => {
+                diagnostics.extend(errors);
+                None
+            }
+        })
     };
     (program, diagnostics)
 }

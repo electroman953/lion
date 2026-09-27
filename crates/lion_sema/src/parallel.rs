@@ -122,6 +122,7 @@ impl Checker<'_> {
             let mut reported = HashSet::new();
             for &instance in &region.calls {
                 self.check_shared_uses(instance, &region, &mut reported);
+                self.check_pure_foreign(instance, &region);
                 let Some((global, through)) = self.modified_global_of(instance) else { continue };
                 let name = self.instance_display_name(instance);
                 if !reported.insert((name.clone(), global)) {
@@ -156,6 +157,34 @@ impl Checker<'_> {
                 );
             }
         }
+    }
+
+    /// A foreign function that is not `pure` may change a global state: it does not run
+    /// in parallel (§19.3, §21.2, D48).
+    fn check_pure_foreign(&mut self, instance: usize, region: &ParallelRegion) {
+        let impure =
+            |builtin: ir::Builtin| matches!(builtin, ir::Builtin::Native(native) if !native.is_pure());
+        let Some((ir::Builtin::Native(native), current)) = self.builtin_called_by(instance, &impure) else {
+            return;
+        };
+        let name = self.instance_display_name(instance);
+        // The function that makes the call is the one of the standard library that
+        // declares it: the one that calls that one is shown.
+        let caller = self.instance_display_name(current);
+        let via = if current == instance || caller == native.name() {
+            String::new()
+        } else {
+            format!(" (through `{caller}`)")
+        };
+        let what = if region.domain { "the property of a Domain" } else { "what runs in parallel" };
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "`{name}` calls `{}`{via}, a foreign function that is not pure, so {what} cannot call it",
+                native.name()
+            ))
+            .with_primary(region.span, "")
+            .with_note("a foreign function without `pure` may change a global state (§21.2, D48)"),
+        );
     }
 
     /// The shared objects that `instance` uses, directly or through its calls: refused

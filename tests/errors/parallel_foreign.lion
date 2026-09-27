@@ -1,0 +1,6 @@
+use files
+fun save(n in Int) in Bool:
+    let written = files.write("out{n}.txt", "x")
+    return written in None
+;
+let done = parallel [save(n), n in 1..3]

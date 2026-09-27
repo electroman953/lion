@@ -1185,12 +1185,10 @@ impl<'t> Parser<'t> {
             if matches!(keyword, Keyword::Shared | Keyword::Synced) {
                 return self.shared();
             }
-            let unsupported = match keyword {
-                Keyword::Compile => Some(("`compile`", "§21.1")),
-                _ => None,
-            };
-            if let Some((what, section)) = unsupported {
-                return Err(self.not_implemented(self.span(), what, section));
+            if *keyword == Keyword::Compile {
+                let start = self.bump().span;
+                let value = self.expr()?;
+                return Ok(Expr { span: start.to(value.span), kind: ExprKind::Compile(Box::new(value)) });
             }
         }
         self.or_expr()

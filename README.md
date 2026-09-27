@@ -35,6 +35,7 @@ L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 2
 - **Tâches** (§19.1) : `task f(x)`, `wait t`, avec les règles de sûreté du §19.3 ; méthodes détachées `s.passes` (§12.6).
 - **Partage explicite** (§17.2) : `var score = shared Counter()`, `shared synced` pour les tâches, `a same b`, méthodes détachées d'un objet partagé (`score.increment`), avec les règles de la spec vérifiées à la compilation.
 - **Parallélisme de données** (§19.2) : `parallel [...]`, `parallel {...}`, `parallel for`, avec les règles de sûreté du §19.3 vérifiées à la compilation. L'exécution reste séquentielle pour l'instant (mêmes résultats).
+- **Calcul à la compilation** (§21.1) : `let primes = compile {p in 2..1_000_000, is_prime(p)}` ; le programme contient directement la valeur, et une expression à effets est refusée.
 - **Tests intégrés** (§24.1) : `test "nom": ... ;`, `expect a == b` qui montre « expected 6, got 5 », commande `lion test`.
 - **Bibliothèque standard, noyau** (§23) : `show`, `ask`, `exit`, `error`, `sum`, `reverse`, `floor`, `ceil`, `round`, `isqrt`.
 - **Vérifications à la compilation** : types, noms inconnus (avec suggestions), constantes réaffectées, lecture d'une variable qui peut ne pas avoir de valeur sur un des chemins (§6.1), `;` oublié localisé grâce à l'indentation (§5.3).

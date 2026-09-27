@@ -8,6 +8,7 @@
 
 mod print;
 mod types;
+pub mod visit;
 
 pub use print::print_program;
 pub use types::{EnumRef, FunData, FunRef, StructRef, TraitRef, TupleRef, Type, TypeRef, UnionRef, VarRef};
@@ -324,6 +325,9 @@ pub enum ExprKind {
     Task(Box<Expr>),
     /// `wait t`: the result of a task.
     Wait(Box<Expr>),
+    /// `compile value`: computed while the program is compiled, then replaced by the
+    /// value it gives (§21.1, D21). No backend sees it.
+    Compile(Box<Expr>),
     /// `f(1)` with fewer arguments than `f` requires: the function that waits for the
     /// others (§11.3).
     Partial {
@@ -522,7 +526,30 @@ pub enum Native {
     CsvParse,
 }
 
+impl Builtin {
+    /// What the builtin does outside the values of the program, if anything: `compile`
+    /// refuses it (§21.1, D82).
+    pub fn outside_effect(self) -> Option<&'static str> {
+        match self {
+            Builtin::Show => Some("writes on the screen"),
+            Builtin::Ask => Some("reads the keyboard"),
+            Builtin::Exit | Builtin::Fail => Some("stops the program"),
+            Builtin::ExpectFailed => Some("records a failed test"),
+            Builtin::Native(Native::FilesRead | Native::FilesExists) => Some("reads files"),
+            Builtin::Native(Native::FilesWrite) => Some("writes a file"),
+            Builtin::Native(Native::RandomSeed) => Some("reads the clock"),
+            _ => None,
+        }
+    }
+}
+
 impl Native {
+    /// Whether it leaves the world as it is. A foreign function that is not pure may
+    /// change a global state: it does not run in parallel (§19.3, §21.2, D48).
+    pub fn is_pure(self) -> bool {
+        !matches!(self, Native::FilesWrite)
+    }
+
     const ALL: &[(&str, &str, Native)] = &[
         ("files", "read", Native::FilesRead),
         ("files", "write", Native::FilesWrite),

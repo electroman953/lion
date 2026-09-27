@@ -1,0 +1,27 @@
+// Computation at compile time (§21.1, C77): the program contains the values.
+use math
+fun is_prime(n in Int) in Bool:
+    if n < 2: return false ;
+    var d = 2
+    while d * d <= n:
+        if n mod d == 0: return false ;
+        d += 1
+    ;
+    return true
+;
+let primes = compile {p in 2..100, is_prime(p)}
+show(primes.size)
+show(compile [x * x, x in 1..5])
+let table = compile [math.sqrt(x as Float), x in 1..3]
+show(table)
+struct Point:
+    x in Int
+    y in Int
+;
+show(compile Point(1, 2))
+show(compile (1 over 3) + 1)
+show(compile ("a", 2, none))
+show(compile "12" as Int)
+show(compile math.pi * 2.0)
+fun f() in Int = compile 6 * 7
+show(f())

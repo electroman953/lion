@@ -84,6 +84,7 @@ impl Checker<'_> {
             ast::ExprKind::Tuple(elements) => self.tuple(elements, span),
             ast::ExprKind::Parallel(inner) => self.parallel_expr(inner, span),
             ast::ExprKind::Shared { value, .. } => self.misplaced_shared(value, span),
+            ast::ExprKind::Compile(value) => self.compile_expr(value, span),
             ast::ExprKind::Fun(decl) => self.anonymous_function(decl, span, None),
             ast::ExprKind::Task(value) => {
                 // What runs as a task changes nothing outside it (§19.3).

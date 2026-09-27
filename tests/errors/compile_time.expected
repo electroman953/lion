@@ -1,0 +1,62 @@
+exit: 1
+----- stdout
+----- stderr
+error: `compile` cannot read `n`: its value is known only while the program runs
+  --> tests/errors/compile_time.lion:5:17
+   |
+ 5 | let a = compile n * 2
+   |         ------------- computed while the program is compiled
+   |                 ^
+   |
+   = `compile` computes a value from literals and functions (§21.1, C77)
+   = help: write the value in the expression, or remove `compile`
+
+error: `compile` cannot run `noisy`, which writes on the screen
+   --> tests/errors/compile_time.lion:10:9
+    |
+ 10 | let b = compile noisy(3)
+    |         ^^^^^^^^^^^^^^^^
+    |
+    = `compile` computes its value while the program is compiled: it reads nothing from outside and changes nothing (§21.1, D82)
+
+error: `compile` cannot run `files.read`, which reads files
+   --> tests/errors/compile_time.lion:11:9
+    |
+ 11 | let c = compile files.read("notes.txt")
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = `compile` computes its value while the program is compiled: it reads nothing from outside and changes nothing (§21.1, D82)
+
+error: `compile` cannot run `random.int`, which uses `random.generator`, a variable of the program
+   --> tests/errors/compile_time.lion:12:9
+    |
+ 12 | let d = compile random.int(1, 6)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = `compile` computes its value while the program is compiled: it reads nothing from outside and changes nothing (§21.1, D82)
+
+error: `compile` cannot run `bump`, which uses `count`, a variable of the program
+   --> tests/errors/compile_time.lion:17:9
+    |
+ 17 | let e = compile bump()
+    |         ^^^^^^^^^^^^^^
+    |
+    = `compile` computes its value while the program is compiled: it reads nothing from outside and changes nothing (§21.1, D82)
+
+error: `compile` gives a value written with literals, not a fun(Int) in Int
+   --> tests/errors/compile_time.lion:18:17
+    |
+ 18 | let f = compile fun(x in Int) = x + 1
+    |                 ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = the program contains the value that `compile` computes: a function, a Domain or a task cannot be written in it (§21.1, C77)
+
+error: `compile` gives a value written with literals, not a Domain of Int
+   --> tests/errors/compile_time.lion:19:17
+    |
+ 19 | let g = compile {x in Int, x > 0}
+    |                 ^^^^^^^^^^^^^^^^^
+    |
+    = the program contains the value that `compile` computes: a function, a Domain or a task cannot be written in it (§21.1, C77)
+
+7 errors found

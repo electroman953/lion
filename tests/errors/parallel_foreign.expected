@@ -1,0 +1,12 @@
+exit: 1
+----- stdout
+----- stderr
+error: `save` calls `files.write`, a foreign function that is not pure, so what runs in parallel cannot call it
+  --> tests/errors/parallel_foreign.lion:6:12
+   |
+ 6 | let done = parallel [save(n), n in 1..3]
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = a foreign function without `pure` may change a global state (§21.2, D48)
+
+1 error found

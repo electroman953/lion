@@ -186,6 +186,19 @@ pub fn run_from(
     result.map_err(|fault| *fault)
 }
 
+/// Runs a function without arguments on a machine of its own, and gives its result:
+/// the value of a `compile` expression (§21.1).
+pub(crate) fn evaluate(program: &Program, function: usize) -> Result<Value, Trap> {
+    let (mut out, mut input) = (io::sink(), io::empty());
+    let mut ignore = |_: Alert| {};
+    let mut machine = Machine::new(program, &mut out, &mut input, &mut ignore);
+    let halt = machine.chunk.code.len() - 1;
+    let registers = machine.chunk.registers;
+    machine.call(function, 0, registers, 0, halt, halt).map_err(|fault| *fault)?;
+    machine.run().map_err(|fault| *fault)?;
+    Ok(std::mem::take(&mut machine.stack[0]))
+}
+
 /// A failed `expect` of a test: where, and why (§24.1, D72).
 #[derive(Debug)]
 pub struct Failure {

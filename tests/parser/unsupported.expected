@@ -4,6 +4,7 @@ exit: 1
 (for i (.. 1 3) [(call show i)])
 (let twice (fun fun ((x)) = (* x 2)))
 (let l (list 1 2 3))
+(let fast (compile (call f 1)))
 (let t (tuple "Léa" 12))
 (let w (try (call f)))
 (let ok 1)
@@ -16,12 +17,4 @@ error: not implemented yet: calling C code
    |
    = this part of Lion (spec §21.2) is not supported by this version of the implementation
 
-error: not implemented yet: `compile`
-  --> tests/parser/unsupported.lion:7:12
-   |
- 7 | let fast = compile f(1)
-   |            ^^^^^^^
-   |
-   = this part of Lion (spec §21.1) is not supported by this version of the implementation
-
-2 errors found
+1 error found

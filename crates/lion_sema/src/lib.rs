@@ -11,6 +11,7 @@
 
 mod closures;
 mod collections;
+mod compile_time;
 mod consteval;
 mod domains;
 mod enums;
@@ -77,6 +78,7 @@ pub fn check_program(files: &[Source]) -> Checked {
     checker.check_equalities();
     checker.check_script_calls();
     checker.check_parallel_regions();
+    checker.check_compile_regions();
     checker.check_synced();
     checker.finish()
 }
@@ -173,6 +175,8 @@ struct Context {
     in_try: u32,
     /// The part that runs in parallel around the code being checked (§19.2).
     parallel: Option<crate::parallel::Parallel>,
+    /// The expression computed at compile time around the code being checked (§21.1).
+    compile: Option<crate::compile_time::CompileRegion>,
     /// The globals read and the functions called, for the check of the calls made by
     /// the script (C3).
     reads: Vec<ir::LocalId>,
@@ -192,6 +196,7 @@ impl Context {
             failed_return: false,
             in_try: 0,
             parallel: None,
+            compile: None,
             reads: Vec::new(),
             calls: Vec::new(),
             body: Vec::new(),
@@ -272,6 +277,8 @@ struct Checker<'a> {
     synced_used: std::collections::HashSet<Span>,
     /// The uses of a shared object in a parallel part that are already reported.
     shared_reported: std::collections::HashSet<Span>,
+    /// The expressions computed at compile time, checked once every function is (§21.1).
+    compile_checks: Vec<crate::compile_time::CompileCheck>,
 }
 
 impl<'a> Checker<'a> {
@@ -316,6 +323,7 @@ impl<'a> Checker<'a> {
             synced: Vec::new(),
             synced_used: std::collections::HashSet::new(),
             shared_reported: std::collections::HashSet::new(),
+            compile_checks: Vec::new(),
         };
         checker.register_program();
         checker

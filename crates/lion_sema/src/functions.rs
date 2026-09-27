@@ -1503,6 +1503,37 @@ impl<'a> Checker<'a> {
         used
     }
 
+    /// A call of a builtin for which `found` holds, in the body of `instance` or of the
+    /// functions it calls, with the instance that makes it.
+    pub(crate) fn builtin_called_by(
+        &self,
+        instance: usize,
+        found: &dyn Fn(ir::Builtin) -> bool,
+    ) -> Option<(ir::Builtin, usize)> {
+        let mut seen = HashSet::new();
+        let mut queue = vec![instance];
+        while let Some(current) = queue.pop() {
+            if !seen.insert(current) {
+                continue;
+            }
+            let checked = &self.instances[current];
+            queue.extend(checked.calls.iter().copied());
+            let Some(body) = &checked.checked else { continue };
+            let mut builtin = None;
+            ir::visit::exprs_in_stmts(&body.body, &mut |expr| {
+                if let ir::ExprKind::CallBuiltin { builtin: called, .. } = expr.kind
+                    && found(called)
+                {
+                    builtin.get_or_insert(called);
+                }
+            });
+            if let Some(builtin) = builtin {
+                return Some((builtin, current));
+            }
+        }
+        None
+    }
+
     pub(crate) fn modified_global_of(&self, instance: usize) -> Option<(ir::LocalId, Option<usize>)> {
         let mut seen = HashSet::new();
         let mut queue = vec![instance];

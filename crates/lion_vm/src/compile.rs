@@ -476,6 +476,9 @@ impl Compiler<'_> {
                 let count = captures.len() as u32;
                 self.emit(Instr::MakeClosure { dst, function: function.0, start, count }, span);
             }
+            // Replaced by its value before the program runs; computed here while it is
+            // being evaluated (§21.1).
+            ExprKind::Compile(value) => self.expr_into(value, dst),
             ExprKind::Partial { callee, args } => {
                 let callee_reg = self.temp();
                 self.expr_into(callee, callee_reg);
@@ -978,6 +981,7 @@ fn calls_function(expr: &ir::Expr) -> bool {
         ExprKind::CallValue { .. } => true,
         ExprKind::Task(value) | ExprKind::Wait(value) => calls_function(value),
         ExprKind::Partial { callee, args } => calls_function(callee) || args.iter().any(calls_function),
+        ExprKind::Compile(value) => calls_function(value),
     }
 }
 

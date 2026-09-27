@@ -321,6 +321,8 @@ pub enum ExprKind {
     Tuple(Vec<Element>),
     /// `parallel [f(x), x in l]`: a comprehension computed in parallel (§19.2).
     Parallel(Box<Expr>),
+    /// `compile value`: computed while the program is compiled (§21.1, D21).
+    Compile(Box<Expr>),
     /// `shared Counter()`, `shared synced Counter()`: an object that several holders
     /// share (§17.2, §19.3).
     Shared {

@@ -1,0 +1,19 @@
+use files
+use random
+var count = 0
+let n = 10
+let a = compile n * 2
+fun noisy(x in Int) in Int:
+    show(x)
+    return x
+;
+let b = compile noisy(3)
+let c = compile files.read("notes.txt")
+let d = compile random.int(1, 6)
+fun bump() in Int modifies count:
+    count += 1
+    return count
+;
+let e = compile bump()
+let f = compile fun(x in Int) = x + 1
+let g = compile {x in Int, x > 0}

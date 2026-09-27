@@ -496,7 +496,7 @@ pub(crate) fn names_in_expr(expr: &ast::Expr, names: &mut Vec<(String, Span)>) {
         Paren(inner) | Try(inner) | Parallel(inner) | Task(inner) | Wait(inner) => {
             names_in_expr(inner, names)
         }
-        Shared { value, .. } => names_in_expr(value, names),
+        Shared { value, .. } | Compile(value) => names_in_expr(value, names),
         List(elements) | Set(elements) => elements.iter().for_each(|element| names_in_expr(element, names)),
         Tuple(elements) => elements.iter().for_each(|element| names_in_expr(&element.value, names)),
         Unary { operand, .. } => names_in_expr(operand, names),

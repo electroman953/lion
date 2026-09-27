@@ -1,0 +1,16 @@
+exit: 1
+----- stdout
+----- stderr
+error: `compile` stops with a bug: integer overflow
+  --> tests/errors/compile_time_bug.lion:1:25
+   |
+ 1 | fun overflow() in Int = 9223372036854775807 + 1
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^
+ 2 | let h = compile overflow()
+   |                 ---------- in the call made here
+   |
+   = 9223372036854775807 + 1 exceeds the capacity of an Int (64 bits)
+   = `compile` computes its value while the program is compiled (§21.1)
+   = help: use a Float, or check the value before the addition
+
+1 error found

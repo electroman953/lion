@@ -876,7 +876,7 @@ fn names_in(expr: &ast::Expr, names: &mut Vec<String>) {
             }
         }
         Paren(inner) | Try(inner) | Parallel(inner) | Task(inner) | Wait(inner) => names_in(inner, names),
-        Shared { value, .. } => names_in(value, names),
+        Shared { value, .. } | Compile(value) => names_in(value, names),
         Fun(_) => {}
         List(elements) | Set(elements) => elements.iter().for_each(|element| names_in(element, names)),
         Tuple(elements) => elements.iter().for_each(|element| names_in(&element.value, names)),
