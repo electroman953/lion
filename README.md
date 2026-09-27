@@ -11,6 +11,8 @@ Les huit étapes de la feuille de route (§28) sont atteintes :
 - la bibliothèque graphique `ui` ouvre de vraies fenêtres (X11, et Wayland par XWayland), dessinées par Lion lui-même, sans dépendance ;
 - `lion add` installe une bibliothèque en une commande, depuis un dépôt git ou un dossier.
 
+Au-delà de la feuille de route, VS Code connaît Lion : coloration, indentation, diagnostics pendant la frappe, formatage et plan des fichiers, par le serveur de langage `lion lsp` (C102).
+
 Le bilan détaillé, avec les limites connues et les prochaines étapes, est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). L'historique des modifications est dans [CHANGELOG.md](CHANGELOG.md). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
 
 **Ce qui fonctionne aujourd'hui**
@@ -81,6 +83,18 @@ ui.run(view)
 
 `ui.run(view)` ouvre une fenêtre et la redessine après chaque événement (voir C98 et la [conception](docs/design/ui.md)). Il faut un écran X11 : sous Wayland, XWayland suffit. Pour les tests, `LION_UI=headless` remplace l'écran par un fichier d'événements (`LION_UI_EVENTS`) et écrit chaque frame en texte ; `LION_UI_SNAPSHOT=image.ppm` enregistre l'image.
 
+## Éditeurs : VS Code et `lion lsp`
+
+`lion lsp` est le serveur de langage des éditeurs (Language Server Protocol), sur l'entrée et la sortie standard. Il donne les diagnostics de `lion check` pendant la frappe, le formatage de `lion fmt` et le plan des fichiers, sans jamais lancer le code du programme (C102).
+
+L'extension VS Code est dans [`editors/vscode`](editors/vscode/README.md) :
+
+```sh
+cargo install --path crates/lion_cli       # la commande lion, dans ~/.cargo/bin
+cd editors/vscode && npm install && npm run package
+code --install-extension lion-0.1.0.vsix
+```
+
 ## Construire et utiliser
 
 Il faut Rust 1.88 ou plus récent (<https://rustup.rs>).
@@ -111,6 +125,7 @@ show(z)          // 30
 | `lion run`, `check`, `build`, `test` sans fichier | agissent sur le projet du dossier courant |
 | `lion` | mode interactif : on tape du Lion ligne par ligne |
 | `lion debug tokens\|ast\|ir\|bytecode\|rust f.lion` | montre une étape du compilateur |
+| `lion lsp` | le serveur de langage des éditeurs, comme VS Code |
 
 Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 ligne de commande incorrecte, 70 erreur interne. Un programme compilé sort avec les mêmes codes que `lion run`.
 
@@ -145,6 +160,7 @@ cargo test --workspace
 Après un changement voulu de sortie, régénérer avec `LION_BLESS=1 cargo test --test golden`, puis relire le diff.
 
 - **Tests du mode compilé** (`cargo test --test native`) : tous les programmes de `tests/runtime`, `tests/integration` et `tests/programs` sont compilés en natif, puis comparés aux **mêmes** fichiers `.expected`, sans les alertes. C'est la garantie « deux modes, une sémantique » (§22.2). Un second test lance `lion build` lui-même.
+- **Tests du serveur de langage** (`cargo test --test lsp`) : `lion lsp` lancé comme un éditeur le lance, sur un projet dont certains fichiers seulement sont ouverts. Ceux de l'extension sont dans `editors/vscode` : `npm test` (coloration) et `npm run e2e` (dans un vrai VS Code).
 - **Tests des paquets** (`cargo test --test packages`) : des dépôts git créés dans un dossier temporaire, puis `lion new`, `lion add`, `lion update`, `lion remove` et `lion run`, avec un cache à part (sautés sans git).
 
 ## Architecture
@@ -162,5 +178,7 @@ source .lion
   lion_std           les modules de la bibliothèque standard, écrits en Lion
   lion_ui            fenêtres de la bibliothèque `ui` : protocole X11, dessin, police intégrée
   lion_diagnostics   positions, erreurs, bugs, alertes et leur rendu
-  lion_cli           la commande `lion` ; charge le script et les modules qu'il utilise
+  lion_cli           la commande `lion` ; charge le script et les modules qu'il utilise ;
+                     le serveur de langage `lion lsp`
+editors/vscode       l'extension VS Code : grammaire, indentation, client de `lion lsp`
 ```

@@ -42,7 +42,7 @@ pub enum Spec {
 
 /// The packages that each file of a program may use: those of the project, and those
 /// of each package, by the folder of the package.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Resolution {
     pub project: HashMap<String, PathBuf>,
     pub packages: HashMap<PathBuf, HashMap<String, PathBuf>>,

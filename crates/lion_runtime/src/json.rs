@@ -25,6 +25,102 @@ pub fn parse(text: &str) -> Result<Json, String> {
     Ok(value)
 }
 
+impl Json {
+    /// The value of the member `name` of an object.
+    pub fn get(&self, name: &str) -> Option<&Json> {
+        match self {
+            Json::Object(members) => {
+                members.iter().find(|(member, _)| member == name).map(|(_, value)| value)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Json::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// A number without a fraction or an exponent that fits in 64 bits.
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            Json::Number(number) => number.parse().ok(),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&[Json]> {
+        match self {
+            Json::List(items) => Some(items),
+            _ => None,
+        }
+    }
+
+    /// An object of these members, in this order.
+    pub fn object<const N: usize>(members: [(&str, Json); N]) -> Json {
+        Json::Object(members.into_iter().map(|(name, value)| (name.to_string(), value)).collect())
+    }
+
+    pub fn text(text: impl Into<String>) -> Json {
+        Json::Text(text.into())
+    }
+
+    pub fn int(value: i64) -> Json {
+        Json::Number(value.to_string())
+    }
+}
+
+/// The JSON text of a value, on one line.
+impl std::fmt::Display for Json {
+    fn fmt(&self, out: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Json::Null => out.write_str("null"),
+            Json::Bool(value) => write!(out, "{value}"),
+            Json::Number(number) => out.write_str(number),
+            Json::Text(text) => write_text(out, text),
+            Json::List(items) => {
+                out.write_str("[")?;
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        out.write_str(",")?;
+                    }
+                    write!(out, "{item}")?;
+                }
+                out.write_str("]")
+            }
+            Json::Object(members) => {
+                out.write_str("{")?;
+                for (index, (name, value)) in members.iter().enumerate() {
+                    if index > 0 {
+                        out.write_str(",")?;
+                    }
+                    write_text(out, name)?;
+                    write!(out, ":{value}")?;
+                }
+                out.write_str("}")
+            }
+        }
+    }
+}
+
+fn write_text(out: &mut std::fmt::Formatter, text: &str) -> std::fmt::Result {
+    out.write_str("\"")?;
+    for c in text.chars() {
+        match c {
+            '"' => out.write_str("\\\"")?,
+            '\\' => out.write_str("\\\\")?,
+            '\n' => out.write_str("\\n")?,
+            '\r' => out.write_str("\\r")?,
+            '\t' => out.write_str("\\t")?,
+            c if (c as u32) < 0x20 => write!(out, "\\u{:04x}", c as u32)?,
+            c => write!(out, "{c}")?,
+        }
+    }
+    out.write_str("\"")
+}
+
 /// One row of a list of objects: the names of its members, their values as texts, and,
 /// for a value that is not a text, a number or a Bool, why it cannot be read.
 pub struct Row {
@@ -316,6 +412,21 @@ mod tests {
         );
         assert!(parse("01").is_err());
         assert!(parse("[1] 2").is_err());
+    }
+
+    #[test]
+    fn values_are_written_back() {
+        let text = r#"{"a":[1,-2.5e3,true,null],"b":"x\u00e9\n\"\\\u0001","c":{}}"#;
+        let value = parse(text).unwrap();
+        assert_eq!(value.to_string(), "{\"a\":[1,-2.5e3,true,null],\"b\":\"xé\\n\\\"\\\\\\u0001\",\"c\":{}}");
+        assert_eq!(parse(&value.to_string()), Ok(value.clone()));
+        assert_eq!(value.get("a").and_then(Json::as_list).map(<[Json]>::len), Some(4));
+        assert_eq!(value.get("a").unwrap().as_list().unwrap()[0].as_int(), Some(1));
+        assert_eq!(value.get("z"), None);
+        assert_eq!(
+            Json::object([("n", Json::int(3)), ("t", Json::text("é"))]).to_string(),
+            r#"{"n":3,"t":"é"}"#
+        );
     }
 
     #[test]

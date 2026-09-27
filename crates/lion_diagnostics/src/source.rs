@@ -74,6 +74,36 @@ impl SourceFile {
         (line, self.text[start..offset].chars().count() + 1)
     }
 
+    /// The 0-based line and column of byte `offset`, the column counted in UTF-16 code
+    /// units: a position of the Language Server Protocol.
+    pub fn utf16_position(&self, offset: u32) -> (u32, u32) {
+        let line = self.line_of(offset);
+        let start = self.line_start(line) as usize;
+        let offset = (offset as usize).clamp(start, self.text.len());
+        let column: usize = self.text[start..offset].chars().map(char::len_utf16).sum();
+        (line as u32 - 1, column as u32)
+    }
+
+    /// The byte offset of a 0-based line and UTF-16 column. A column past the end of the
+    /// line gives the end of the line, and a line past the end of the file its end.
+    pub fn utf16_offset(&self, line: u32, column: u32) -> u32 {
+        let Some(&start) = self.line_starts.get(line as usize) else { return self.text.len() as u32 };
+        let text = self.line_text(line as usize + 1);
+        let mut units = 0;
+        for (index, c) in text.char_indices() {
+            if units >= column as usize {
+                return start + index as u32;
+            }
+            units += c.len_utf16();
+        }
+        start + text.len() as u32
+    }
+
+    /// The number of lines: one more than the number of line ends.
+    pub fn line_count(&self) -> usize {
+        self.line_starts.len()
+    }
+
     /// Byte offset of the first character of a 1-based line.
     pub fn line_start(&self, line: usize) -> u32 {
         self.line_starts[line - 1]
@@ -132,5 +162,27 @@ mod tests {
         assert_eq!(file.line_text(3), "");
         assert_eq!(file.line_text(4), "end");
         assert_eq!(file.line_col(file.text().len() as u32), (4, 4));
+    }
+
+    #[test]
+    fn positions_of_the_language_server_protocol() {
+        let mut map = SourceMap::new();
+        // `é` is one UTF-16 unit, `🦁` two.
+        let text = "let x = 1\nlet é = \"🦁!\"\r\nend";
+        let id = map.add("t.lion", text);
+        let file = map.get(id);
+        assert_eq!(file.utf16_position(0), (0, 0));
+        assert_eq!(file.utf16_position(10), (1, 0));
+        let bang = text.find('!').unwrap() as u32;
+        assert_eq!(file.utf16_position(bang), (1, 11));
+        assert_eq!(file.utf16_offset(1, 11), bang);
+        // Inside the two units of `🦁`: after it.
+        assert_eq!(file.utf16_offset(1, 10), bang);
+        assert_eq!(file.utf16_offset(0, 4), 4);
+        // Past the end of a line, past the last line.
+        assert_eq!(file.utf16_offset(1, 99), text.find('\r').unwrap() as u32);
+        assert_eq!(file.utf16_offset(7, 0), text.len() as u32);
+        assert_eq!(file.utf16_position(text.len() as u32), (2, 3));
+        assert_eq!(file.line_count(), 3);
     }
 }

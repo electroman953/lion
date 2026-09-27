@@ -1,9 +1,9 @@
 # État de l'implémentation de Lion
 
-Mis à jour le 2026-09-27 : les huit étapes de la feuille de route sont atteintes, avec le compilateur natif (5), le parallélisme sur plusieurs cœurs (6), la bibliothèque graphique `ui` (7) et le gestionnaire de paquets (8). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète ces documents :
+Mis à jour le 2026-09-27 : les huit étapes de la feuille de route sont atteintes, avec le compilateur natif (5), le parallélisme sur plusieurs cœurs (6), la bibliothèque graphique `ui` (7) et le gestionnaire de paquets (8). Depuis, VS Code connaît Lion par le serveur de langage `lion lsp` (C102). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète ces documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C101) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C102) ;
 - [`docs/design/ui.md`](docs/design/ui.md) et [`docs/design/packages.md`](docs/design/packages.md) : les conceptions de `ui` et des paquets, validées par l'auteur et implémentées (C98, C101) ;
 - [`README.md`](README.md) : la présentation et l'usage ;
 - [`CHANGELOG.md`](CHANGELOG.md) : l'historique des modifications, session par session.
@@ -15,7 +15,8 @@ Mis à jour le 2026-09-27 : les huit étapes de la feuille de route sont atteint
 | `cargo build` | OK |
 | `cargo clippy --all-targets` | 0 avertissement |
 | `cargo fmt --check` | OK |
-| `cargo test` (tout le workspace) | OK : 156 tests unitaires, 200 programmes golden, et les 97 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
+| `cargo test` (tout le workspace) | OK : 170 tests unitaires, 200 programmes golden, les 97 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties, et `lion lsp` lancé comme par un éditeur |
+| Extension VS Code (`editors/vscode`) | `npm test` : 3 tests de la coloration par le moteur TextMate de VS Code ; `npm run e2e` : l'extension dans VS Code 1.129, avec diagnostics, plan, formatage, correction pendant la frappe et indentation |
 | Programmes du §27 de la spec | Les trois tournent sans modification, dans les deux modes : 27.1 (CSV, structures), 27.2 (hasard, parallèle, ensembles) et 27.3 (application graphique, `tests/programs/notes_app`, sans écran avec un fichier d'événements) ; Sur 12 cœurs, 27.2 prend 0,67 s interprété (`--release`) et 0,19 s compilé ; avec `LION_THREADS=1`, 3,2 s et 0,65 s. |
 
 L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié en privé sur GitHub : <https://github.com/electroman953/lion> (remote `origin`).
@@ -49,7 +50,9 @@ source .lion
   lion_std           modules de la bibliothèque standard, écrits en Lion (include_str!)
   lion_ui            fenêtres de `ui` : client X11, dessin logiciel, police intégrée, mode sans écran
   lion_diagnostics   sources, positions, diagnostics et leur rendu façon rustc
-  lion_cli           la commande `lion`, les tests golden et les tests du mode compilé
+  lion_cli           la commande `lion`, le serveur de langage `lion lsp`, les tests golden
+                     et les tests du mode compilé
+editors/vscode       l'extension VS Code : grammaire TextMate, indentation, client de `lion lsp`
 ```
 
 Principes :
@@ -147,7 +150,7 @@ Principes :
 - `Rt::task`, `Rt::wait` : les tâches à part (C85).
 - Aides : `enter` et `leave` autour de chaque appel, `called_from` pour la trace, et des conversions (`int`, `text`, `field`…).
 
-**`lion_runtime`** : `ops.rs` (arithmétique vérifiée, rationnels, conversions), `bug.rs` (les `BugKind` et leurs messages), `format.rs` (affichage des Float et des rationnels), `json.rs` (lecture stricte du JSON, réutilisable pour un LSP), `stdlib.rs`.
+**`lion_runtime`** : `ops.rs` (arithmétique vérifiée, rationnels, conversions), `bug.rs` (les `BugKind` et leurs messages), `format.rs` (affichage des Float et des rationnels), `json.rs` (lecture stricte du JSON, et son écriture par `Display`, dont se sert `lion lsp`), `stdlib.rs`.
 
 **`lion_std/std/*.lion`** : `csv`, `dates`, `files`, `json`, `math`, `random`, `sets`, `text`, `time`, `ui`.
 
@@ -160,13 +163,21 @@ Principes :
 
 **`lion_cli`** :
 - `main.rs` : les commandes ;
-- `driver.rs` : le pipeline ;
+- `driver.rs` : le pipeline. `analyze` lit les modules par une fonction qu'on lui donne (le disque, ou les textes de l'éditeur), peut ne pas calculer les `compile`, et dit quel `use` a atteint chaque fichier ;
+- `lsp/` : `lion lsp` (C102). `mod.rs` : la boucle, les fichiers ouverts, quel programme vérifier pour chaque fichier, les diagnostics envoyés ; `rpc.rs` : les messages JSON-RPC et leurs en-têtes ; `convert.rs` : adresses `file:`, positions UTF-16, diagnostics ; `symbols.rs` : le plan d'un fichier, depuis son arbre syntaxique ; `tests.rs` : le serveur en mémoire ;
 - `project.rs` : les projets et les paquets (C101) : `lion.toml`, `lion.lock`, versions, git, résolution, et les commandes `new`, `add`, `remove`, `update` ;
 - `native.rs` : `lion build`. Il écrit le runtime dans un cache, prépare un paquet cargo par exécutable, lance `cargo build --release --offline` et copie le binaire ;
 - `build.rs` : embarque dans `lion` les sources et les manifestes des crates du runtime (`FILES`, `HASH`) ;
 - `tests/golden.rs` : le lanceur des tests golden ;
 - `tests/native.rs` : le lanceur des tests du mode compilé ;
-- `tests/packages.rs` : les tests des paquets, avec des dépôts git temporaires.
+- `tests/packages.rs` : les tests des paquets, avec des dépôts git temporaires ;
+- `tests/lsp.rs` : `lion lsp` lancé comme par un éditeur, sur un projet dont un seul module est ouvert.
+
+**`editors/vscode`** (C102) :
+- `package.json` : le langage `lion`, la grammaire, les réglages `lion.path` et `lion.trace.server`, les commandes ;
+- `extension.js` : trouve `lion` (réglage, `PATH`, `~/.cargo/bin`), lance `lion lsp` par `vscode-languageclient`, et les commandes « Run » et « Test » dans un terminal ;
+- `syntaxes/lion.tmLanguage.json` : la coloration ; `language-configuration.json` : commentaires, paires, indentation ;
+- `test/grammar.test.js` (`npm test`) et `test/e2e/` (`npm run e2e`, qui ouvre une fenêtre de VS Code avec un profil temporaire).
 
 ## 5. Fonctionnalités de Lion supportées (mode interprété)
 
@@ -256,6 +267,8 @@ Chaque test golden est un fichier `tests/<suite>/*.lion` accompagné de son `.ex
 | `tests/testing` | 3 | `lion test` |
 | `tests/interactive` | 1 | `lion` seul, le fichier en entrée |
 
+Le serveur de langage a les siens : dans `lion_cli/src/lsp/tests.rs`, le serveur reçoit ses messages en mémoire ; `cargo test --test lsp` lance `lion lsp` et lui parle comme un éditeur, sur des fichiers du disque. L'extension VS Code se teste depuis `editors/vscode` : `npm test` pour la coloration, `npm run e2e` dans un vrai VS Code (une fenêtre s'ouvre et se ferme).
+
 Les paquets ont les leurs (`cargo test --test packages`) : des dépôts git créés dans un dossier temporaire, avec un cache à part, puis `lion new`, `add`, `update`, `remove` et `run`, jusqu'au conflit de versions et au travail hors ligne. Ils se sautent sans git.
 
 Le mode compilé a ses propres tests (`cargo test --test native`, `crates/lion_cli/tests/native.rs`) :
@@ -264,7 +277,7 @@ Le mode compilé a ses propres tests (`cargo test --test native`, `crates/lion_c
 
 Ces tests demandent cargo, qu'ils trouvent dans la variable `CARGO` posée par `cargo test`. Un programme ajouté à `tests/runtime` est donc testé dans les deux modes.
 
-Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (20), `lion_vm` (15), `lion_codegen` (12), `lion_native` (5), `lion_diagnostics` (4), `lion_ir` (3), `lion_ui` (5) et `lion_cli` (1).
+Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (20), `lion_vm` (15), `lion_codegen` (12), `lion_native` (5), `lion_diagnostics` (4), `lion_ir` (3), `lion_ui` (5) et `lion_cli` (13, dont 12 pour `lion lsp`).
 
 Les tests golden tournent avec autant de fils que de cœurs ; `LION_THREADS=1` les fait tourner sur un seul, avec la même sortie.
 
@@ -283,6 +296,7 @@ cargo build --release
 ./target/release/lion remove nom
 ./target/release/lion update [nom]
 ./target/release/lion run                    # sans fichier : le main.lion du projet (aussi check, build, test)
+./target/release/lion lsp                   # le serveur de langage des éditeurs (stdin/stdout)
 ./target/release/lion                       # mode interactif
 ```
 
@@ -316,6 +330,11 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
   - pas de registre central, ni de publication ;
   - une seule version d'un paquet par programme ;
   - un paquet de git ne peut pas dépendre d'un dossier local.
+- Serveur de langage (C102) :
+  - diagnostics, formatage et plan seulement : ni survol, ni définition, ni références, ni complétion ;
+  - les `compile` ne sont pas calculés : leurs bugs n'apparaissent qu'avec `lion check` ;
+  - un fichier qui n'est ni ouvert ni atteint par un programme ouvert n'est pas vérifié ;
+  - l'interner de types global ne se vide jamais : la mémoire croît lentement pendant une longue session.
 - Mode compilé :
   - `lion build` demande une chaîne Rust sur la machine qui compile ;
   - la première compilation prépare le runtime dans le cache (`LION_CACHE`, `$XDG_CACHE_HOME/lion` ou `~/.cache/lion`), ce qui prend quelques secondes ;
@@ -327,7 +346,7 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
 
 Les huit étapes de la feuille de route sont atteintes. La suite dépend de ce que l'auteur veut privilégier :
 - **étendre `ui`** : Windows et macOS, touches mortes, défilement, styles, images ;
-- **l'outillage des éditeurs** : VS Code et LSP (point 5 ci-dessous) ;
+- **l'outillage des éditeurs** : la suite de VS Code et de `lion lsp` (point 5 ci-dessous) ;
 - **les paquets** : un registre central et la publication, quand il y aura des paquets à partager ;
 - **la spec** : l'étape 1 de la feuille de route demande qu'elle n'ait plus de point ouvert bloquant. Les choix délégués (Dn, Cn) et les décisions de l'auteur de cette session pourraient y entrer.
 
@@ -341,17 +360,15 @@ Ce qui peut se faire sans nouvelle règle de langage :
 3. **Parallélisme** :
    - un verrou plus fin pour `shared synced` (C84).
 4. **Outils** : le débogueur pas à pas du §24.2 (D25).
-5. **VS Code et LSP**, à préparer dans l'architecture :
-   - sortir le pipeline de `lion_cli/src/driver.rs` dans une bibliothèque qui rend les diagnostics au lieu de les afficher, avec un fournisseur de fichiers pour les tampons non sauvegardés ;
-   - convertir les `Span` (octets) en positions LSP (ligne, colonne UTF-16) dans `lion_diagnostics` ;
-   - faire produire par `lion_sema` un index (définitions, références, type de chaque nom) même pour un programme avec des erreurs, puisque l'IR n'existe que pour un programme valide ; tenir compte des versions des fonctions génériques (C1) ;
-   - dans un processus long : `catch_unwind` autour de chaque analyse, un cache des modules standard vérifiés, et l'interner de types global, qui ne se vide jamais ;
-   - JSON-RPC : l'analyseur JSON de `lion_runtime/src/json.rs` existe déjà (C96), il reste l'écriture ;
-   - une sous-commande `lion lsp` (outil unique, D30), et une extension dans `editors/vscode` : grammaire TextMate, indentation (`:` ouvre, `;`, `elif` et `else` ferment), formatage par `lion fmt` ; plus tard, un adaptateur de débogage (DAP).
+5. **VS Code et LSP** : `lion lsp` et l'extension donnent déjà diagnostics, formatage et plan (C102). La suite :
+   - faire produire par `lion_sema` un index (définitions, références, type de chaque nom) même pour un programme avec des erreurs, puisque l'IR n'existe que pour un programme valide ; tenir compte des versions des fonctions génériques (C1) et de la seconde vérification de C90 ; puis le survol, l'aller à la définition, les références et le renommage ;
+   - la complétion : noms visibles, membres d'un module après `.`, champs et méthodes d'une valeur ;
+   - « Run test » au-dessus de chaque bloc `test` (CodeLens) ;
+   - plus tard, un adaptateur de débogage (DAP), quand le débogueur du §24.2 existera.
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C102**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C103**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README, des notes et de `CHANGELOG.md`, puis un commit Conventional Commits, poussé sur le dépôt privé. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

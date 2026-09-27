@@ -1,0 +1,124 @@
+{
+  "name": "lion",
+  "displayName": "Lion",
+  "description": "The Lion language: highlighting, diagnostics, formatting and outline, from `lion lsp`",
+  "version": "0.1.0",
+  "publisher": "lion-lang",
+  "license": "UNLICENSED",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/electroman953/lion"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "lion",
+        "aliases": [
+          "Lion"
+        ],
+        "extensions": [
+          ".lion"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lion",
+        "scopeName": "source.lion",
+        "path": "./syntaxes/lion.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Lion",
+      "properties": {
+        "lion.path": {
+          "type": "string",
+          "default": "lion",
+          "markdownDescription": "The `lion` command. By default, `lion` on the `PATH`, else `~/.cargo/bin/lion`."
+        },
+        "lion.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Shows the messages between VS Code and `lion lsp` in the output of Lion."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[lion]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "editor.detectIndentation": false
+      }
+    },
+    "commands": [
+      {
+        "command": "lion.run",
+        "title": "Run the File",
+        "category": "Lion",
+        "icon": "$(play)"
+      },
+      {
+        "command": "lion.test",
+        "title": "Run the Tests of the File",
+        "category": "Lion",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "lion.restartServer",
+        "title": "Restart the Language Server",
+        "category": "Lion"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "lion.run",
+          "when": "resourceLangId == lion"
+        },
+        {
+          "command": "lion.test",
+          "when": "resourceLangId == lion"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "lion.run",
+          "when": "editorLangId == lion"
+        },
+        {
+          "command": "lion.test",
+          "when": "editorLangId == lion"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "package": "vsce package --skip-license",
+    "test": "node --test test/grammar.test.js",
+    "e2e": "node test/e2e/run.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.2"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2"
+  }
+}

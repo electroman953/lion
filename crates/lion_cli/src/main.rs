@@ -1,6 +1,7 @@
 //! The `lion` command (spec §24). Only the commands that work are offered.
 
 mod driver;
+mod lsp;
 mod native;
 mod project;
 
@@ -26,6 +27,8 @@ usage:
                                    lay out files in the official style (4 spaces per block)
   lion debug <stage> <file.lion>   show a stage of the compiler: tokens, ast, ir, bytecode
                                    or rust
+  lion lsp                         the language server of editors, such as VS Code, on the
+                                   standard input and output
   lion --version
 
   lion                             the interactive mode: type Lion line by line
@@ -79,6 +82,7 @@ fn dispatch(args: &[String]) -> ExitCode {
         ["update"] => done(project::update(None)),
         ["update", name] => done(project::update(Some(name))),
         ["debug", stage, file] => driver::debug(stage, file),
+        ["lsp"] => lsp::serve(),
         ["test"] => match project::find_root(std::path::Path::new(".")) {
             Some(root) => {
                 let current =

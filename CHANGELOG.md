@@ -2,6 +2,16 @@
 
 Les décisions détaillées sont dans [docs/implementation-notes.md](docs/implementation-notes.md) (Rn, In, Cn). Ce qui reste à faire est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) (§5, §8 et §9). Chaque ligne correspond à un commit du dépôt.
 
+## 2026-09-27, quatrième session : VS Code et le serveur de langage
+
+**Ajouté**
+- `lion lsp`, le serveur de langage des éditeurs (C102) : diagnostics pendant la frappe, formatage par `lion fmt`, plan des fichiers. Un module est vérifié avec le programme qui l'utilise, et le serveur ne lance jamais le code du programme.
+- L'extension VS Code (`editors/vscode`) : coloration, indentation des blocs, client de `lion lsp`, commandes « Run » et « Test ». Testée par le moteur de coloration de VS Code (`npm test`) et dans un vrai VS Code (`npm run e2e`).
+- `lion_runtime::json` écrit aussi le JSON, et donne les positions du protocole (UTF-16) dans `lion_diagnostics`.
+
+**Modifié**
+- Le driver lit les modules par une fonction qu'on lui donne (le disque, ou les textes de l'éditeur), et dit quel `use` a atteint chaque fichier (`driver::analyze`).
+
 ## 2026-09-27, troisième session : étapes 7 et 8
 
 **Ajouté**
