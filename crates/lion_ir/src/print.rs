@@ -156,6 +156,14 @@ impl Printer<'_> {
                 let elements: Vec<String> = elements.iter().map(print).collect();
                 format!("(list{}{})", if elements.is_empty() { "" } else { " " }, elements.join(" "))
             }
+            ExprKind::Set(elements) => {
+                let elements: Vec<String> = elements.iter().map(print).collect();
+                format!("(set{}{})", if elements.is_empty() { "" } else { " " }, elements.join(" "))
+            }
+            ExprKind::Tuple(elements) => {
+                let elements: Vec<String> = elements.iter().map(print).collect();
+                format!("(tuple{}{})", if elements.is_empty() { "" } else { " " }, elements.join(" "))
+            }
             ExprKind::Index { object, index } => format!("(index {} {})", print(object), print(index)),
             ExprKind::TypeTest { value, ty } => format!("(in_type {} {ty})", print(value)),
             ExprKind::Try(value) => format!("(try {})", print(value)),

@@ -4,7 +4,7 @@ trait Shape:
 ;
 let twice = fun(x) = x * 2
 let l = [1, 2, 3]
-let s = {1, 2}
+let job = task f()
 let t = ("Léa", 12)
 let w = try f()
 let ok = 1

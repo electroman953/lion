@@ -30,7 +30,7 @@ error: the type of this empty list is not known
  4 | let e = []
    |         ^^
    |
-   = help: write its type: `var l = [] in List of Int`, or `[] as List of Int`
+   = help: write its type: `var l = [] in List of Int`
 
 error: an index is an Int, or an interval for an extract
   --> tests/errors/lists.lion:6:15

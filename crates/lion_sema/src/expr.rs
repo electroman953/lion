@@ -7,6 +7,7 @@ use lion_diagnostics::{Diagnostic, Span};
 use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
+use crate::collections::Collection;
 use crate::names::{IMPLEMENTED_FUNCTIONS, PLANNED_FUNCTIONS, Resolved};
 use crate::structs::Given;
 use crate::{Checker, ContextKind, GlobalType, article, typed};
@@ -51,10 +52,8 @@ impl Checker<'_> {
             ast::ExprKind::TypeTest { value, ty } => self.type_test(value, ty, span),
             ast::ExprKind::Try(value) => self.try_expr(value, span),
             ast::ExprKind::Match { scrutinee, cases } => self.match_expr(scrutinee, cases, span),
-            ast::ExprKind::Tuple(_) => {
-                self.not_implemented(span, "tuples as values", "§16");
-                None
-            }
+            ast::ExprKind::Set(elements) => self.collection(Collection::Set, elements, span),
+            ast::ExprKind::Tuple(elements) => self.tuple(elements, span),
         }
     }
 
@@ -214,7 +213,6 @@ impl Checker<'_> {
         use ast::BinaryOp::*;
         let unsupported = match op {
             Over => Some(("Rational numbers (`over`)", "§8.3")),
-            Inter | Union | Minus | Subset => Some(("set operations", "§16.6")),
             Same => Some(("`same`", "§9.4, §17.2")),
             _ => None,
         };
@@ -249,6 +247,7 @@ impl Checker<'_> {
             And | Or => unreachable!("handled above"),
             Range => self.range(lhs, rhs, span),
             In => self.membership(lhs, rhs, op_span, span),
+            Union | Inter | Minus | Subset => self.set_operation(op, op_span, lhs, rhs, span),
             _ => self.arithmetic(op, op_span, lhs, rhs, span),
         }
     }
@@ -288,7 +287,7 @@ impl Checker<'_> {
                 };
                 Some(typed(kind, Type::Bool, span))
             }
-            Type::List(_) => self.list_membership(value, set, span),
+            Type::List(_) | Type::Set(_) => self.list_membership(value, set, span),
             Type::Range => {
                 self.diagnostics.push(
                     Diagnostic::error(format!("an interval holds Int values, not {}", article(value.ty)))
@@ -336,14 +335,76 @@ impl Checker<'_> {
     /// Whether a value of `whole` can be told to be in `part` while the program runs: a
     /// value carries its kind (Int, List...), but not the type of the elements of a list.
     pub(crate) fn distinguishable(&mut self, whole: Type, part: Type, span: Span) -> bool {
-        let lists = whole.members().into_iter().filter(|member| matches!(member, Type::List(_))).count();
-        let tested_lists =
-            part.members().into_iter().filter(|member| matches!(member, Type::List(_))).count();
-        if lists > 1 && tested_lists > 0 && tested_lists < lists {
-            self.not_implemented(span, "telling apart several list types in a union", "§7.3");
-            return false;
+        // The collections whose values do not carry the types of their elements.
+        let kind = |ty: &Type| match ty {
+            Type::List(_) => Some("list"),
+            Type::Set(_) => Some("set"),
+            Type::Tuple(_) => Some("tuple"),
+            _ => None,
+        };
+        for name in ["list", "set", "tuple"] {
+            let all = whole.members().iter().filter(|member| kind(member) == Some(name)).count();
+            let tested = part.members().iter().filter(|member| kind(member) == Some(name)).count();
+            if all > 1 && tested > 0 && tested < all {
+                self.not_implemented(span, &format!("telling apart several {name} types in a union"), "§7.3");
+                return false;
+            }
         }
         true
+    }
+
+    /// `(a, b)`: a tuple of values (§4.5); names in a tuple build a structure (§12.2).
+    fn tuple(&mut self, elements: &[ast::Element], span: Span) -> Option<ir::Expr> {
+        if let Some(name) = elements.iter().find_map(|element| element.name.as_ref()) {
+            self.diagnostics.push(
+                Diagnostic::error("the elements of a tuple have no name")
+                    .with_primary(name.span, "")
+                    .with_help("names give the fields of a structure: `(...) as Student` (§12.2)"),
+            );
+            return None;
+        }
+        let values: Vec<Option<ir::Expr>> =
+            elements.iter().map(|element| self.expr(&element.value)).collect();
+        let values: Vec<ir::Expr> = values.into_iter().collect::<Option<_>>()?;
+        let ty = Type::tuple(values.iter().map(|value| value.ty).collect());
+        Some(typed(ir::ExprKind::Tuple(values), ty, span))
+    }
+
+    /// `a union b`, `a inter b`, `a minus b`, `a subset b`, on Sets of the same type (§16.6).
+    fn set_operation(
+        &mut self,
+        op: ast::BinaryOp,
+        op_span: Span,
+        lhs: ir::Expr,
+        rhs: ir::Expr,
+        span: Span,
+    ) -> Option<ir::Expr> {
+        let (lhs, rhs) = (self.within_try(lhs), self.within_try(rhs));
+        let word = op.as_str();
+        if !matches!(lhs.ty, Type::Set(_)) || lhs.ty != rhs.ty {
+            let mut error = Diagnostic::error(format!(
+                "`{word}` needs two Sets of the same type, not {} and {}",
+                article(lhs.ty),
+                article(rhs.ty)
+            ))
+            .with_primary(op_span, "")
+            .with_secondary(lhs.span, format!("this is {}", article(lhs.ty)))
+            .with_secondary(rhs.span, format!("this is {}", article(rhs.ty)));
+            if matches!(lhs.ty, Type::List(_)) || matches!(rhs.ty, Type::List(_)) {
+                error = error
+                    .with_help("a list keeps order and repetitions; build a Set with `{x, x in l}` (§16.4)");
+            }
+            self.diagnostics.push(error);
+            return None;
+        }
+        let (ir_op, ty) = match op {
+            ast::BinaryOp::Union => (ir::BinaryOp::SetUnion, lhs.ty),
+            ast::BinaryOp::Inter => (ir::BinaryOp::SetInter, lhs.ty),
+            ast::BinaryOp::Minus => (ir::BinaryOp::SetMinus, lhs.ty),
+            _ => (ir::BinaryOp::Subset, Type::Bool),
+        };
+        let kind = ir::ExprKind::Binary { op: ir_op, lhs: Box::new(lhs), rhs: Box::new(rhs) };
+        Some(typed(kind, ty, span))
     }
 
     /// `try expr` (§18.3): the value without its Error, which leaves the function.
@@ -598,23 +659,32 @@ impl Checker<'_> {
                 return None;
             }
             // Collections compare their content, structures their fields (§9.4, §12.5).
-            (Type::List(_) | Type::Range | Type::Union(_) | Type::Struct(_) | Type::Enum(_), _)
-                if equality && lty == rty =>
-            {
-                plain(equality_op(B::EqValue, B::NeValue))
-            }
+            (
+                Type::List(_)
+                | Type::Set(_)
+                | Type::Tuple(_)
+                | Type::Range
+                | Type::Union(_)
+                | Type::Struct(_)
+                | Type::Enum(_),
+                _,
+            ) if equality && lty == rty => plain(equality_op(B::EqValue, B::NeValue)),
             // A value of a union compares with a value of one of its members, as in
             // `x == none` (§7.4).
             _ if equality && (lty.is_subset_of(rty) || rty.is_subset_of(lty)) => {
                 plain(equality_op(B::EqValue, B::NeValue))
             }
             _ if lty == rty => {
-                self.diagnostics.push(
+                let mut error =
                     Diagnostic::error(format!("`{}` is not defined for {lty} values", op.as_str()))
                         .with_primary(op_span, "")
                         .with_note("`<`, `>`, `<=` and `>=` compare Int and Float values")
-                        .with_note(format!("Lion 0.1 does not define an order on {lty}")),
-                );
+                        .with_note(format!("Lion 0.1 does not define an order on {lty}"));
+                if let Type::Set(_) = lty {
+                    error = error
+                        .with_help("to test the inclusion of a Set in another, write `a subset b` (§16.6)");
+                }
+                self.diagnostics.push(error);
                 return None;
             }
             _ => {

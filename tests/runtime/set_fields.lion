@@ -1,0 +1,12 @@
+struct Tagged:
+    tags in Set of Text = {}
+    origin in (Int, Int) = (0, 0)
+    tags.size <= 2
+;
+var t = Tagged()
+t.tags.add("a")
+show(t)
+let u = Tagged({"a", "b", "a"})
+show(u)
+t.tags.add("b")
+t.tags.add("c")

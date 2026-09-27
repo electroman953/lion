@@ -9,6 +9,34 @@ use lion_syntax::ast;
 
 use crate::{Checker, Scope, article, capitalize, typed};
 
+/// The two collections written with elements: `[...]` and `{...}` (§16.1).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Collection {
+    List,
+    Set,
+}
+
+impl Collection {
+    fn ty(self, element: Type) -> Type {
+        match self {
+            Collection::List => Type::list(element),
+            Collection::Set => Type::set(element),
+        }
+    }
+
+    fn build(self, values: Vec<ir::Expr>, element: Type, span: Span) -> ir::Expr {
+        match self {
+            Collection::List => typed(ir::ExprKind::List(values), Type::list(element), span),
+            Collection::Set => typed(ir::ExprKind::Set(values), Type::set(element), span),
+        }
+    }
+}
+
+/// The type of the elements of a collection type.
+fn output_type(collection: Type) -> Type {
+    collection.element().expect("a collection has elements")
+}
+
 /// One element of a comprehension after the output (§16.4).
 enum Part {
     Generator { var: ir::LocalId, iterable: ir::Expr },
@@ -18,15 +46,29 @@ enum Part {
 impl Checker<'_> {
     /// `[a, b, c]`, or a comprehension when an element is `v in X` with a new `v`.
     pub(crate) fn list(&mut self, elements: &[ast::Expr], span: Span) -> Option<ir::Expr> {
+        self.collection(Collection::List, elements, span)
+    }
+
+    /// `[a, b]` or `{a, b}`, or a comprehension (§16.1, §16.4).
+    pub(crate) fn collection(
+        &mut self,
+        kind: Collection,
+        elements: &[ast::Expr],
+        span: Span,
+    ) -> Option<ir::Expr> {
         let generators = self.generators(elements);
         if generators.iter().any(|&is_generator| is_generator) {
-            return self.comprehension(elements, &generators, span);
+            return self.comprehension(kind, elements, &generators, span);
         }
         if elements.is_empty() {
+            let (what, example) = match kind {
+                Collection::List => ("list", "var l = [] in List of Int"),
+                Collection::Set => ("set", "var s = {} in Set of Int"),
+            };
             self.diagnostics.push(
-                Diagnostic::error("the type of this empty list is not known")
+                Diagnostic::error(format!("the type of this empty {what} is not known"))
                     .with_primary(span, "")
-                    .with_help("write its type: `var l = [] in List of Int`, or `[] as List of Int`"),
+                    .with_help(format!("write its type: `{example}`")),
             );
             return None;
         }
@@ -60,16 +102,22 @@ impl Checker<'_> {
                 values.push(widen(checked.next().expect("one value per element"), element));
             }
         }
-        Some(typed(ir::ExprKind::List(values), Type::list(element), span))
+        Some(kind.build(values, element, span))
     }
 
     /// An empty list takes the type expected where it is written.
     pub(crate) fn empty_list(&mut self, expr: &ast::Expr, expected: Type) -> Option<ir::Expr> {
-        match (&expr.kind, expected) {
-            (ast::ExprKind::List(elements), Type::List(_)) if elements.is_empty() => {
-                Some(typed(ir::ExprKind::List(Vec::new()), expected, expr.span))
+        let member = |pick: fn(&Type) -> bool| expected.members().into_iter().find(pick);
+        match &expr.kind {
+            ast::ExprKind::List(elements) if elements.is_empty() => {
+                let ty = member(|ty| matches!(ty, Type::List(_)))?;
+                Some(typed(ir::ExprKind::List(Vec::new()), ty, expr.span))
             }
-            (ast::ExprKind::Paren(inner), _) => self.empty_list(inner, expected),
+            ast::ExprKind::Set(elements) if elements.is_empty() => {
+                let ty = member(|ty| matches!(ty, Type::Set(_)))?;
+                Some(typed(ir::ExprKind::Set(Vec::new()), ty, expr.span))
+            }
+            ast::ExprKind::Paren(inner) => self.empty_list(inner, expected),
             _ => None,
         }
     }
@@ -87,15 +135,22 @@ impl Checker<'_> {
                 self.expr_expecting(inner, expected).map(|value| ir::Expr { span: expr.span, ..value })
             }
             // The elements of a list expect the type of the elements: `[red, blue] in List of Color`.
-            ast::ExprKind::List(elements)
+            ast::ExprKind::List(elements) | ast::ExprKind::Set(elements)
                 if !elements.is_empty() && !self.generators(elements).contains(&true) =>
             {
-                let Some(Type::List(element)) =
-                    expected.members().into_iter().find(|member| matches!(member, Type::List(_)))
-                else {
+                let kind = if matches!(expr.kind, ast::ExprKind::List(_)) {
+                    Collection::List
+                } else {
+                    Collection::Set
+                };
+                let Some(element) = expected.members().into_iter().find_map(|member| match (kind, member) {
+                    (Collection::List, Type::List(element)) | (Collection::Set, Type::Set(element)) => {
+                        Some(element.get())
+                    }
+                    _ => None,
+                }) else {
                     return self.expr(expr);
                 };
-                let element = element.get();
                 let values: Vec<Option<ir::Expr>> = elements
                     .iter()
                     .map(|value| {
@@ -104,7 +159,7 @@ impl Checker<'_> {
                     })
                     .collect();
                 let values = values.into_iter().collect::<Option<Vec<_>>>()?;
-                Some(typed(ir::ExprKind::List(values), Type::list(element), expr.span))
+                Some(kind.build(values, element, expr.span))
             }
             _ => self.expr(expr),
         }
@@ -145,7 +200,8 @@ impl Checker<'_> {
         elements
             .iter()
             .map(|element| match &element.kind {
-                ast::ExprKind::Binary { op: ast::BinaryOp::In, lhs, .. } => match &lhs.kind {
+                ast::ExprKind::Binary { op: ast::BinaryOp::In, lhs, .. }
+                | ast::ExprKind::TypeTest { value: lhs, .. } => match &lhs.kind {
                     ast::ExprKind::Name(name) if !self.is_known(name) && !new_names.contains(name) => {
                         new_names.insert(name.clone());
                         true
@@ -159,13 +215,23 @@ impl Checker<'_> {
 
     /// `[output, v in X, condition, ...]`: the generators nest from left to right and
     /// the conditions filter, like loops and `if`s (§16.4).
-    fn comprehension(&mut self, elements: &[ast::Expr], generators: &[bool], span: Span) -> Option<ir::Expr> {
+    fn comprehension(
+        &mut self,
+        kind: Collection,
+        elements: &[ast::Expr],
+        generators: &[bool],
+        span: Span,
+    ) -> Option<ir::Expr> {
         let implicit_output = generators[0];
         if implicit_output && generators.iter().filter(|&&is_generator| is_generator).count() > 1 {
+            let example = match kind {
+                Collection::List => "[(a, b), a in A, b in B]",
+                Collection::Set => "{(a, b), a in A, b in B}",
+            };
             self.diagnostics.push(
                 Diagnostic::error("with several generators, a comprehension starts with its result")
                     .with_primary(elements[0].span, "")
-                    .with_help("write the result first: `[(a, b), a in A, b in B]` (§16.4)"),
+                    .with_help(format!("write the result first: `{example}` (§16.4)")),
             );
             return None;
         }
@@ -183,7 +249,11 @@ impl Checker<'_> {
                     parts.push(Part::Generator { var, iterable });
                 }
                 Some(part) => parts.push(part),
-                None => valid = false,
+                None => {
+                    // What follows may use the variable of a failed generator.
+                    valid = false;
+                    break;
+                }
             }
         }
         let output = if implicit_output {
@@ -196,7 +266,7 @@ impl Checker<'_> {
         };
         self.ctx.scopes.pop();
         let output = output.filter(|_| valid)?;
-        let list_type = Type::list(output.ty);
+        let list_type = kind.ty(output.ty);
         let result = self.temporary(list_type, span);
         let mut body =
             vec![ir::Stmt::Add { root: ir::Place::Local(result), path: Vec::new(), value: output }];
@@ -206,7 +276,7 @@ impl Checker<'_> {
                 Part::Condition(cond) => ir::Stmt::If { cond, then: body, otherwise: Vec::new() },
             }];
         }
-        let empty = typed(ir::ExprKind::List(Vec::new()), list_type, span);
+        let empty = kind.build(Vec::new(), output_type(list_type), span);
         let mut stmts = vec![ir::Stmt::Assign { place: ir::Place::Local(result), value: empty }];
         stmts.extend(body);
         let value = typed(ir::ExprKind::Local(result), list_type, span);
@@ -214,15 +284,35 @@ impl Checker<'_> {
     }
 
     fn generator(&mut self, element: &ast::Expr) -> Option<Part> {
-        let ast::ExprKind::Binary { lhs, rhs, .. } = &element.kind else {
-            unreachable!("a generator is `v in X`")
+        let (lhs, iterable) = match &element.kind {
+            ast::ExprKind::Binary { lhs, rhs, .. } => (lhs, self.expr(rhs)),
+            // `d in Days` goes through an enumeration; `x in Int` would make a Domain.
+            ast::ExprKind::TypeTest { value, ty } => {
+                let values = match &ty.kind {
+                    ast::TypeExprKind::Named { module, name, args }
+                        if module.is_empty()
+                            && args.is_empty()
+                            && self.named_types.contains_key(&name.name) =>
+                    {
+                        self.enum_values(&name.name, ty.span)
+                    }
+                    _ => None,
+                };
+                if values.is_none() {
+                    self.not_implemented(
+                        element.span,
+                        "comprehensions over a type, which make a `Domain`",
+                        "§16.5",
+                    );
+                    return None;
+                }
+                (value, values)
+            }
+            _ => unreachable!("a generator is `v in X`"),
         };
         let ast::ExprKind::Name(name) = &lhs.kind else { unreachable!("a generator is `v in X`") };
-        if let ast::ExprKind::TypeName(_) = rhs.kind {
-            self.not_implemented(element.span, "comprehensions over a type, which make a `Domain`", "§16.5");
-            return None;
-        }
-        let iterable = self.expr(rhs)?;
+        let rhs = element;
+        let iterable = iterable?;
         let Some(element_type) = iterable.ty.element() else {
             self.diagnostics.push(
                 Diagnostic::error(format!("a generator cannot go through {}", article(iterable.ty)))
@@ -300,7 +390,9 @@ impl Checker<'_> {
             return Some(typed(ir::ExprKind::Field { object: Box::new(object), field }, ty, span));
         }
         let (property, ty) = match (object.ty, name.name.as_str()) {
-            (Type::List(_) | Type::Text | Type::Range, "size") => (ir::Property::Size, Type::Int),
+            (Type::List(_) | Type::Set(_) | Type::Text | Type::Range, "size") => {
+                (ir::Property::Size, Type::Int)
+            }
             (Type::List(element), "first") => (ir::Property::First, element.get()),
             (Type::List(element), "last") => (ir::Property::Last, element.get()),
             (Type::List(_), "add") => {
@@ -336,7 +428,7 @@ impl Checker<'_> {
         list: ir::Expr,
         span: Span,
     ) -> Option<ir::Expr> {
-        let Type::List(element) = list.ty else { unreachable!("a list") };
+        let (Type::List(element) | Type::Set(element)) = list.ty else { unreachable!("a list or a set") };
         let element = element.get();
         let value =
             if value.ty == Type::Int && element == Type::Float { widen(value, Type::Float) } else { value };
@@ -348,8 +440,8 @@ impl Checker<'_> {
             );
             return None;
         }
-        let kind =
-            ir::ExprKind::Binary { op: ir::BinaryOp::InList, lhs: Box::new(value), rhs: Box::new(list) };
+        let op = if matches!(list.ty, Type::Set(_)) { ir::BinaryOp::InSet } else { ir::BinaryOp::InList };
+        let kind = ir::ExprKind::Binary { op, lhs: Box::new(value), rhs: Box::new(list) };
         Some(typed(kind, Type::Bool, span))
     }
 
@@ -389,7 +481,7 @@ impl Checker<'_> {
         let ty = path.ty();
         let expected = if adding {
             match ty {
-                Type::List(element) => element.get(),
+                Type::List(element) | Type::Set(element) => element.get(),
                 other => {
                     self.diagnostics.push(
                         Diagnostic::error(format!("`add` adds to a List, not to {}", article(other)))

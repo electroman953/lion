@@ -19,7 +19,6 @@ const SUPPORTED: &[(&str, Type)] = &[
 /// Types of the spec that this version does not support yet, with their section.
 const PLANNED: &[(&str, &str, &str)] = &[
     ("Rational", "Rational numbers", "§8.3"),
-    ("Set", "collections", "§16"),
     ("Domain", "collections", "§16"),
     ("Range", "collections", "§16"),
     ("Map", "collections", "§16"),
@@ -31,6 +30,7 @@ const PLANNED: &[(&str, &str, &str)] = &[
 pub(crate) fn is_standard_type(name: &str) -> bool {
     // `Bool = {true, false}` is an enumeration of the standard library (D45).
     name == "List"
+        || name == "Set"
         || SUPPORTED.iter().any(|(known, _)| *known == name)
         || PLANNED.iter().any(|(p, ..)| *p == name)
 }
@@ -50,7 +50,11 @@ impl Checker<'_> {
                     members.iter().map(|member| self.resolve_type(member)).collect();
                 return members.into_iter().collect::<Option<Vec<Type>>>().map(Type::union);
             }
-            ast::TypeExprKind::Tuple(_) => ("tuples", "§16"),
+            ast::TypeExprKind::Tuple(elements) => {
+                let elements: Vec<Option<Type>> =
+                    elements.iter().map(|element| self.resolve_type(element)).collect();
+                return elements.into_iter().collect::<Option<Vec<Type>>>().map(Type::tuple);
+            }
             ast::TypeExprKind::Fun { .. } => ("function types", "§7.2, §11"),
         };
         self.not_implemented(ty.span, what, section);
@@ -58,16 +62,20 @@ impl Checker<'_> {
     }
 
     fn named_type(&mut self, name: &ast::Ident, args: &[ast::TypeExpr], ty: &ast::TypeExpr) -> Option<Type> {
-        if name.name == "List" {
+        if name.name == "List" || name.name == "Set" {
             let [element] = args else {
                 self.diagnostics.push(
-                    Diagnostic::error("`List` takes the type of its elements: `List of Int`")
-                        .with_primary(ty.span, "")
-                        .with_note("`of` gives the type parameters of a generic type (§15.1)"),
+                    Diagnostic::error(format!(
+                        "`{0}` takes the type of its elements: `{0} of Int`",
+                        name.name
+                    ))
+                    .with_primary(ty.span, "")
+                    .with_note("`of` gives the type parameters of a generic type (§15.1)"),
                 );
                 return None;
             };
-            return self.resolve_type(element).map(Type::list);
+            let element = self.resolve_type(element)?;
+            return Some(if name.name == "List" { Type::list(element) } else { Type::set(element) });
         }
         if let Some(&index) = self.struct_names.get(&name.name) {
             if !args.is_empty() {
@@ -98,7 +106,7 @@ impl Checker<'_> {
                 .iter()
                 .map(|(known, _)| *known)
                 .chain(PLANNED.iter().map(|(p, ..)| *p))
-                .chain(["List"])
+                .chain(["List", "Set"])
                 .chain(self.type_spans.keys().map(String::as_str));
             let mut error = Diagnostic::error(format!("cannot find the type `{}`", name.name))
                 .with_primary(name.span, "unknown type");

@@ -1,0 +1,93 @@
+exit: 1
+----- stdout
+----- stderr
+error: with several generators, a comprehension starts with its result
+  --> tests/errors/sets.lion:3:14
+   |
+ 3 | let pairs = {p in [1], q in [2]}
+   |              ^^^^^^^^
+   |
+   = help: write the result first: `{(a, b), a in A, b in B}` (§16.4)
+
+error: not implemented yet: comprehensions over a type, which make a `Domain`
+  --> tests/errors/sets.lion:4:17
+   |
+ 4 | let positive = {x in Int, x > 0}
+   |                 ^^^^^^^^
+   |
+   = this part of Lion (spec §16.5) is not supported by this version of the implementation
+
+error: the type of this empty set is not known
+  --> tests/errors/sets.lion:5:9
+   |
+ 5 | let e = {}
+   |         ^^
+   |
+   = help: write its type: `var s = {} in Set of Int`
+
+error: `union` needs two Sets of the same type, not a Set of Int and a List of Int
+  --> tests/errors/sets.lion:6:15
+   |
+ 6 | let mixed = a union [3]
+   |             - this is a Set of Int
+   |               ^^^^^
+   |                     --- this is a List of Int
+   |
+   = help: a list keeps order and repetitions; build a Set with `{x, x in l}` (§16.4)
+
+error: `union` needs two Sets of the same type, not a Set of Text and a Set of Int
+  --> tests/errors/sets.lion:7:19
+   |
+ 7 | let words = {"a"} union a
+   |             ----- this is a Set of Text
+   |                   ^^^^^
+   |                         - this is a Set of Int
+
+error: cannot change the content of the constant `s`
+  --> tests/errors/sets.lion:9:1
+   |
+ 8 | let s = {1, 2}
+   |     - declared with `let`
+ 9 | s.add(3)
+   | ^
+   |
+   = a value held by `let` never changes, nor does its content (§6.4)
+   = help: to change it, declare it with `var`: `var s = ...`
+
+error: the elements of a tuple have no name
+   --> tests/errors/sets.lion:10:14
+    |
+ 10 | let named = (name: "Léa", grade: 12)
+    |              ^^^^
+    |
+    = help: names give the fields of a structure: `(...) as Student` (§12.2)
+
+error: `<` is not defined for Set of Int values
+   --> tests/errors/sets.lion:11:8
+    |
+ 11 | show(a < a)
+    |        ^
+    |
+    = `<`, `>`, `<=` and `>=` compare Int and Float values
+    = Lion 0.1 does not define an order on Set of Int
+    = help: to test the inclusion of a Set in another, write `a subset b` (§16.6)
+
+error: a Set of Int does not hold a Text
+   --> tests/errors/sets.lion:12:6
+    |
+ 12 | show("a" in a)
+    |      ^^^ this is a Text
+    |
+    = Lion 0.1 does not define membership between values of different types
+
+error: cannot compare a tuple (Int, Text) with a tuple (Int, Int)
+   --> tests/errors/sets.lion:14:8
+    |
+ 14 | show(t == (1, 2))
+    |      - this is a tuple (Int, Text)
+    |        ^^
+    |           ------ this is a tuple (Int, Int)
+    |
+    = Lion 0.1 does not define comparisons between values of different types
+
+10 errors found

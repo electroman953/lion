@@ -4,8 +4,8 @@ exit: 1
 error: not implemented yet: collections
   --> tests/errors/not_implemented.lion:1:10
    |
- 1 | var l in Set of Int
-   |          ^^^^^^^^^^
+ 1 | var l in Map of (Text, Int)
+   |          ^^^^^^^^^^^^^^^^^^
    |
    = this part of Lion (spec §16) is not supported by this version of the implementation
 

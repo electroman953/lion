@@ -728,6 +728,30 @@ impl<'a> Checker<'a> {
             Const::Enum(enumeration, value) => {
                 (ir::ExprKind::Enum { enumeration: *enumeration, value: *value }, Type::Enum(*enumeration))
             }
+            Const::Set(elements) => {
+                let set = ty
+                    .members()
+                    .into_iter()
+                    .find(|member| matches!(member, Type::Set(_)))
+                    .expect("a set goes where a set is expected");
+                let element = set.element().expect("a set has elements");
+                let elements = elements.iter().map(|value| self.const_expr(value, element, span)).collect();
+                (ir::ExprKind::Set(elements), set)
+            }
+            Const::Tuple(elements) => {
+                let tuple = ty
+                    .members()
+                    .into_iter()
+                    .find(|member| matches!(member, Type::Tuple(_)))
+                    .expect("a tuple goes where a tuple is expected");
+                let Type::Tuple(types) = tuple else { unreachable!("a tuple type") };
+                let elements = elements
+                    .iter()
+                    .zip(types.elements())
+                    .map(|(value, ty)| self.const_expr(value, ty, span))
+                    .collect();
+                (ir::ExprKind::Tuple(elements), tuple)
+            }
             Const::Struct(structure, values) => {
                 let fields = &self.structs[self.struct_index(*structure)].fields;
                 let values = values
@@ -756,7 +780,7 @@ fn names_in(expr: &ast::Expr, names: &mut Vec<String>) {
             }
         }
         Paren(inner) | Try(inner) => names_in(inner, names),
-        List(elements) => elements.iter().for_each(|element| names_in(element, names)),
+        List(elements) | Set(elements) => elements.iter().for_each(|element| names_in(element, names)),
         Tuple(elements) => elements.iter().for_each(|element| names_in(&element.value, names)),
         Unary { operand, .. } => names_in(operand, names),
         Binary { lhs, rhs, .. } => {

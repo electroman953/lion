@@ -56,6 +56,8 @@ pub enum BugKind {
     SliceOutOfRange { start: i64, end: i64, size: usize },
     /// `l.first` or `l.last` of an empty list (D38).
     EmptyList,
+    /// NaN, or a value that holds NaN, added to a Set (§8.2, §16).
+    NanInSet,
     /// A value of a structure no longer satisfies its invariants after a change (§12.3,
     /// D40). `detail` names the condition and the values of its fields.
     BrokenInvariant { structure: String, detail: String },
@@ -76,6 +78,7 @@ impl BugKind {
             BugKind::IndexOutOfRange { .. } => "index out of range".to_string(),
             BugKind::SliceOutOfRange { .. } => "extract out of range".to_string(),
             BugKind::EmptyList => "the list is empty".to_string(),
+            BugKind::NanInSet => "NaN cannot go in a Set".to_string(),
             BugKind::BrokenInvariant { structure, .. } => {
                 format!("this change breaks an invariant of {structure}")
             }
@@ -113,6 +116,9 @@ impl BugKind {
                 format!("{start}..{end} is not inside 1..{size}")
             }
             BugKind::EmptyList => "an empty list has no first or last element".to_string(),
+            BugKind::NanInSet => {
+                "NaN is not equal to itself, so a Set could not tell whether it holds it (§8.2)".to_string()
+            }
         }
     }
 
@@ -138,6 +144,7 @@ impl BugKind {
                 "check the index against `size` first; the last element is at `size`, or `last`".to_string()
             }
             BugKind::EmptyList => "check that `size > 0` first".to_string(),
+            BugKind::NanInSet => "check the values first: `x == x` is false only for NaN".to_string(),
             BugKind::BrokenInvariant { .. } => {
                 "a value must satisfy its conditions after each change, and when the outermost `var self` method on it returns: check the values before changing them (§12.3)".to_string()
             }

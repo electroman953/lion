@@ -23,12 +23,12 @@ error: not implemented yet: anonymous functions
    |
    = this part of Lion (spec §11.1) is not supported by this version of the implementation
 
-error: not implemented yet: sets and comprehensions
-  --> tests/parser/unsupported.lion:7:9
+error: not implemented yet: tasks
+  --> tests/parser/unsupported.lion:7:11
    |
- 7 | let s = {1, 2}
-   |         ^
+ 7 | let job = task f()
+   |           ^^^^
    |
-   = this part of Lion (spec §16) is not supported by this version of the implementation
+   = this part of Lion (spec §19.1) is not supported by this version of the implementation
 
 3 errors found

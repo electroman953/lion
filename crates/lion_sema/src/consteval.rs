@@ -23,6 +23,9 @@ pub(crate) enum Const {
     List(Vec<Const>),
     Struct(StructRef, Vec<Const>),
     Enum(EnumRef, u32),
+    /// Without repetitions, in the order of their first appearance.
+    Set(Vec<Const>),
+    Tuple(Vec<Const>),
 }
 
 impl Const {
@@ -35,6 +38,12 @@ impl Const {
             (Const::Text(a), Const::Text(b)) => a == b,
             (Const::None, Const::None) => true,
             (Const::Enum(a, x), Const::Enum(b, y)) => a == b && x == y,
+            (Const::Set(a), Const::Set(b)) => {
+                a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| x.equals(y)))
+            }
+            (Const::Tuple(a), Const::Tuple(b)) => {
+                a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.equals(y))
+            }
             (Const::List(a), Const::List(b)) => {
                 a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.equals(y))
             }
@@ -52,6 +61,17 @@ impl Const {
             Const::Text(text) => quote_text(text),
             Const::None => "none".to_string(),
             Const::Enum(enumeration, value) => enumeration.values()[*value as usize].clone(),
+            Const::Set(elements) => {
+                let elements: Vec<String> = elements.iter().map(|element| element.literal(fields)).collect();
+                format!("{{{}}}", elements.join(", "))
+            }
+            Const::Tuple(elements) => {
+                let elements: Vec<String> = elements.iter().map(|element| element.literal(fields)).collect();
+                match elements.as_slice() {
+                    [single] => format!("({single},)"),
+                    _ => format!("({})", elements.join(", ")),
+                }
+            }
             Const::List(elements) => {
                 let elements: Vec<String> = elements.iter().map(|element| element.literal(fields)).collect();
                 format!("[{}]", elements.join(", "))
@@ -126,6 +146,23 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
         ir::ExprKind::List(elements) => {
             Const::List(elements.iter().map(|element| eval(element, env)).collect::<Option<_>>()?)
         }
+        ir::ExprKind::Tuple(elements) => {
+            Const::Tuple(elements.iter().map(|element| eval(element, env)).collect::<Option<_>>()?)
+        }
+        ir::ExprKind::Set(elements) => {
+            let mut set: Vec<Const> = Vec::new();
+            for element in elements {
+                let value = eval(element, env)?;
+                // NaN in a Set is a bug, which the run reports (§8.2).
+                if !value.equals(&value) {
+                    return None;
+                }
+                if !set.iter().any(|known| known.equals(&value)) {
+                    set.push(value);
+                }
+            }
+            Const::Set(set)
+        }
         ir::ExprKind::Concat(parts) => {
             let mut text = String::new();
             for part in parts {
@@ -135,7 +172,9 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
             Const::Text(text)
         }
         ir::ExprKind::Property { object, property } => match (property, eval(object, env)?) {
-            (ir::Property::Size, Const::List(elements)) => Const::Int(elements.len() as i64),
+            (ir::Property::Size, Const::List(elements) | Const::Set(elements)) => {
+                Const::Int(elements.len() as i64)
+            }
             (ir::Property::Size, Const::Text(text)) => Const::Int(text.chars().count() as i64),
             (ir::Property::First, Const::List(elements)) => elements.first()?.clone(),
             (ir::Property::Last, Const::List(elements)) => elements.last()?.clone(),
@@ -187,7 +226,9 @@ fn binary(op: BinaryOp, lhs: Const, rhs: Const) -> Option<Const> {
         (NeNone, _, _) => Bool(false),
         (EqValue, a, b) => Bool(a.equals(&b)),
         (NeValue, a, b) => Bool(!a.equals(&b)),
-        (InList, value, Const::List(elements)) => Bool(elements.iter().any(|element| element.equals(&value))),
+        (InList | InSet, value, Const::List(elements) | Const::Set(elements)) => {
+            Bool(elements.iter().any(|element| element.equals(&value)))
+        }
         _ => return None,
     })
 }

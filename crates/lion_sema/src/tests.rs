@@ -147,7 +147,7 @@ fn one_mistake_gives_one_message() {
 
 #[test]
 fn unsupported_types_are_reported() {
-    assert_eq!(errors("var s in Set of Int"), ["not implemented yet: collections"]);
+    assert_eq!(errors("var s in Map of (Text, Int)"), ["not implemented yet: collections"]);
 }
 
 #[test]
@@ -416,4 +416,23 @@ fn named_unions() {
     let text = "struct Circle:\n    r in Float\n;\nstruct Rect:\n    w in Float\n;\nShape = Circle or Rect\nfun f(s in Shape) = 1\nshow(f(Circle(1.0)))";
     assert!(check_text(text).is_ok());
     assert_eq!(errors("A = B\nB = A"), ["the type `A` is defined by itself"]);
+}
+
+#[test]
+fn sets_and_tuples() {
+    assert_eq!(body("let s = {1, 2, 1}"), "s#0 = (set 1 2 1)");
+    assert_eq!(body("let s = {1, 2}\nlet b = 1 in s"), "s#0 = (set 1 2)\nb#1 = (in_set 1 s#0)");
+    assert_eq!(body("let s = {1} union {2}"), "s#0 = (union (set 1) (set 2))");
+    assert_eq!(body("let t = (1, \"a\")"), "t#0 = (tuple 1 \"a\")");
+    let ir = check_text("let s = {x, x in [1, 2]}").unwrap();
+    assert!(ir.contains("s#0 let Set of Int"), "{ir}");
+    assert_eq!(errors("let s = {}"), ["the type of this empty set is not known"]);
+    assert_eq!(
+        errors("let s = {1} union [2]"),
+        ["`union` needs two Sets of the same type, not a Set of Int and a List of Int"]
+    );
+    assert_eq!(
+        errors("let s = {a in [1], b in [2]}"),
+        ["with several generators, a comprehension starts with its result"]
+    );
 }

@@ -3,6 +3,7 @@ use std::rc::Rc;
 use lion_runtime::format::{format_float, quote_text};
 
 use crate::bytecode::{EnumLayout, Layout};
+use crate::set::SetValue;
 
 /// A value in a register of the virtual machine.
 #[derive(Clone, Debug, Default)]
@@ -23,6 +24,10 @@ pub enum Value {
     Struct(Rc<Record>),
     /// A value of an enumeration, by its position (§13.1).
     Enum(Rc<EnumLayout>, u32),
+    /// A Set, copied only when it is changed while shared (§16.1).
+    Set(Rc<SetValue>),
+    /// A tuple (§4.5).
+    Tuple(Rc<Vec<Value>>),
     /// A reference to a register of the stack, held by a `var` parameter (§11.2).
     Ref(u32),
 }
@@ -61,6 +66,17 @@ impl Value {
                 format!("{}({})", record.layout.name, fields.join(", "))
             }
             Value::Enum(enumeration, value) => enumeration.values[*value as usize].clone(),
+            Value::Set(set) => {
+                let elements: Vec<String> = set.items().iter().map(Value::literal).collect();
+                format!("{{{}}}", elements.join(", "))
+            }
+            Value::Tuple(elements) => {
+                let elements: Vec<String> = elements.iter().map(Value::literal).collect();
+                match elements.as_slice() {
+                    [single] => format!("({single},)"),
+                    _ => format!("({})", elements.join(", ")),
+                }
+            }
             Value::Ref(_) => "<reference>".to_string(),
         }
     }
@@ -85,6 +101,8 @@ impl Value {
                 | Value::Range(_)
                 | Value::Struct(_)
                 | Value::Enum(..)
+                | Value::Set(_)
+                | Value::Tuple(_)
         )
     }
 
@@ -101,6 +119,8 @@ impl Value {
             Value::Error(_) => kinds::ERROR,
             Value::Struct(_) => kinds::STRUCT,
             Value::Enum(..) => kinds::ENUM,
+            Value::Set(_) => kinds::SET,
+            Value::Tuple(_) => kinds::TUPLE,
             Value::Ref(_) => 0,
         }
     }
@@ -119,6 +139,10 @@ impl Value {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals(y))
             }
             (Value::Enum(a, x), Value::Enum(b, y)) => a.index == b.index && x == y,
+            (Value::Set(a), Value::Set(b)) => a.equals(b),
+            (Value::Tuple(a), Value::Tuple(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals(y))
+            }
             // Field by field (§12.5).
             (Value::Struct(a), Value::Struct(b)) => {
                 a.layout.index == b.layout.index && a.fields.iter().zip(&b.fields).all(|(x, y)| x.equals(y))
@@ -139,6 +163,8 @@ impl Value {
             Value::List(_) => "List",
             Value::Struct(_) => "structure",
             Value::Enum(..) => "enumeration",
+            Value::Set(_) => "Set",
+            Value::Tuple(_) => "tuple",
             Value::Ref(_) => "reference",
         }
     }
@@ -157,4 +183,6 @@ pub mod kinds {
     pub const ERROR: u16 = 1 << 7;
     pub const STRUCT: u16 = 1 << 8;
     pub const ENUM: u16 = 1 << 9;
+    pub const SET: u16 = 1 << 10;
+    pub const TUPLE: u16 = 1 << 11;
 }

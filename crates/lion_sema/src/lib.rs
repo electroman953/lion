@@ -390,6 +390,7 @@ fn article(ty: Type) -> String {
         Type::Error => "an Error".to_string(),
         Type::None => "`none`".to_string(),
         Type::Union(_) => format!("a value of type `{ty}`"),
+        Type::Tuple(_) => format!("a tuple {ty}"),
         other => format!("a {other}"),
     }
 }

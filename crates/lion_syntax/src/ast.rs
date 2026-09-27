@@ -230,6 +230,8 @@ pub enum ExprKind {
     /// `[a, b, c]`, or a comprehension `[f(x), x in values, condition]` when an element
     /// is `v in X` with a new name `v` (§16.4, §26 rule 4).
     List(Vec<Expr>),
+    /// `{a, b}`, or a comprehension `{f(x), x in values, condition}` (§16.1, §16.4).
+    Set(Vec<Expr>),
     Unary {
         op: UnaryOp,
         operand: Box<Expr>,

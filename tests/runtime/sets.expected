@@ -1,0 +1,46 @@
+exit: 2
+----- stdout
+{3, 1, 2}
+3
+true
+false
+{3, 1, 2, 4}
+{3, 2}
+{1}
+true
+true
+true
+{"x", "y"}
+{9, 4, 1, 0}
+{2, 4, 6, 8, 10}
+30
+{(1, 10), (1, 20), (2, 10), (2, 20)}
+true
+("Léa", 12)
+(1,)
+()
+2
+3
+4
+[3, 1, 2]
+{tue, wed}
+[mon, tue, wed]
+----- stderr
+alert: this operation produced NaN
+   --> tests/runtime/sets.lion:37:11
+    |
+ 37 | let nan = 0.0 / 0.0
+    |           ^^^^^^^^^
+    |
+    = Float follows IEEE 754 (§8.2)
+    = alerts are reported only in interpreted mode, once per location (§22.3)
+
+bug: NaN cannot go in a Set
+   --> tests/runtime/sets.lion:38:11
+    |
+ 38 | let bad = {1.0, nan}
+    |           ^^^^^^^^^^
+    |
+    = NaN is not equal to itself, so a Set could not tell whether it holds it (§8.2)
+    = help: check the values first: `x == x` is false only for NaN
+

@@ -16,6 +16,10 @@ pub enum Type {
     Range,
     /// `List of T` (§16.1).
     List(TypeRef),
+    /// `Set of T`: without order nor repetition (§16.1).
+    Set(TypeRef),
+    /// `(A, B)`: a tuple, whose elements have these types (§4.5).
+    Tuple(TupleRef),
     /// A failure that the program must handle (§18.1). For now, the errors made by
     /// `error(...)` and by the standard library.
     Error,
@@ -34,6 +38,14 @@ impl Type {
 
     pub fn list(element: Type) -> Type {
         Type::List(TypeRef::new(element))
+    }
+
+    pub fn set(element: Type) -> Type {
+        Type::Set(TypeRef::new(element))
+    }
+
+    pub fn tuple(elements: Vec<Type>) -> Type {
+        Type::Tuple(TupleRef::new(elements))
     }
 
     /// `A or B or ...`, flattened, without repetitions; a single member is that member.
@@ -90,7 +102,7 @@ impl Type {
     pub fn element(self) -> Option<Type> {
         match self {
             Type::Range => Some(Type::Int),
-            Type::List(element) => Some(element.get()),
+            Type::List(element) | Type::Set(element) => Some(element.get()),
             _ => None,
         }
     }
@@ -110,6 +122,17 @@ impl fmt::Display for Type {
                 union @ Type::Union(_) => write!(f, "List of ({union})"),
                 element => write!(f, "List of {element}"),
             },
+            Type::Set(element) => match element.get() {
+                union @ Type::Union(_) => write!(f, "Set of ({union})"),
+                element => write!(f, "Set of {element}"),
+            },
+            Type::Tuple(tuple) => {
+                let elements: Vec<String> = tuple.elements().iter().map(Type::to_string).collect();
+                match elements.as_slice() {
+                    [single] => write!(f, "({single},)"),
+                    _ => write!(f, "({})", elements.join(", ")),
+                }
+            }
             Type::Error => f.write_str("Error"),
             Type::Struct(structure) => f.write_str(&structure.name()),
             Type::Enum(enumeration) => f.write_str(&enumeration.name()),
@@ -197,6 +220,33 @@ impl fmt::Debug for EnumRef {
     }
 }
 
+/// The types of the elements of a tuple, stored once for the whole process.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TupleRef(u32);
+
+impl TupleRef {
+    fn new(elements: Vec<Type>) -> TupleRef {
+        let mut interner = interner().lock().expect("the type interner is never poisoned");
+        if let Some(&id) = interner.tuple_ids.get(&elements) {
+            return TupleRef(id);
+        }
+        let id = interner.tuples.len() as u32;
+        interner.tuples.push(elements.clone());
+        interner.tuple_ids.insert(elements, id);
+        TupleRef(id)
+    }
+
+    pub fn elements(self) -> Vec<Type> {
+        interner().lock().expect("the type interner is never poisoned").tuples[self.0 as usize].clone()
+    }
+}
+
+impl fmt::Debug for TupleRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.elements())
+    }
+}
+
 /// The members of a union type, stored once for the whole process.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UnionRef(u32);
@@ -237,6 +287,8 @@ struct Interner {
     union_ids: HashMap<Vec<Type>, u32>,
     structs: Vec<String>,
     enums: Vec<EnumData>,
+    tuples: Vec<Vec<Type>>,
+    tuple_ids: HashMap<Vec<Type>, u32>,
 }
 
 fn interner() -> &'static Mutex<Interner> {

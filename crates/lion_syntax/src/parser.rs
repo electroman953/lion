@@ -1150,9 +1150,7 @@ impl<'t> Parser<'t> {
             TokenKind::TextStart => return self.text(),
             TokenKind::LParen => return self.parenthesized(),
             TokenKind::LBracket => return self.list(),
-            TokenKind::LBrace => {
-                return Err(self.not_implemented(span, "sets and comprehensions", "§16"));
-            }
+            TokenKind::LBrace => return self.set(),
             TokenKind::Keyword(Keyword::SelfValue) => ExprKind::Name("self".to_string()),
             _ => return Err(self.expected("an expression")),
         };
@@ -1186,6 +1184,22 @@ impl<'t> Parser<'t> {
     }
 
     /// `(expr)`, or a tuple: `()`, `(x,)`, `(a, b)`, `(name: a, grade: b)` (§4.5, D56).
+    /// `{a, b, c}` or a set comprehension; newlines are ignored inside the braces (§5.1).
+    fn set(&mut self) -> PResult<Expr> {
+        let start = self.bump().span;
+        let mut elements = Vec::new();
+        if !self.at(&TokenKind::RBrace) {
+            loop {
+                elements.push(self.nested(Self::expr)?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+        let end = self.expect(&TokenKind::RBrace, "`,` or `}`")?;
+        Ok(Expr { kind: ExprKind::Set(elements), span: start.to(end) })
+    }
+
     fn parenthesized(&mut self) -> PResult<Expr> {
         let start = self.bump().span;
         if self.at(&TokenKind::RParen) {

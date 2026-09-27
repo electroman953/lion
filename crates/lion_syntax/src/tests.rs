@@ -175,7 +175,6 @@ fn unsupported_constructions_are_reported() {
     let cases = [
         ("parallel for f in files: show(f) ;", "not implemented yet: parallelism"),
         ("trait S:\n;", "not implemented yet: traits"),
-        ("let s = {1, 2}", "not implemented yet: sets and comprehensions"),
     ];
     for (text, message) in cases {
         assert_eq!(first_error(text), message, "for {text:?}");
@@ -456,4 +455,12 @@ fn type_definitions() {
     assert_eq!(ast("Shape = Circle or Rect"), "(type Shape (or Circle Rect))");
     assert_eq!(ast("let c = Color.red"), "(let c (. Color red))");
     assert_eq!(first_error("Color = {Red}"), "the value `Red` needs a lowercase name");
+}
+
+#[test]
+fn sets() {
+    assert_eq!(ast("let s = {1, 2}"), "(let s (set 1 2))");
+    assert_eq!(ast("let s = {}"), "(let s (set))");
+    assert_eq!(ast("let s = {x * 2, x in l, x > 1}"), "(let s (set (* x 2) (in x l) (> x 1)))");
+    assert_eq!(ast("let u = a union b inter c"), "(let u (union a (inter b c)))");
 }

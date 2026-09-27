@@ -102,6 +102,15 @@ pub enum Instr {
     NextRange { range: Reg, counter: Reg, target: u32 },
 
     MakeList { dst: Reg, start: Reg, count: u32 },
+    /// A Set of the values of the `count` registers from `start`, without repetitions.
+    MakeSet { dst: Reg, start: Reg, count: u32 },
+    MakeTuple { dst: Reg, start: Reg, count: u32 },
+    /// Whether the value in `a` is an element of the Set in `b`.
+    InSet { dst: Reg, a: Reg, b: Reg },
+    SetUnion { dst: Reg, a: Reg, b: Reg },
+    SetInter { dst: Reg, a: Reg, b: Reg },
+    SetMinus { dst: Reg, a: Reg, b: Reg },
+    Subset { dst: Reg, a: Reg, b: Reg },
     /// An element of a List, or a character of a Text, from 1 (§16.2).
     GetIndex { dst: Reg, object: Reg, index: Reg },
     /// `l[a..b]` of a List or a Text (D41).
@@ -115,7 +124,7 @@ pub enum Instr {
     /// Equality of content of any two values of the same type.
     EqValue { dst: Reg, a: Reg, b: Reg },
     NeValue { dst: Reg, a: Reg, b: Reg },
-    /// Starts going through a List: jumps to `target` when it is empty.
+    /// Starts going through a List or a Set: jumps to `target` when it is empty.
     ForList { list: Reg, counter: Reg, target: u32 },
     /// The element at the position in `counter`, counted from 0.
     ElementAt { dst: Reg, list: Reg, counter: Reg },
@@ -125,7 +134,8 @@ pub enum Instr {
     /// `indices ..`: an Int is an index from 1 in a List, or the position of a field,
     /// from 0, in a structure.
     StoreElement { target: Target, indices: Reg, depth: u32, src: Reg },
-    /// Adds at the end of the list reached from `target` through the indices.
+    /// Adds at the end of the List, or to the Set, reached from `target` through the
+    /// indices.
     AddElement { target: Target, indices: Reg, depth: u32, src: Reg },
     SumInt { dst: Reg, values: Reg },
     SumFloat { dst: Reg, values: Reg },

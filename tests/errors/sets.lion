@@ -1,0 +1,14 @@
+// Mistakes with Sets and tuples (§16).
+let a = {1, 2}
+let pairs = {p in [1], q in [2]}
+let positive = {x in Int, x > 0}
+let e = {}
+let mixed = a union [3]
+let words = {"a"} union a
+let s = {1, 2}
+s.add(3)
+let named = (name: "Léa", grade: 12)
+show(a < a)
+show("a" in a)
+let t = (1, "a")
+show(t == (1, 2))

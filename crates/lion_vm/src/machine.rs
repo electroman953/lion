@@ -9,6 +9,7 @@ use lion_runtime::format::format_float;
 use lion_runtime::{BugKind, MAX_CALL_DEPTH, ops};
 
 use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
+use crate::set::SetValue;
 use crate::value::{Record, Value};
 
 /// Why execution stopped before the end of the program.
@@ -349,6 +350,7 @@ impl Machine<'_> {
                 Instr::GetSize { dst, object } => {
                     let size = match &self.stack[self.base + object as usize] {
                         Value::List(elements) => elements.len() as i64,
+                        Value::Set(set) => set.len() as i64,
                         Value::Text(text) => text.chars().count() as i64,
                         Value::Range(bounds) => {
                             range_size(bounds[0], bounds[1]).map_err(|kind| self.bug(kind, at))?
@@ -408,24 +410,59 @@ impl Machine<'_> {
                 }
                 Instr::AddElement { target, indices, depth, src } => {
                     let value = self.stack[self.base + src as usize].clone();
-                    let added = self.element_mut(target, indices, depth).map(|slot| match slot {
-                        Value::List(elements) => Rc::make_mut(elements).push(value),
+                    let added = self.element_mut(target, indices, depth).and_then(|slot| match slot {
+                        Value::List(elements) => {
+                            Rc::make_mut(elements).push(value);
+                            Ok(())
+                        }
+                        Value::Set(set) => Rc::make_mut(set).insert(value).map_err(|_| BugKind::NanInSet),
                         other => {
-                            panic!("the virtual machine expected a List but found {}", other.type_name())
+                            panic!(
+                                "the virtual machine expected a List or a Set but found {}",
+                                other.type_name()
+                            )
                         }
                     });
                     added.map_err(|kind| self.bug(kind, at))?;
                 }
+                Instr::MakeSet { dst, start, count } => {
+                    let first = self.base + start as usize;
+                    let values = self.stack[first..first + count as usize].to_vec();
+                    let set = SetValue::from_values(values).map_err(|_| self.bug(BugKind::NanInSet, at))?;
+                    self.set(dst, Value::Set(Rc::new(set)));
+                }
+                Instr::MakeTuple { dst, start, count } => {
+                    let first = self.base + start as usize;
+                    let elements = self.stack[first..first + count as usize].to_vec();
+                    self.set(dst, Value::Tuple(Rc::new(elements)));
+                }
+                Instr::InSet { dst, a, b } => {
+                    let found = self.set_value(b).contains(&self.stack[self.base + a as usize]);
+                    self.set(dst, Value::Bool(found));
+                }
+                Instr::SetUnion { dst, a, b } => {
+                    let result = self.set_value(a).union(self.set_value(b));
+                    self.set(dst, Value::Set(Rc::new(result)));
+                }
+                Instr::SetInter { dst, a, b } => {
+                    let result = self.set_value(a).inter(self.set_value(b));
+                    self.set(dst, Value::Set(Rc::new(result)));
+                }
+                Instr::SetMinus { dst, a, b } => {
+                    let result = self.set_value(a).minus(self.set_value(b));
+                    self.set(dst, Value::Set(Rc::new(result)));
+                }
+                Instr::Subset { dst, a, b } => {
+                    let result = self.set_value(a).subset(self.set_value(b));
+                    self.set(dst, Value::Bool(result));
+                }
                 Instr::SumInt { dst, values } => {
                     let total = match &self.stack[self.base + values as usize] {
-                        Value::List(elements) => {
-                            elements.iter().try_fold(0i64, |total, element| match element {
-                                Value::Int(value) => ops::int_add(total, *value),
-                                other => self.mismatch("Int", other),
-                            })
-                        }
                         Value::Range(bounds) => range_sum(bounds[0], bounds[1]),
-                        other => self.mismatch("List or Range", other),
+                        _ => self.list(values).iter().try_fold(0i64, |total, element| match element {
+                            Value::Int(value) => ops::int_add(total, *value),
+                            other => self.mismatch("Int", other),
+                        }),
                     }
                     .map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, Value::Int(total));
@@ -680,10 +717,19 @@ impl Machine<'_> {
         }
     }
 
-    fn list(&self, reg: Reg) -> &Vec<Value> {
+    /// The elements of a List, or of a Set in their order.
+    fn list(&self, reg: Reg) -> &[Value] {
         match &self.stack[self.base + reg as usize] {
             Value::List(elements) => elements,
-            other => self.mismatch("List", other),
+            Value::Set(set) => set.items(),
+            other => self.mismatch("List or Set", other),
+        }
+    }
+
+    fn set_value(&self, reg: Reg) -> &SetValue {
+        match &self.stack[self.base + reg as usize] {
+            Value::Set(set) => set,
+            other => self.mismatch("Set", other),
         }
     }
 

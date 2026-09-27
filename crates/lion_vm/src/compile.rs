@@ -480,6 +480,21 @@ impl Compiler<'_> {
                 }
                 self.emit(Instr::MakeList { dst, start, count: elements.len() as u32 }, span);
             }
+            ExprKind::Set(elements) | ExprKind::Tuple(elements) => {
+                let start = self.next_temp;
+                for _ in elements {
+                    self.temp();
+                }
+                for (offset, element) in elements.iter().enumerate() {
+                    self.expr_into(element, start + offset as u32);
+                }
+                let count = elements.len() as u32;
+                let instr = match expr.kind {
+                    ExprKind::Set(_) => Instr::MakeSet { dst, start, count },
+                    _ => Instr::MakeTuple { dst, start, count },
+                };
+                self.emit(instr, span);
+            }
             ExprKind::Index { object, index } => {
                 let object = self.operand_before(object, index);
                 let index = self.operand(index);
@@ -726,7 +741,9 @@ fn calls_function(expr: &ir::Expr) -> bool {
         ExprKind::Range { start, end } => calls_function(start) || calls_function(end),
         // A comprehension may call functions from its statements.
         ExprKind::Block { .. } => true,
-        ExprKind::List(elements) => elements.iter().any(calls_function),
+        ExprKind::List(elements) | ExprKind::Set(elements) | ExprKind::Tuple(elements) => {
+            elements.iter().any(calls_function)
+        }
         ExprKind::Index { object, index } => calls_function(object) || calls_function(index),
         ExprKind::Slice { object, range } => calls_function(object) || calls_function(range),
         ExprKind::Property { object, .. } => calls_function(object),
@@ -752,6 +769,8 @@ fn kinds_of(ty: ir::Type) -> u16 {
             ir::Type::None => kinds::NONE,
             ir::Type::Range => kinds::RANGE,
             ir::Type::List(_) => kinds::LIST,
+            ir::Type::Set(_) => kinds::SET,
+            ir::Type::Tuple(_) => kinds::TUPLE,
             ir::Type::Error => kinds::ERROR,
             ir::Type::Struct(_) => kinds::STRUCT,
             ir::Type::Enum(_) => kinds::ENUM,
@@ -824,6 +843,11 @@ fn binary_instr(op: BinaryOp, dst: Reg, a: Reg, b: Reg) -> Instr {
         BinaryOp::NeText => Instr::NeText { dst, a, b },
         BinaryOp::InRange => Instr::InRange { dst, a, b },
         BinaryOp::InList => Instr::InList { dst, a, b },
+        BinaryOp::InSet => Instr::InSet { dst, a, b },
+        BinaryOp::SetUnion => Instr::SetUnion { dst, a, b },
+        BinaryOp::SetInter => Instr::SetInter { dst, a, b },
+        BinaryOp::SetMinus => Instr::SetMinus { dst, a, b },
+        BinaryOp::Subset => Instr::Subset { dst, a, b },
         BinaryOp::EqValue => Instr::EqValue { dst, a, b },
         BinaryOp::NeValue => Instr::NeValue { dst, a, b },
         BinaryOp::EqNone | BinaryOp::NeNone => unreachable!("compiled to a constant"),

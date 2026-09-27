@@ -1,0 +1,18 @@
+exit: 0
+----- stdout
+script
+  locals
+    a#0 let Set of Int
+    b#1 let Set of Int
+    c#2 let Set of Int
+    inside#3 let Bool
+    t#4 let (Int, Text)
+    x#5 let Int
+    %t#6 temp Set of Int
+  body
+    a#0 = (set 3 1 3)
+    b#1 = (block [%t#6 = (set); for x#5 in a#0; if (gt_int x#5 1); %t#6.add((mul_int x#5 2)); end; end] %t#6)
+    c#2 = (union a#0 b#1)
+    inside#3 = (in_set 2 c#2)
+    t#4 = (tuple 1 "one")
+----- stderr

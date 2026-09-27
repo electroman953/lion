@@ -8,6 +8,7 @@
 mod bytecode;
 mod compile;
 mod machine;
+mod set;
 mod value;
 
 pub use bytecode::{Chunk, Cmp, Instr, Program, Reg, Target, disassemble};

@@ -10,7 +10,7 @@ mod print;
 mod types;
 
 pub use print::print_program;
-pub use types::{EnumRef, StructRef, Type, TypeRef, UnionRef};
+pub use types::{EnumRef, StructRef, TupleRef, Type, TypeRef, UnionRef};
 
 use lion_diagnostics::Span;
 
@@ -213,6 +213,11 @@ pub enum ExprKind {
     },
     /// `[a, b, c]`.
     List(Vec<Expr>),
+    /// `{a, b, c}`: the values without repetition, in the order of their first
+    /// appearance (§16.1, C57).
+    Set(Vec<Expr>),
+    /// `(a, b)` (§4.5).
+    Tuple(Vec<Expr>),
     /// Whether the value belongs to `ty`, a set of the value's possible types (§7.1).
     TypeTest {
         value: Box<Expr>,
@@ -348,6 +353,13 @@ pub enum BinaryOp {
     /// Equality of Lists and Ranges, element by element (§9.4).
     EqValue,
     NeValue,
+    /// A value among the elements of a Set (§16.1).
+    InSet,
+    /// `a union b`, `a inter b`, `a minus b` on Sets, and `a subset b` (§16.6).
+    SetUnion,
+    SetInter,
+    SetMinus,
+    Subset,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -421,6 +433,11 @@ impl BinaryOp {
             InList => "in_list",
             EqValue => "eq_value",
             NeValue => "ne_value",
+            InSet => "in_set",
+            SetUnion => "union",
+            SetInter => "inter",
+            SetMinus => "minus",
+            Subset => "subset",
         }
     }
 }

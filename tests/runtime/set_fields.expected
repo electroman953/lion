@@ -1,0 +1,14 @@
+exit: 2
+----- stdout
+Tagged(tags: {"a"}, origin: (0, 0))
+Tagged(tags: {"a", "b"}, origin: (0, 0))
+----- stderr
+bug: this change breaks an invariant of Tagged
+   --> tests/runtime/set_fields.lion:12:1
+    |
+ 12 | t.tags.add("c")
+    | ^^^^^^
+    |
+    = tags = {"a", "b", "c"} does not satisfy tags.size <= 2
+    = help: a value must satisfy its conditions after each change, and when the outermost `var self` method on it returns: check the values before changing them (§12.3)
+
