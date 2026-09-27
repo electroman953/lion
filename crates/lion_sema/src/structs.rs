@@ -37,6 +37,8 @@ pub(crate) struct StructInfo<'a> {
     /// conditions.
     validator: Option<usize>,
     constructor: Option<usize>,
+    /// Its `equals` method, which gives its equality (§12.5).
+    pub(crate) equals: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -161,6 +163,7 @@ impl<'a> Checker<'a> {
             field_locals: Vec::new(),
             validator: None,
             constructor: None,
+            equals: None,
         });
         self.structs.len() - 1
     }

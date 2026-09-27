@@ -1,0 +1,18 @@
+exit: 0
+----- stdout
+true
+false
+true
+true
+2
+{Student(name: "Léa", grade: 14.0), Student(name: "Tom", grade: 14.0)}
+{Student(name: "Tom", grade: 14.0), Student(name: "LÉA", grade: 9.0)}
+true
+{Student(name: "Léa", grade: 14.0)}
+{Student(name: "Tom", grade: 14.0)}
+{Student(name: "Léa", grade: 14.0), Student(name: "Tom", grade: 14.0)}
+true
+true
+true
+1
+----- stderr

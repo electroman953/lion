@@ -1,35 +1,19 @@
 //! Sets (spec §16.1): values without repetition, compared with `==`, kept in the order
 //! of their first insertion so that a program shows the same thing at each run (C57).
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use crate::value::Value;
 
+/// The elements, in the order of their first insertion, and their positions by hash.
+/// Equal values have equal hashes; the values of a hash are compared with `==`, or with
+/// the `equals` of their structure, which the machine calls (§12.5).
 #[derive(Clone, Debug, Default)]
 pub struct SetValue {
     items: Vec<Value>,
-    index: HashSet<Key>,
-}
-
-/// A value as a key of the index: hashed and compared by content, as `==` does (§9.4).
-/// A NaN is never inserted, so the comparison is an equivalence on the keys.
-#[derive(Clone, Debug)]
-struct Key(Value);
-
-impl PartialEq for Key {
-    fn eq(&self, other: &Key) -> bool {
-        self.0.equals(&other.0)
-    }
-}
-
-impl Eq for Key {}
-
-impl Hash for Key {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        hash_value(&self.0, state);
-    }
+    index: HashMap<u64, Vec<u32>>,
 }
 
 /// A value is not inserted in a Set when it holds NaN, which is not equal to itself (§8.2).
@@ -49,8 +33,21 @@ impl SetValue {
         self.items.is_empty()
     }
 
+    /// The elements that may equal `value`: those of its hash.
+    pub fn candidates<'s>(&'s self, value: &Value) -> impl Iterator<Item = &'s Value> + 's {
+        let positions = self.index.get(&hash_of(value)).map(Vec::as_slice).unwrap_or_default();
+        positions.iter().map(|&position| &self.items[position as usize])
+    }
+
+    /// Whether an element is equal to `value`, with the equality of content.
     pub fn contains(&self, value: &Value) -> bool {
-        !holds_nan(value) && self.index.contains(&Key(value.clone()))
+        !holds_nan(value) && self.candidates(value).any(|element| element.equals(value))
+    }
+
+    /// Adds a value that is not NaN and that no element equals.
+    pub fn push_new(&mut self, value: Value) {
+        self.index.entry(hash_of(&value)).or_default().push(self.items.len() as u32);
+        self.items.push(value);
     }
 
     /// Adds the value, unless an equal one is there already.
@@ -58,8 +55,8 @@ impl SetValue {
         if holds_nan(&value) {
             return Err(NanInSet);
         }
-        if self.index.insert(Key(value.clone())) {
-            self.items.push(value);
+        if !self.contains(&value) {
+            self.push_new(value);
         }
         Ok(())
     }
@@ -100,8 +97,14 @@ impl SetValue {
     }
 }
 
+fn hash_of(value: &Value) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hash_value(value, &mut hasher);
+    hasher.finish()
+}
+
 /// Whether the value is NaN, or contains one.
-fn holds_nan(value: &Value) -> bool {
+pub fn holds_nan(value: &Value) -> bool {
     match value {
         Value::Float(value) => value.is_nan(),
         Value::List(elements) | Value::Tuple(elements) => elements.iter().any(holds_nan),
@@ -129,6 +132,8 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
             }
         }
         Value::Range(bounds) => (7u8, bounds[0], bounds[1]).hash(state),
+        // A structure with its own equality: only its type counts (§12.5).
+        Value::Struct(record) if record.layout.equals.is_some() => (8u8, record.layout.index).hash(state),
         Value::Struct(record) => {
             (8u8, record.layout.index).hash(state);
             for field in &record.fields {

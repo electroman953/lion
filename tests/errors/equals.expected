@@ -1,0 +1,28 @@
+exit: 1
+----- stdout
+----- stderr
+error: `equals` is declared `fun Point.equals(other in Point) in Bool`
+  --> tests/errors/equals.lion:5:11
+   |
+ 5 | fun Point.equals(other in Int) in Bool = self.x == other
+   |           ^^^^^^
+   |
+   = it gives the equality of the structure, used by `==`, `in` and the Sets (§12.5)
+
+error: the equality of Int cannot be redefined
+  --> tests/errors/equals.lion:6:9
+   |
+ 6 | fun Int.equals(other in Int) in Bool = true
+   |         ^^^^^^
+   |
+   = a structure defines its equality with `equals` (§12.5, C76)
+
+error: `equals` cannot use `calls`, a variable of the script
+   --> tests/errors/equals.lion:11:9
+    |
+ 11 | fun Tag.equals(other in Tag) in Bool:
+    |         ^^^^^^
+    |
+    = an equality runs wherever values are compared: it depends on the two values only (§12.5, C76)
+
+3 errors found

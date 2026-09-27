@@ -49,6 +49,8 @@ pub struct StructDef {
     pub id: StructRef,
     pub name: String,
     pub fields: Vec<(String, Type)>,
+    /// Its `equals` method, which gives its equality (§12.5).
+    pub equals: Option<FunctionId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -31,6 +31,20 @@ pub(crate) enum Const {
 }
 
 impl Const {
+    /// Whether the value holds a structure compared with its `equals` method, which
+    /// only the run can call (§12.5).
+    fn has_custom_equality(&self) -> bool {
+        match self {
+            Const::Struct(structure, values) => {
+                structure.has_custom_equality() || values.iter().any(Const::has_custom_equality)
+            }
+            Const::List(values) | Const::Set(values) | Const::Tuple(values) => {
+                values.iter().any(Const::has_custom_equality)
+            }
+            _ => false,
+        }
+    }
+
     /// Equality of content, as `==` (§9.4): NaN is not equal to itself.
     fn equals(&self, other: &Const) -> bool {
         match (self, other) {
@@ -165,6 +179,9 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
             let mut set: Vec<Const> = Vec::new();
             for element in elements {
                 let value = eval(element, env)?;
+                if value.has_custom_equality() {
+                    return None;
+                }
                 // NaN in a Set is a bug, which the run reports (§8.2).
                 if !value.equals(&value) {
                     return None;
@@ -204,6 +221,10 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
 }
 
 fn binary(op: BinaryOp, lhs: Const, rhs: Const) -> Option<Const> {
+    let compares = matches!(op, BinaryOp::EqValue | BinaryOp::NeValue | BinaryOp::InList | BinaryOp::InSet);
+    if compares && (lhs.has_custom_equality() || rhs.has_custom_equality()) {
+        return None;
+    }
     use BinaryOp::*;
     use Const::{Bool, Float, Int, Rational, Text};
     let exact = |op, a, b| ops::rational_op(op, a, b).ok().map(Rational);

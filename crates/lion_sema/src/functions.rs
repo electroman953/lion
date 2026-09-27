@@ -260,6 +260,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.enter_module(0);
+        self.register_equalities();
         self.conform_traits();
         self.check_pending_constraints();
         self.register_tests();
@@ -492,11 +493,6 @@ impl<'a> Checker<'a> {
                     .with_primary(decl.name.span, "")
                     .with_help("give the method another name"),
             );
-            return false;
-        }
-        // `equals` would also give the equality of Sets and of lists (§12.5).
-        if name == "equals" {
-            self.not_implemented(decl.name.span, "equality defined by a method", "§9.5, §12.5");
             return false;
         }
         true

@@ -278,6 +278,8 @@ pub struct Program {
     pub tests: Vec<(String, u32)>,
     /// The declarations of the globals of the script, which run before each test (C68).
     pub declarations: Option<Chunk>,
+    /// Whether a structure defines its equality: then comparing values may call it.
+    pub custom_equality: bool,
 }
 
 /// What a value of a structure needs to be shown and compared (§12).
@@ -287,6 +289,9 @@ pub struct Layout {
     pub index: u32,
     pub name: String,
     pub fields: Vec<String>,
+    /// The function that compares two values of the structure, when it defines
+    /// `equals` (§12.5).
+    pub equals: Option<u32>,
 }
 
 /// An enumeration, for its values to be shown and compared (§13.1).

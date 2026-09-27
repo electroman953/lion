@@ -1,14 +1,6 @@
 exit: 1
 ----- stdout
 ----- stderr
-error: not implemented yet: equality defined by a method
-  --> tests/errors/operator_methods.lion:7:9
-   |
- 7 | fun Box.equals(other in Box) in Bool = true
-   |         ^^^^^^
-   |
-   = this part of Lion (spec §9.5, §12.5) is not supported by this version of the implementation
-
 error: an `infix` method takes one value
   --> tests/errors/operator_methods.lion:8:15
    |
@@ -56,4 +48,4 @@ error: `-` cannot be applied to Box and Box
     = `-` is defined for Int, Float and Rational values
     = help: a structure gives `-` a meaning with a method: `fun Box.subtract(other in Box) in ...` (§9.5)
 
-6 errors found
+5 errors found

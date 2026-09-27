@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Mutex, OnceLock};
 
@@ -229,6 +229,17 @@ impl StructRef {
 
     pub fn name(self) -> String {
         interner().lock().expect("the type interner is never poisoned").structs[self.0 as usize].clone()
+    }
+
+    /// Marks the structure as compared with its `equals` method (§12.5).
+    pub fn set_custom_equality(self) {
+        interner().lock().expect("the type interner is never poisoned").custom_equality.insert(self.0);
+    }
+
+    /// Whether the structure is compared with its `equals` method rather than field by
+    /// field (§12.5).
+    pub fn has_custom_equality(self) -> bool {
+        interner().lock().expect("the type interner is never poisoned").custom_equality.contains(&self.0)
     }
 
     /// A number that identifies the structure while the program runs.
@@ -517,6 +528,8 @@ struct Interner {
     unions: Vec<Vec<Type>>,
     union_ids: HashMap<Vec<Type>, u32>,
     structs: Vec<String>,
+    /// The structures whose equality is their `equals` method (§12.5).
+    custom_equality: HashSet<u32>,
     enums: Vec<EnumData>,
     tuples: Vec<Vec<Type>>,
     tuple_ids: HashMap<Vec<Type>, u32>,

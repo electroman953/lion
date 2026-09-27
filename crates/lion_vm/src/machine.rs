@@ -11,7 +11,7 @@ use lion_runtime::ops::RationalOp;
 use lion_runtime::{BugKind, MAX_CALL_DEPTH, ops};
 
 use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
-use crate::set::SetValue;
+use crate::set::{SetValue, holds_nan};
 use crate::value::{Closure, Record, Value};
 
 /// Why execution stopped before the end of the program.
@@ -256,6 +256,9 @@ struct Machine<'a> {
     initialized: Vec<bool>,
     /// The failed `expect`s of the test that runs (§24.1).
     failures: Vec<Failure>,
+    /// A function that the machine calls itself, as `equals`, runs until the number of
+    /// frames goes below this.
+    stop_depth: usize,
 }
 
 impl<'a> Machine<'a> {
@@ -285,6 +288,7 @@ impl<'a> Machine<'a> {
             alerted: HashSet::new(),
             initialized: vec![false; program.module_inits.len()],
             failures: Vec::new(),
+            stop_depth: 0,
         }
     }
 
@@ -595,10 +599,16 @@ impl<'a> Machine<'a> {
                     let value = std::mem::take(&mut self.stack[self.base + src as usize]);
                     pc = self.return_to_caller(value);
                     code = &self.chunk.code;
+                    if self.frames.len() < self.stop_depth {
+                        return Ok(());
+                    }
                 }
                 Instr::ReturnNone => {
                     pc = self.return_to_caller(Value::None);
                     code = &self.chunk.code;
+                    if self.frames.len() < self.stop_depth {
+                        return Ok(());
+                    }
                 }
                 Instr::JumpIfArgs { count, target } => {
                     if self.frames.last().expect("a frame runs").args >= count {
@@ -683,20 +693,33 @@ impl<'a> Machine<'a> {
                         self.list(list).last().cloned().ok_or_else(|| self.bug(BugKind::EmptyList, at))?;
                     self.set(dst, value);
                 }
+                Instr::InList { dst, a, b } if self.program.custom_equality => {
+                    let value = self.stack[self.base + a as usize].clone();
+                    let Value::List(list) = self.stack[self.base + b as usize].clone() else {
+                        self.mismatch("List", &self.stack[self.base + b as usize])
+                    };
+                    let mut found = false;
+                    for element in list.iter() {
+                        if self.equal(element, &value, at)? {
+                            found = true;
+                            break;
+                        }
+                    }
+                    self.set(dst, Value::Bool(found));
+                }
                 Instr::InList { dst, a, b } => {
                     let value = &self.stack[self.base + a as usize];
                     let found = self.list(b).iter().any(|element| element.equals(value));
                     self.set(dst, Value::Bool(found));
                 }
-                Instr::EqValue { dst, a, b } => {
-                    let equal =
-                        self.stack[self.base + a as usize].equals(&self.stack[self.base + b as usize]);
-                    self.set(dst, Value::Bool(equal));
-                }
-                Instr::NeValue { dst, a, b } => {
-                    let equal =
-                        self.stack[self.base + a as usize].equals(&self.stack[self.base + b as usize]);
-                    self.set(dst, Value::Bool(!equal));
+                Instr::EqValue { dst, a, b } | Instr::NeValue { dst, a, b } => {
+                    let (first, second) = (
+                        self.stack[self.base + a as usize].clone(),
+                        self.stack[self.base + b as usize].clone(),
+                    );
+                    let equal = self.equal(&first, &second, at)?;
+                    let negate = matches!(code[at], Instr::NeValue { .. });
+                    self.set(dst, Value::Bool(equal != negate));
                 }
                 Instr::ForList { list, counter, target } => {
                     if self.list(list).is_empty() {
@@ -722,6 +745,36 @@ impl<'a> Machine<'a> {
                     let stored = self.element_mut(target, indices, depth).map(|slot| *slot = value);
                     stored.map_err(|kind| self.bug(kind, at))?;
                 }
+                Instr::AddElement { target, indices, depth, src } if self.program.custom_equality => {
+                    let value = self.stack[self.base + src as usize].clone();
+                    // A Set gets the value unless an element equals it, as its `equals` says.
+                    let set = match self.element_mut(target, indices, depth) {
+                        Ok(Value::Set(set)) => Some(Rc::clone(set)),
+                        _ => None,
+                    };
+                    if let Some(set) = set {
+                        if holds_nan(&value) {
+                            return Err(self.bug(BugKind::NanInSet, at));
+                        }
+                        let present = self.set_contains(&set, &value, at)?;
+                        drop(set);
+                        if !present {
+                            let added = self.element_mut(target, indices, depth).map(|slot| {
+                                let Value::Set(set) = slot else { unreachable!("a Set above") };
+                                Rc::make_mut(set).push_new(value);
+                            });
+                            added.map_err(|kind| self.bug(kind, at))?;
+                        }
+                    } else {
+                        let added = self.element_mut(target, indices, depth).map(|slot| match slot {
+                            Value::List(elements) => Rc::make_mut(elements).push(value),
+                            other => {
+                                panic!("the virtual machine expected a List but found {}", other.type_name())
+                            }
+                        });
+                        added.map_err(|kind| self.bug(kind, at))?;
+                    }
+                }
                 Instr::AddElement { target, indices, depth, src } => {
                     let value = self.stack[self.base + src as usize].clone();
                     let added = self.element_mut(target, indices, depth).and_then(|slot| match slot {
@@ -738,6 +791,50 @@ impl<'a> Machine<'a> {
                         }
                     });
                     added.map_err(|kind| self.bug(kind, at))?;
+                }
+                Instr::MakeSet { dst, start, count } if self.program.custom_equality => {
+                    let first = self.base + start as usize;
+                    let values = self.stack[first..first + count as usize].to_vec();
+                    let mut set = SetValue::default();
+                    for value in values {
+                        self.set_insert(&mut set, value, at)?;
+                    }
+                    self.set(dst, Value::Set(Rc::new(set)));
+                }
+                Instr::InSet { dst, a, b } if self.program.custom_equality => {
+                    let value = self.stack[self.base + a as usize].clone();
+                    let set = self.set_rc(b);
+                    let found = self.set_contains(&set, &value, at)?;
+                    self.set(dst, Value::Bool(found));
+                }
+                Instr::SetUnion { dst, a, b }
+                | Instr::SetInter { dst, a, b }
+                | Instr::SetMinus { dst, a, b }
+                | Instr::Subset { dst, a, b }
+                    if self.program.custom_equality =>
+                {
+                    let (first, second) = (self.set_rc(a), self.set_rc(b));
+                    let result = match code[at] {
+                        Instr::SetUnion { .. } => {
+                            let mut result = (*first).clone();
+                            for value in second.items() {
+                                self.set_insert(&mut result, value.clone(), at)?;
+                            }
+                            Value::Set(Rc::new(result))
+                        }
+                        Instr::Subset { .. } => Value::Bool(self.set_subset(&first, &second, at)?),
+                        ref instr => {
+                            let keep_common = matches!(instr, Instr::SetInter { .. });
+                            let mut result = SetValue::default();
+                            for value in first.items() {
+                                if self.set_contains(&second, value, at)? == keep_common {
+                                    result.push_new(value.clone());
+                                }
+                            }
+                            Value::Set(Rc::new(result))
+                        }
+                    };
+                    self.set(dst, result);
                 }
                 Instr::MakeSet { dst, start, count } => {
                     let first = self.base + start as usize;
@@ -948,6 +1045,109 @@ impl<'a> Machine<'a> {
         self.chunk = callee;
         self.base = base;
         Ok(0)
+    }
+
+    /// Calls a function of the program from an instruction, as `equals`, and gives its
+    /// result. Its frame starts above the registers of the current one.
+    fn invoke(&mut self, function: u32, args: Vec<Value>, at: usize) -> Result<Value, Fault> {
+        let offset = self.chunk.registers;
+        let base = self.base + offset as usize;
+        if self.stack.len() < base + args.len() {
+            self.stack.resize(base + args.len(), Value::None);
+        }
+        let count = args.len() as u32;
+        for (position, arg) in args.into_iter().enumerate() {
+            self.stack[base + position] = arg;
+        }
+        self.call(function as usize, offset, offset, count, at + 1, at)?;
+        let outer = std::mem::replace(&mut self.stop_depth, self.frames.len());
+        let result = self.run_at(0);
+        self.stop_depth = outer;
+        result?;
+        Ok(std::mem::take(&mut self.stack[self.base + offset as usize]))
+    }
+
+    /// Equality of content (§9.4), with the `equals` of the structures that define one
+    /// (§12.5).
+    fn equal(&mut self, a: &Value, b: &Value, at: usize) -> Result<bool, Fault> {
+        if !self.program.custom_equality {
+            return Ok(a.equals(b));
+        }
+        Ok(match (a, b) {
+            (Value::Struct(x), Value::Struct(y)) if x.layout.index == y.layout.index => match x.layout.equals
+            {
+                Some(function) => match self.invoke(function, vec![a.clone(), b.clone()], at)? {
+                    Value::Bool(equal) => equal,
+                    other => self.mismatch("Bool", &other),
+                },
+                None => {
+                    let (x, y) = (Rc::clone(x), Rc::clone(y));
+                    for (first, second) in x.fields.iter().zip(&y.fields) {
+                        if !self.equal(first, second, at)? {
+                            return Ok(false);
+                        }
+                    }
+                    true
+                }
+            },
+            (Value::List(x), Value::List(y)) | (Value::Tuple(x), Value::Tuple(y)) => {
+                if x.len() != y.len() {
+                    return Ok(false);
+                }
+                let (x, y) = (Rc::clone(x), Rc::clone(y));
+                for (first, second) in x.iter().zip(y.iter()) {
+                    if !self.equal(first, second, at)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
+            (Value::Set(x), Value::Set(y)) => {
+                let (x, y) = (Rc::clone(x), Rc::clone(y));
+                x.len() == y.len() && self.set_subset(&x, &y, at)?
+            }
+            _ => a.equals(b),
+        })
+    }
+
+    /// Whether an element of the Set equals `value`, as the machine compares values.
+    fn set_contains(&mut self, set: &SetValue, value: &Value, at: usize) -> Result<bool, Fault> {
+        if holds_nan(value) {
+            return Ok(false);
+        }
+        let candidates: Vec<Value> = set.candidates(value).cloned().collect();
+        for candidate in &candidates {
+            if self.equal(candidate, value, at)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn set_insert(&mut self, set: &mut SetValue, value: Value, at: usize) -> Result<(), Fault> {
+        if holds_nan(&value) {
+            return Err(self.bug(BugKind::NanInSet, at));
+        }
+        if !self.set_contains(set, &value, at)? {
+            set.push_new(value);
+        }
+        Ok(())
+    }
+
+    fn set_subset(&mut self, first: &SetValue, second: &SetValue, at: usize) -> Result<bool, Fault> {
+        for value in first.items() {
+            if !self.set_contains(second, value, at)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn set_rc(&self, reg: Reg) -> Rc<SetValue> {
+        match &self.stack[self.base + reg as usize] {
+            Value::Set(set) => Rc::clone(set),
+            other => self.mismatch("Set", other),
+        }
     }
 
     /// Leaves the current function with its result; returns where the caller resumes.

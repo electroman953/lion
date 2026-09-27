@@ -1,0 +1,13 @@
+struct Point:
+    x in Int
+    y in Int
+;
+fun Point.equals(other in Int) in Bool = self.x == other
+fun Int.equals(other in Int) in Bool = true
+struct Tag:
+    name in Text
+;
+var calls = 0
+fun Tag.equals(other in Tag) in Bool:
+    return self.name == other.name and calls >= 0
+;

@@ -14,6 +14,7 @@ mod collections;
 mod consteval;
 mod domains;
 mod enums;
+mod equality;
 mod expr;
 mod flow;
 mod functions;
@@ -73,6 +74,7 @@ pub fn check_program(files: &[Source]) -> Checked {
     checker.close_scope();
     checker.ctx.body = body;
     checker.check_remaining_functions();
+    checker.check_equalities();
     checker.check_script_calls();
     checker.check_parallel_regions();
     checker.check_synced();
@@ -456,6 +458,10 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|field| (field.name.clone(), field.ty.expect("a valid field has a type")))
                     .collect(),
+                equals: info
+                    .equals
+                    .and_then(|method| self.functions[method].instance)
+                    .map(|instance| ir::FunctionId(instance as u32)),
             })
             .collect();
         let functions = self.functions;

@@ -1,0 +1,36 @@
+// Equality defined by a structure (§12.5): used by `==`, `in` and the Sets (C76).
+use text
+struct Student:
+    name in Text
+    grade in Float
+;
+// Two students are the same person when they have the same name.
+fun Student.equals(other in Student) in Bool = text.lower(self.name) == text.lower(other.name)
+
+
+let a = Student("Léa", 14.0)
+let b = Student("LÉA", 9.0)
+let c = Student("Tom", 14.0)
+show(a == b)
+show(a == c)
+show(a != c)
+show(b in [c, a])
+let group = {a, b, c}
+show(group.size)
+show(group)
+var more = {c}
+more.add(b)
+more.add(a)
+show(more)
+show({a} subset {b, c})
+show({a, c} inter {b})
+show({a, c} minus {b})
+show({a} union {b, c})
+show([a, c] == [b, c])
+show((a, 1) == (b, 1))
+struct Class:
+    students in List of Student
+;
+show(Class([a]) == Class([b]))
+// Built from constants, the Set still uses `equals`, when the program runs.
+show({Student("Ana", 1.0), Student("ANA", 2.0)}.size)

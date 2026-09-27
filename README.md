@@ -21,7 +21,7 @@ L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 2
 - **Types** : `Int` (64 bits, débordement = bug), `Float` (IEEE 754), `Rational` (fractions exactes `1 over 3`, toujours simplifiées), `Bool`, `Text`, `None`, avec conversion automatique Int → Float.
 - **Structures génériques** (§15.1) : `struct Pair of (A, B), A in Type, B in Type`, `Pair(1, "one")` qui déduit les types, `Pair of (Int, Text)`, structures récursives `Node of T`.
 - **Traits et variables de type** (§14, §15.2) : conformité structurelle, méthodes par défaut, `List of Shape` avec appel choisi à l'exécution, `x in Shape` ; `fun biggest(a in T, b in T) in T, T in Comparable`.
-- **Opérateurs définis par les types** (§9.5) : méthodes `plus`, `subtract`, `times`, `divide`, `power`, `negate`, `less`, et fonctions `infix` (`u dot v`).
+- **Opérateurs définis par les types** (§9.5) : méthodes `plus`, `subtract`, `times`, `divide`, `power`, `negate`, `less`, et fonctions `infix` (`u dot v`) ; `equals` (§12.5), qui sert aussi à `x in l` et aux Sets.
 - **Opérateurs** :
   - `+ - * /` ;
   - `div` et `mod` euclidiens ;

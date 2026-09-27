@@ -23,6 +23,7 @@ pub fn compile(program: &ir::Program) -> Program {
                 index: index as u32,
                 name: def.name.clone(),
                 fields: def.fields.iter().map(|(name, _)| name.clone()).collect(),
+                equals: def.equals.map(|function| function.0),
             })
         })
         .collect();
@@ -79,7 +80,9 @@ pub fn compile(program: &ir::Program) -> Program {
         };
         compile_function(&script, true, &mut shared)
     });
+    let custom_equality = layouts.iter().any(|layout| layout.equals.is_some());
     Program {
+        custom_equality,
         functions,
         layouts,
         enums,
