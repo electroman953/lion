@@ -9,11 +9,11 @@ use lion_runtime::format::format_float;
 use lion_runtime::ops::RationalOp;
 use lion_runtime::{BugKind, MAX_CALL_DEPTH, ops};
 
-use crate::bytecode::{Chunk, Instr, ParallelInfo, Program, Reg, Target};
+use crate::bytecode::{Chunk, Instr, ParallelInfo, Program, Reg, Target, TaskInfo};
 use crate::map::MapValue;
 use crate::set::SetValue;
 use crate::shared::{self, Comparer, Stop};
-use crate::value::{Closure, Record, Value, lock};
+use crate::value::{Closure, Event, Finished, Record, TaskCell, Value, lock};
 
 /// Why execution stopped before the end of the program.
 #[derive(Debug)]
@@ -142,13 +142,13 @@ impl Alert {
 /// of `ask` from `input`, and reporting alerts to `on_alert` as they happen; `out` is
 /// flushed before each alert.
 pub fn run(
-    program: &Program,
+    program: &Arc<Program>,
     out: &mut dyn Write,
     input: &mut dyn BufRead,
     on_alert: &mut dyn FnMut(Alert),
 ) -> Result<(), Trap> {
     let mut machine = Machine::new(program, out, input, on_alert);
-    machine.run().map(|_| ()).map_err(|fault| *fault)
+    machine.run().and_then(|_| machine.finish_tasks()).map_err(|fault| *fault)
 }
 
 /// What the interactive mode keeps from one input to the next: the registers of the
@@ -162,7 +162,7 @@ pub struct Session {
 /// Runs the statements of the script from the one at `first`, on the variables of the
 /// session. On a trap, the session keeps the values it had reached.
 pub fn run_from(
-    program: &Program,
+    program: &Arc<Program>,
     session: &mut Session,
     first: usize,
     out: &mut dyn Write,
@@ -181,24 +181,24 @@ pub fn run_from(
     }
     let main = machine.chunk;
     let start = main.starts.get(first).map_or(main.code.len() - 1, |&start| start as usize);
-    let result = machine.run_at(start);
+    let result = machine.run_at(start).and_then(|_| machine.finish_tasks());
     // The registers of the script are kept; those of calls that a bug stopped are not.
     machine.stack.truncate(main.registers as usize);
     session.stack = std::mem::take(&mut machine.stack);
     session.initialized = machine.initialized;
-    result.map(|_| ()).map_err(|fault| *fault)
+    result.map_err(|fault| *fault)
 }
 
 /// Runs a function without arguments on a machine of its own, and gives its result:
 /// the value of a `compile` expression (§21.1).
-pub(crate) fn evaluate(program: &Program, function: usize) -> Result<Value, Trap> {
+pub(crate) fn evaluate(program: &Arc<Program>, function: usize) -> Result<Value, Trap> {
     let (mut out, mut input) = (io::sink(), io::empty());
     let mut ignore = |_: Alert| {};
     let mut machine = Machine::new(program, &mut out, &mut input, &mut ignore);
     let halt = machine.chunk.code.len() - 1;
     let registers = machine.chunk.registers;
     machine.call(function, 0, registers, 0, halt, halt).map_err(|fault| *fault)?;
-    machine.run().map_err(|fault| *fault)?;
+    machine.run().and_then(|_| machine.finish_tasks()).map_err(|fault| *fault)?;
     Ok(std::mem::take(&mut machine.stack[0]))
 }
 
@@ -212,7 +212,7 @@ pub struct Failure {
 /// Runs the test `index` of `program.tests`, without the statements of the script: the
 /// failed `expect`s, or the trap that stopped it (§24.1).
 pub fn run_test(
-    program: &Program,
+    program: &Arc<Program>,
     index: usize,
     out: &mut dyn Write,
     input: &mut dyn BufRead,
@@ -231,7 +231,7 @@ pub fn run_test(
     let function = program.tests[index].1 as usize;
     // The `Halt` has no place in the source: the trace of a bug starts in the test.
     machine.call(function, 0, registers, 0, halt, halt).map_err(|fault| *fault)?;
-    machine.run().map_err(|fault| *fault)?;
+    machine.run().and_then(|_| machine.finish_tasks()).map_err(|fault| *fault)?;
     Ok(machine.failures)
 }
 
@@ -276,6 +276,8 @@ struct Frame {
 
 struct Machine<'a> {
     program: &'a Program,
+    /// The program, for the threads of the tasks, which may outlive a run of the code.
+    shared: &'a Arc<Program>,
     /// The code of the function running now.
     chunk: &'a Chunk,
     /// Where its registers start.
@@ -304,18 +306,23 @@ struct Machine<'a> {
     /// The number of frames of the turn that runs, if one does: returning from its frame
     /// leaves the turn.
     turn_depth: usize,
+    /// The tasks that run apart, in the order of their start: those that nothing waited
+    /// for are waited for at the end of the script (C85).
+    tasks: Vec<Arc<TaskCell>>,
 }
 
 impl<'a> Machine<'a> {
     fn new(
-        program: &'a Program,
+        shared: &'a Arc<Program>,
         out: &'a mut dyn Write,
         input: &'a mut dyn BufRead,
         on_alert: &'a mut dyn FnMut(Alert),
     ) -> Machine<'a> {
+        let program: &'a Program = shared;
         let main = &program.functions[program.main];
         Machine {
             program,
+            shared,
             chunk: main,
             base: 0,
             stack: vec![Value::None; main.registers as usize],
@@ -338,6 +345,7 @@ impl<'a> Machine<'a> {
             worker: false,
             depth_offset: 0,
             turn_depth: 0,
+            tasks: Vec::new(),
         }
     }
 
@@ -596,13 +604,21 @@ impl<'a> Machine<'a> {
                 }
                 Instr::MakeTask { dst, src } => {
                     let result = self.stack[self.base + src as usize].clone();
-                    self.set(dst, Value::Task(Arc::new(result)));
+                    self.set(dst, Value::Task(TaskCell::done(result)));
+                }
+                Instr::Task { dst, index } => {
+                    let chunk = self.chunk;
+                    let info = &chunk.tasks[index as usize];
+                    let task = self.task(info)?;
+                    self.set(dst, task);
+                    pc = info.end as usize;
                 }
                 Instr::Wait { dst, src } => {
-                    let result = match &self.stack[self.base + src as usize] {
-                        Value::Task(result) => (**result).clone(),
+                    let task = match &self.stack[self.base + src as usize] {
+                        Value::Task(task) => Arc::clone(task),
                         other => self.mismatch("task", other),
                     };
+                    let result = self.wait(&task)?;
                     self.set(dst, result);
                 }
                 Instr::NewCell { dst } => {
@@ -1066,7 +1082,7 @@ impl<'a> Machine<'a> {
             _ => Value::List(Arc::new(Vec::new())),
         });
         let job = Job {
-            program: self.program,
+            program: self.shared,
             function,
             base: self.base,
             snapshot,
@@ -1081,20 +1097,7 @@ impl<'a> Machine<'a> {
         let results = crate::parallel::run_chunks(turns, threads, WORKER_STACKS, &work, &stops);
         // What the turns did, in their order.
         for result in results {
-            for event in result.events {
-                match event {
-                    Event::Output(bytes) => {
-                        self.out.write_all(&bytes).map_err(|error| Box::new(Trap::Io(error)))?
-                    }
-                    Event::Alert(mut alert) => {
-                        if self.alerted.insert(alert.place) {
-                            let _ = self.out.flush();
-                            alert.calls.extend(self.calls());
-                            (self.on_alert)(alert);
-                        }
-                    }
-                }
-            }
+            self.replay(result.events)?;
             if let Some(gather) = info.gather
                 && !result.gathered.is_empty()
             {
@@ -1116,6 +1119,81 @@ impl<'a> Machine<'a> {
             }
         }
         Ok(Exit::EndTurn)
+    }
+
+    /// Writes what a part that ran apart wrote, and reports its alerts, each place
+    /// alerting once (I5).
+    fn replay(&mut self, events: Vec<Event>) -> Result<(), Fault> {
+        for event in events {
+            match event {
+                Event::Output(bytes) => {
+                    self.out.write_all(&bytes).map_err(|error| Box::new(Trap::Io(error)))?
+                }
+                Event::Alert(mut alert) => {
+                    if self.alerted.insert(alert.place) {
+                        let _ = self.out.flush();
+                        alert.calls.extend(self.calls());
+                        (self.on_alert)(alert);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Starts a task that may run apart (§19.1, C85): on a thread of its own, from a
+    /// copy of the registers, its output kept for its `wait`. When too many tasks run,
+    /// it runs now, still apart. A machine that runs turns or tasks for another one
+    /// computes its tasks at once, as the other tasks (C71).
+    fn task(&mut self, info: &TaskInfo) -> Result<Value, Fault> {
+        for &module in &info.modules {
+            self.init_module(module as usize)?;
+        }
+        if self.worker {
+            let outer = std::mem::replace(&mut self.turn_depth, self.frames.len());
+            let exit = self.run_at(info.body as usize);
+            self.turn_depth = outer;
+            let Exit::EndTurn = exit? else { unreachable!("a task ends with its value") };
+            let result = std::mem::take(&mut self.stack[self.base + info.result as usize]);
+            return Ok(Value::Task(TaskCell::done(result)));
+        }
+        let job = TaskJob {
+            program: Arc::clone(self.shared),
+            function: self.frames.last().expect("a frame runs").function,
+            base: self.base,
+            snapshot: self.stack[..self.base + self.chunk.registers as usize].to_vec(),
+            depth_offset: self.frames.len() - 1 + self.depth_offset,
+            initialized: self.initialized.clone(),
+            body: info.body as usize,
+            result: info.result as usize,
+        };
+        let task = match crate::parallel::spawn_task(WORKER_STACKS, move || job.run()) {
+            Ok(thread) => TaskCell::running(thread),
+            Err(run) => TaskCell::finished(run()),
+        };
+        self.tasks.push(Arc::clone(&task));
+        Ok(Value::Task(task))
+    }
+
+    /// `wait t` (§19.1): the result of the task. The first time, what the task wrote is
+    /// written, and a trap that stopped it stops the program here (C85).
+    fn wait(&mut self, task: &TaskCell) -> Result<Value, Fault> {
+        let Some(finished) = task.take() else { return Ok(task.result().unwrap_or_default()) };
+        self.replay(finished.events)?;
+        finished.result.map_err(|mut fault| {
+            if let Trap::Bug { calls, .. } = &mut *fault {
+                calls.extend(self.calls());
+            }
+            fault
+        })
+    }
+
+    /// At the end of the script, the tasks that nothing waited for, in their order.
+    fn finish_tasks(&mut self) -> Result<(), Fault> {
+        for task in std::mem::take(&mut self.tasks) {
+            self.wait(&task)?;
+        }
+        Ok(())
     }
 
     /// Runs the turns `range` of a parallel loop, one after the other, in the frame of
@@ -1417,7 +1495,7 @@ const WORKER_STACKS: &[usize] = &[64 << 20, 8 << 20];
 /// What a thread needs to run turns of a parallel loop: a copy of the frames of the
 /// machine that runs the loop.
 struct Job<'j> {
-    program: &'j Program,
+    program: &'j Arc<Program>,
     function: u32,
     base: usize,
     snapshot: &'j [Value],
@@ -1436,11 +1514,6 @@ struct ChunkResult {
     /// The values that they added to the result of a comprehension.
     gathered: Vec<Value>,
     exit: Result<Exit, Fault>,
-}
-
-enum Event {
-    Output(Vec<u8>),
-    Alert(Alert),
 }
 
 /// The output of a thread, kept until it is written in the order of the turns.
@@ -1498,5 +1571,50 @@ impl Job<'_> {
         };
         drop(machine);
         ChunkResult { events: events.take(), gathered, exit }
+    }
+}
+
+/// What the thread of a task needs: a copy of the frames of the machine that starts it.
+struct TaskJob {
+    program: Arc<Program>,
+    function: u32,
+    base: usize,
+    snapshot: Vec<Value>,
+    depth_offset: usize,
+    initialized: Vec<bool>,
+    body: usize,
+    result: usize,
+}
+
+impl TaskJob {
+    /// Runs the task, on a machine of this thread.
+    fn run(self) -> Finished {
+        let events = std::cell::RefCell::new(Vec::new());
+        let mut out = Recorder(&events);
+        let mut input = io::empty();
+        let mut on_alert = |alert: Alert| events.borrow_mut().push(Event::Alert(alert));
+        let mut machine = Machine::new(&self.program, &mut out, &mut input, &mut on_alert);
+        machine.chunk = &self.program.functions[self.function as usize];
+        machine.base = self.base;
+        machine.stack = self.snapshot;
+        machine.frames = vec![Frame {
+            function: self.function,
+            base: self.base as u32,
+            resume: 0,
+            dst: 0,
+            args: 0,
+            call: NO_PLACE as u32,
+        }];
+        machine.initialized = self.initialized;
+        machine.worker = true;
+        machine.depth_offset = self.depth_offset;
+        machine.turn_depth = 1;
+        let result = match machine.run_at(self.body) {
+            Ok(Exit::EndTurn) => Ok(std::mem::take(&mut machine.stack[self.base + self.result])),
+            Ok(exit) => unreachable!("a task ends with its value, not with {exit:?}"),
+            Err(fault) => Err(fault),
+        };
+        drop(machine);
+        Finished { events: events.take(), result }
     }
 }

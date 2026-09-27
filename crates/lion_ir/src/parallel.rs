@@ -22,23 +22,44 @@ pub struct Reach {
 
 /// What the turns of `parallel`, a loop of `function`, may reach.
 pub fn reach(program: &Program, function: &Function, parallel: &ParallelLoop) -> Reach {
-    let mut ctx =
-        Ctx { program, seen: HashSet::new(), pending: Vec::new(), reach: Reach::default(), dynamic: false };
-    // `==`, `in` and the Sets may call the `equals` of a structure (§12.5).
-    for def in &program.structs {
-        if let Some(equals) = def.equals {
-            ctx.visit(equals.0);
-        }
-    }
+    let mut ctx = Ctx::new(program);
     walk(&parallel.body, Some(function), &mut ctx);
-    while let Some(next) = ctx.pending.pop() {
-        let called = &program.functions[next as usize];
-        walk(&called.body, None, &mut ctx);
-        for (_, value) in &called.defaults {
-            exprs_in(value, &mut |expr| expr_use(expr, None, &mut ctx));
+    ctx.finish().reach
+}
+
+/// What a task may reach (§19.1), and whether it may run on a thread of its own.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct TaskReach {
+    /// The files whose globals the task may use, initialized when it starts (D81).
+    pub modules: Vec<u32>,
+    /// Nothing that the task reads can change while it runs: it may run on a thread
+    /// of its own (C85). The variables of the function that makes it are copied when it
+    /// starts; it must not read a `var` global, a variable shared with a closure or the
+    /// variable designated by a `var` parameter, nor use what runs in order (C84), nor
+    /// leave the function that makes it with `try`.
+    pub concurrent: bool,
+}
+
+/// What the task `value`, made in `function`, may reach.
+pub fn task_reach(program: &Program, function: &Function, value: &Expr) -> TaskReach {
+    let mut ctx = Ctx::new(program);
+    let mut own_problem = false;
+    exprs_in(value, &mut |expr| {
+        expr_use(expr, Some(function), &mut ctx);
+        match &expr.kind {
+            ExprKind::Try(_) | ExprKind::Cell(_) => own_problem = true,
+            ExprKind::Local(local) => {
+                let local = function.local(*local);
+                own_problem |= local.boxed || local.by_reference;
+            }
+            _ => {}
         }
+    });
+    let ctx = ctx.finish();
+    TaskReach {
+        modules: ctx.reach.modules,
+        concurrent: !own_problem && !ctx.reach.in_order && !ctx.reads_var_global,
     }
-    ctx.reach
 }
 
 struct Ctx<'p> {
@@ -49,9 +70,42 @@ struct Ctx<'p> {
     reach: Reach,
     /// Whether the functions that may be called through a value are already met.
     dynamic: bool,
+    /// Whether the code may read a `var` global.
+    reads_var_global: bool,
 }
 
-impl Ctx<'_> {
+impl<'p> Ctx<'p> {
+    fn new(program: &'p Program) -> Ctx<'p> {
+        let mut ctx = Ctx {
+            program,
+            seen: HashSet::new(),
+            pending: Vec::new(),
+            reach: Reach::default(),
+            dynamic: false,
+            reads_var_global: false,
+        };
+        // `==`, `in` and the Sets may call the `equals` of a structure (§12.5).
+        for def in &program.structs {
+            if let Some(equals) = def.equals {
+                ctx.visit(equals.0);
+            }
+        }
+        ctx
+    }
+
+    /// Goes through the functions met, and those they call.
+    fn finish(mut self) -> Self {
+        let program = self.program;
+        while let Some(next) = self.pending.pop() {
+            let called = &program.functions[next as usize];
+            walk(&called.body, None, &mut self);
+            for (_, value) in &called.defaults {
+                exprs_in(value, &mut |expr| expr_use(expr, None, &mut self));
+            }
+        }
+        self
+    }
+
     fn visit(&mut self, function: u32) {
         if self.seen.insert(function) {
             self.pending.push(function);
@@ -140,7 +194,10 @@ fn expr_use(expr: &Expr, own: Option<&Function>, ctx: &mut Ctx) {
             ctx.reach.in_order = true
         }
         ExprKind::Local(local) | ExprKind::Cell(local) => ctx.uses(Place::Local(*local), own),
-        ExprKind::Global(global) => ctx.uses(Place::Global(*global), own),
+        ExprKind::Global(global) => {
+            ctx.uses(Place::Global(*global), own);
+            ctx.reads_var_global |= ctx.program.function(ctx.program.main).local(*global).mutable;
+        }
         // The visitor gives the expressions of a block, not its places.
         ExprKind::Block { stmts, .. } => places(stmts, own, ctx),
         _ => {}

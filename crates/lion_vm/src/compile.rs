@@ -13,7 +13,7 @@ use lion_ir::{self as ir, BinaryOp, Builtin, Conversion, ExprKind, UnaryOp};
 
 use crate::bytecode::{Chunk, Cmp, EnumLayout, Instr, Layout, Program, Reg, Target};
 
-pub fn compile(program: &ir::Program) -> Program {
+pub fn compile(program: &ir::Program) -> Arc<Program> {
     let layouts: Vec<Arc<Layout>> = program
         .structs
         .iter()
@@ -83,7 +83,7 @@ pub fn compile(program: &ir::Program) -> Program {
         compile_function(program, &script, true, &mut shared)
     });
     let custom_equality = layouts.iter().any(|layout| layout.equals.is_some());
-    Program {
+    Arc::new(Program {
         custom_equality,
         foreign: program.foreign.clone(),
         functions,
@@ -94,7 +94,7 @@ pub fn compile(program: &ir::Program) -> Program {
         module_inits,
         tests: program.tests.iter().map(|(name, function)| (name.clone(), function.0)).collect(),
         declarations,
-    }
+    })
 }
 
 /// What the functions of a program share while they are compiled.
@@ -119,6 +119,7 @@ fn compile_function(
         program,
         function,
         parallels: Vec::new(),
+        tasks: Vec::new(),
         shared,
         is_script,
         code: Vec::new(),
@@ -153,6 +154,7 @@ fn compile_function(
         texts: compiler.texts,
         registers: compiler.registers,
         parallels: compiler.parallels,
+        tasks: compiler.tasks,
     }
 }
 
@@ -160,6 +162,7 @@ struct Compiler<'f> {
     program: &'f ir::Program,
     function: &'f ir::Function,
     parallels: Vec<crate::bytecode::ParallelInfo>,
+    tasks: Vec<crate::bytecode::TaskInfo>,
     shared: &'f mut Shared,
     is_script: bool,
     code: Vec<Instr>,
@@ -526,8 +529,28 @@ impl Compiler<'_> {
                 self.emit(Instr::LoadCell { dst, cell: register(*local) }, span);
             }
             ExprKind::Task(value) => {
-                let src = self.operand(value);
-                self.emit(Instr::MakeTask { dst, src }, span);
+                let reach = ir::parallel::task_reach(self.program, self.function, value);
+                if reach.concurrent {
+                    // The code of the task follows `Task`, which starts it and skips it.
+                    let result = self.temp();
+                    let index = self.tasks.len() as u32;
+                    self.tasks.push(crate::bytecode::TaskInfo {
+                        body: 0,
+                        end: 0,
+                        result,
+                        modules: reach.modules,
+                    });
+                    self.emit(Instr::Task { dst, index }, span);
+                    let body = self.code.len() as u32;
+                    self.expr_into(value, result);
+                    self.emit(Instr::EndTurn, None);
+                    let info = &mut self.tasks[index as usize];
+                    info.body = body;
+                    info.end = self.code.len() as u32;
+                } else {
+                    let src = self.operand(value);
+                    self.emit(Instr::MakeTask { dst, src }, span);
+                }
             }
             ExprKind::Wait(value) => {
                 let src = self.operand(value);

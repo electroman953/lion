@@ -34,8 +34,8 @@ pub enum Value {
     Map(Arc<MapValue>),
     /// A tuple (§4.5).
     Tuple(Arc<Vec<Value>>),
-    /// A task and its result (§19.1).
-    Task(Arc<Value>),
+    /// A task: its result, or the thread that computes it (§19.1, C85).
+    Task(Arc<TaskCell>),
     /// A function value, with the values it captured (§11).
     Function(Arc<Closure>),
     /// A variable shared by a function and the code around it (§11.5).
@@ -111,7 +111,10 @@ impl Value {
                 }
             }
             Value::Function(closure) => format!("<fun {}>", closure.name),
-            Value::Task(result) => format!("<task: {}>", result.literal()),
+            Value::Task(task) => match task.result() {
+                Some(result) => format!("<task: {}>", result.literal()),
+                None => "<task>".to_string(),
+            },
             Value::Cell(cell) => lock(cell).to_text(),
             Value::Ref(_) => "<reference>".to_string(),
         }
@@ -265,4 +268,97 @@ pub fn make_mut<T: Clone>(shared: &mut Arc<T>) -> &mut T {
         return unsafe { &mut *(Arc::as_ptr(shared) as *mut T) };
     }
     Arc::make_mut(shared)
+}
+
+/// A task (§19.1): its result, or the thread that computes it (C85).
+#[derive(Debug)]
+pub struct TaskCell {
+    state: Mutex<TaskState>,
+}
+
+#[derive(Debug)]
+enum TaskState {
+    /// The result is known, and what the task wrote, if anything, is written.
+    Done(Value),
+    /// A thread computes the task.
+    Running(std::thread::JoinHandle<Finished>),
+    /// The task ended; what it wrote is not written yet.
+    Finished(Finished),
+}
+
+/// What a task that ran apart did: what it wrote, then its result, or the trap that
+/// stopped it.
+#[derive(Debug)]
+pub struct Finished {
+    pub events: Vec<Event>,
+    pub result: Result<Value, Box<crate::machine::Trap>>,
+}
+
+/// What a part of the program that runs apart writes, kept to be written later in
+/// order: text, and the alerts of the interpreted mode (§22.3).
+#[derive(Debug)]
+pub enum Event {
+    Output(Vec<u8>),
+    Alert(crate::machine::Alert),
+}
+
+impl TaskCell {
+    /// A task whose result is known, and whose output, if any, is written.
+    pub fn done(result: Value) -> Arc<TaskCell> {
+        Arc::new(TaskCell { state: Mutex::new(TaskState::Done(result)) })
+    }
+
+    /// A task that a thread computes.
+    pub fn running(thread: std::thread::JoinHandle<Finished>) -> Arc<TaskCell> {
+        Arc::new(TaskCell { state: Mutex::new(TaskState::Running(thread)) })
+    }
+
+    /// A task that ran apart and ended.
+    pub fn finished(finished: Finished) -> Arc<TaskCell> {
+        Arc::new(TaskCell { state: Mutex::new(TaskState::Finished(finished)) })
+    }
+
+    fn state(&self) -> MutexGuard<'_, TaskState> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        // Waits for the thread, if it still runs.
+        if matches!(*state, TaskState::Running(_)) {
+            let TaskState::Running(thread) = std::mem::replace(&mut *state, TaskState::Done(Value::None))
+            else {
+                unreachable!("checked above")
+            };
+            let finished = thread.join().unwrap_or_else(|_| panic!("the thread of a task panicked"));
+            *state = TaskState::Finished(finished);
+        }
+        state
+    }
+
+    /// The first time after the task ended, what it did: its output is then to be
+    /// written. Afterwards, `None`: the result is known.
+    pub fn take(&self) -> Option<Finished> {
+        let mut state = self.state();
+        match &*state {
+            TaskState::Done(_) => None,
+            TaskState::Finished(finished) => {
+                let result = match &finished.result {
+                    Ok(value) => value.clone(),
+                    Err(_) => Value::None,
+                };
+                let TaskState::Finished(finished) = std::mem::replace(&mut *state, TaskState::Done(result))
+                else {
+                    unreachable!("matched above")
+                };
+                Some(finished)
+            }
+            TaskState::Running(_) => unreachable!("the thread ended"),
+        }
+    }
+
+    /// The result of the task, when it has one, once it ended; nothing is written.
+    pub fn result(&self) -> Option<Value> {
+        match &*self.state() {
+            TaskState::Done(value) => Some(value.clone()),
+            TaskState::Finished(finished) => finished.result.as_ref().ok().cloned(),
+            TaskState::Running(_) => unreachable!("the thread ended"),
+        }
+    }
 }

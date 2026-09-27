@@ -25,7 +25,10 @@ pub use lion_runtime::{BugKind, MAX_CALL_DEPTH};
 pub use lion_vm::natives;
 pub use lion_vm::parallel::{turn_count, turn_value};
 pub use lion_vm::shared::{self, Comparer, Stop};
-pub use lion_vm::{Closure, EnumLayout, Layout, MapValue, Record, SetValue, Trap, Value, kinds, lock};
+pub use lion_vm::{
+    Closure, EnumLayout, Event, Finished, Layout, MapValue, Record, SetValue, TaskCell, Trap, Value, kinds,
+    lock,
+};
 
 /// A trap, boxed so that the results stay small on the path where nothing fails.
 pub type Fault = Box<Trap>;
@@ -141,7 +144,7 @@ const INTERNAL: u8 = 70;
 
 fn run(program: &'static Program) -> u8 {
     let mut rt = Rt::new(program);
-    let result = (program.script)(&mut rt);
+    let result = (program.script)(&mut rt).and_then(|_| rt.finish_tasks());
     // Everything the program wrote appears before the report of a bug.
     let _ = rt.out.flush();
     let trap = match result {
@@ -261,6 +264,9 @@ pub struct Rt {
     found: Vec<Option<*mut c_void>>,
     /// The failed `expect`s of a test (§24.1).
     pub failures: Vec<(Option<Span>, String)>,
+    /// The tasks that run apart, in the order of their start: those that nothing waited
+    /// for are waited for at the end of the script (C85).
+    tasks: Vec<Arc<TaskCell>>,
 }
 
 impl Rt {
@@ -316,6 +322,7 @@ impl Rt {
             foreign,
             found: vec![None; program.foreign.len()],
             failures: Vec::new(),
+            tasks: Vec::new(),
         }
     }
 
@@ -477,17 +484,7 @@ impl Rt {
             }
             return Ok(exit);
         }
-        let seed = Seed {
-            depth: self.depth,
-            initialized: self.initialized.clone(),
-            layouts: self.layouts.clone(),
-            enums: self.enums.clone(),
-            texts: self.texts.clone(),
-            names: self.names.clone(),
-            dynamic: self.dynamic,
-            custom_equality: self.custom_equality,
-            foreign: self.foreign.clone(),
-        };
+        let seed = self.seed();
         let work = |range: std::ops::Range<usize>| {
             let mut rt = Rt::worker(&seed);
             let mut gathered = empty.clone();
@@ -546,7 +543,68 @@ impl Rt {
             found: vec![None; seed.foreign.len()],
             foreign: seed.foreign.clone(),
             failures: Vec::new(),
+            tasks: Vec::new(),
         }
+    }
+
+    /// What a thread needs to make an `Rt` like this one.
+    fn seed(&self) -> Seed {
+        Seed {
+            depth: self.depth,
+            initialized: self.initialized.clone(),
+            layouts: self.layouts.clone(),
+            enums: self.enums.clone(),
+            texts: self.texts.clone(),
+            names: self.names.clone(),
+            dynamic: self.dynamic,
+            custom_equality: self.custom_equality,
+            foreign: self.foreign.clone(),
+        }
+    }
+
+    /// Starts a task that may run apart (§19.1, C85): on a thread of its own, its output
+    /// kept for its `wait`; when too many tasks run, it runs now, still apart. An `Rt`
+    /// that runs turns or tasks for another one computes its tasks at once (C71).
+    pub fn task(&mut self, body: impl FnOnce(&mut Rt) -> R<Value> + Send + 'static) -> R<Value> {
+        if self.worker {
+            return Ok(Value::Task(TaskCell::done(body(self)?)));
+        }
+        let seed = self.seed();
+        let job = move || {
+            let mut rt = Rt::worker(&seed);
+            let result = body(&mut rt);
+            let Output::Buffer(output) = std::mem::replace(&mut rt.out, Output::Buffer(Vec::new())) else {
+                unreachable!("a thread writes to a buffer")
+            };
+            Finished { events: vec![Event::Output(output)], result }
+        };
+        let task = match lion_vm::parallel::spawn_task(WORKER_STACKS, job) {
+            Ok(thread) => TaskCell::running(thread),
+            Err(run) => TaskCell::finished(run()),
+        };
+        self.tasks.push(Arc::clone(&task));
+        Ok(Value::Task(task))
+    }
+
+    /// `wait t` (§19.1): the result of the task. The first time, what the task wrote is
+    /// written, and a trap that stopped it stops the program here (C85).
+    pub fn wait(&mut self, task: &Value) -> R<Value> {
+        let Value::Task(task) = task else { mismatch("task", task) };
+        let Some(finished) = task.take() else { return Ok(task.result().unwrap_or_default()) };
+        for event in finished.events {
+            if let Event::Output(bytes) = event {
+                self.out.write_all(&bytes).map_err(|error| Box::new(Trap::Io(error)))?;
+            }
+        }
+        finished.result
+    }
+
+    /// At the end of the script, the tasks that nothing waited for, in their order.
+    fn finish_tasks(&mut self) -> R<()> {
+        for task in std::mem::take(&mut self.tasks) {
+            self.wait(&Value::Task(task))?;
+        }
+        Ok(())
     }
 
     /// A call of the C function `index` (§21.2).
@@ -736,17 +794,9 @@ pub fn concat(parts: &[&Value]) -> Value {
     new_text(joined)
 }
 
-/// `task value`: this version computes it at once (C71).
+/// `task value` computed at once (C71).
 pub fn new_task(result: Value) -> Value {
-    Value::Task(Arc::new(result))
-}
-
-/// `wait t` (§19.1).
-pub fn wait(task: &Value) -> Value {
-    match task {
-        Value::Task(result) => (**result).clone(),
-        other => mismatch("task", other),
-    }
+    Value::Task(TaskCell::done(result))
 }
 
 /// `f(1)` with fewer arguments than `f` requires (§11.3).

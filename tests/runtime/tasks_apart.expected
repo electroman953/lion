@@ -1,0 +1,17 @@
+exit: 0
+----- stdout
+the program goes on
+computing 4
+16
+computing 3
+9
+9
+computing 1
+computing 2
+computing 3
+[1, 4, 9]
+reading 10
+10
+the end of the script
+computing 2
+----- stderr

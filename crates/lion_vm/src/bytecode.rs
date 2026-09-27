@@ -232,6 +232,9 @@ pub enum Instr {
     TakeCell { dst: Reg, cell: Reg },
     /// Runs the parallel loop `index` of the chunk (§19.2), then goes on after its turns.
     Parallel { index: u32 },
+    /// Starts the task `index` of the chunk, whose code follows, on a thread of its own
+    /// (§19.1, C85), then goes on after that code.
+    Task { dst: Reg, index: u32 },
     /// The end of a turn of a parallel loop, where `continue` goes.
     EndTurn,
     /// `break` in a turn of a parallel loop.
@@ -339,6 +342,17 @@ pub struct ParallelInfo {
     pub modules: Vec<u32>,
 }
 
+/// A task that may run on a thread of its own (§19.1, C85): its code goes from `body`
+/// to its `EndTurn`, and leaves its value in `result`.
+#[derive(Debug)]
+pub struct TaskInfo {
+    pub body: u32,
+    pub end: u32,
+    pub result: Reg,
+    /// The files whose globals the task may use, initialized first (D81).
+    pub modules: Vec<u32>,
+}
+
 /// Compiled code for one function.
 pub struct Chunk {
     pub name: String,
@@ -356,6 +370,8 @@ pub struct Chunk {
     pub registers: u32,
     /// The parallel loops, by the index of their `Parallel` instruction.
     pub parallels: Vec<ParallelInfo>,
+    /// The tasks that may run apart, by the index of their `Task` instruction.
+    pub tasks: Vec<TaskInfo>,
 }
 
 /// A readable listing, for `lion debug bytecode`.

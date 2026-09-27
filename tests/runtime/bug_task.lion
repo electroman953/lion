@@ -1,0 +1,9 @@
+// A bug in a task that runs apart stops the program at its `wait`, after what the task
+// wrote (§19.1, C85).
+fun risky(n in Int) in Int:
+    show("start {n}")
+    return 10 div n
+;
+let t = task risky(0)
+show("before the wait")
+show(wait t)

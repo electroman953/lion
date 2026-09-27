@@ -23,7 +23,7 @@ pub use constants::evaluate_compile;
 pub use machine::{Alert, AlertKind, Failure, Session, Trap, run, run_from, run_test};
 pub use map::MapValue;
 pub use set::SetValue;
-pub use value::{Closure, Record, Value, kinds, lock};
+pub use value::{Closure, Event, Finished, Record, TaskCell, Value, kinds, lock};
 
 #[cfg(test)]
 mod tests;

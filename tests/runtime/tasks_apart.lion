@@ -1,0 +1,32 @@
+// A task that reads nothing the program may change runs on a thread of its own; what it
+// writes comes at its first `wait`, or at the end of the script (§19.1, C85).
+fun slow_square(n in Int) in Int:
+    show("computing {n}")
+    var total = 0
+    for i in 1..n:
+        total += n
+    ;
+    return total
+;
+let a = task slow_square(3)
+let b = task slow_square(4)
+show("the program goes on")
+show(wait b)
+show(wait a)
+// Waiting again gives the result, and writes nothing.
+show(wait a)
+let tasks = [task slow_square(n), n in 1..3]
+show([wait t, t in tasks])
+
+// A task that reads a `var` global runs when it starts, as the global is then (C71).
+var counter = 10
+fun read_counter() in Int:
+    show("reading {counter}")
+    return counter
+;
+let r = task read_counter()
+counter = 20
+show(wait r)
+
+let forgotten = task slow_square(2)
+show("the end of the script")

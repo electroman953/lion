@@ -454,6 +454,24 @@ fn written_locals(stmts: &[Stmt], written: &mut BTreeSet<u32>) {
     });
 }
 
+/// The locals that an expression writes, as [`written_locals`] does for statements.
+fn written_locals_in(expr: &ir::Expr, written: &mut BTreeSet<u32>) {
+    ir::visit::exprs_in(expr, &mut |inner| match &inner.kind {
+        ExprKind::Let { local, .. } => {
+            written.insert(local.0);
+        }
+        ExprKind::Call { args, .. } => {
+            for arg in args {
+                if let Arg::Reference(Place::Local(local)) = arg {
+                    written.insert(local.0);
+                }
+            }
+        }
+        ExprKind::Block { stmts, .. } => written_locals(stmts, written),
+        _ => {}
+    });
+}
+
 /// The locals that the expressions of the statements read.
 fn read_locals(stmts: &[Stmt], read: &mut BTreeSet<u32>) {
     ir::visit::exprs_in_stmts(stmts, &mut |expr| {
@@ -543,6 +561,9 @@ struct FunctionGen<'g, 'p> {
     loops: Vec<(String, String)>,
     /// How many turns of parallel loops the code being translated is in.
     turns: usize,
+    /// The locals of the script that the code of a task has its own copies of, rather
+    /// than the `static` ones.
+    own: HashSet<u32>,
 }
 
 impl<'g, 'p> FunctionGen<'g, 'p> {
@@ -558,6 +579,7 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
             next: 0,
             loops: Vec::new(),
             turns: 0,
+            own: HashSet::new(),
         }
     }
 
@@ -660,7 +682,9 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
 
     /// The Rust place of a local of this function, which holds its storage.
     fn local_var(&self, local: ir::LocalId) -> String {
-        if self.is_script && self.g.statics.contains(&local.0) {
+        if self.own.contains(&local.0) {
+            format!("l{}", local.0)
+        } else if self.is_script && self.g.statics.contains(&local.0) {
             format!("(*&raw mut G{})", local.0)
         } else {
             format!("l{}", local.0)
@@ -1341,15 +1365,77 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
                 }
             }
             ExprKind::Task(value) => {
-                let op = self.expr(value);
-                let op = self.coerce(op, Repr::Value);
-                self.temp(Repr::Value, format!("new_task({})", op.take()))
+                let reach = ir::parallel::task_reach(self.g.program, self.function, value);
+                if reach.concurrent {
+                    self.task(value, &reach.modules)
+                } else {
+                    let op = self.expr(value);
+                    let op = self.coerce(op, Repr::Value);
+                    self.temp(Repr::Value, format!("new_task({})", op.take()))
+                }
             }
             ExprKind::Wait(value) => {
                 let op = self.expr(value);
-                self.temp(Repr::Value, format!("wait({})", op.by_ref()))
+                self.temp(Repr::Value, format!("rt.wait({})?", op.by_ref()))
             }
         }
+    }
+
+    /// A task that may run apart (§19.1, C85): a closure that `rt.task` runs on a thread
+    /// of its own. The locals that the task reads are copied when it starts, and those
+    /// that it writes are its own.
+    fn task(&mut self, value: &ir::Expr, modules: &[u32]) -> Op {
+        for module in modules {
+            self.init_module(*module);
+        }
+        let mut written = BTreeSet::new();
+        written_locals_in(value, &mut written);
+        let mut read = BTreeSet::new();
+        ir::visit::exprs_in(value, &mut |expr| {
+            if let ExprKind::Local(local) = expr.kind {
+                read.insert(local.0);
+            }
+        });
+        read.retain(|local| !written.contains(local));
+        let mut copies = Vec::new();
+        for local in &read {
+            let storage = Storage::of(self.function.local(ir::LocalId(*local)));
+            let Storage::Plain(repr) = storage else {
+                panic!("a task that runs apart reads no cell nor pointer")
+            };
+            let op = Op::place(self.local_var(ir::LocalId(*local)), repr);
+            copies.push((*local, repr, op.take()));
+        }
+        for (local, repr, code) in &copies {
+            self.line(format!("let c{local}: {} = {code};", repr.rust()));
+        }
+        let result = self.fresh("t");
+        self.line(format!("let {result}: Value = rt.task(move |rt: &mut Rt| -> R<Value> {{"));
+        self.indent += 1;
+        self.line("unsafe {");
+        self.indent += 1;
+        for (local, repr, _) in &copies {
+            self.line(format!("let mut l{local}: {} = c{local};", repr.rust()));
+        }
+        for local in &written {
+            let storage = Storage::of(self.function.local(ir::LocalId(*local)));
+            let zero = match storage {
+                Storage::Plain(repr) => repr.zero(),
+                _ => "Value::None",
+            };
+            self.line(format!("let mut l{local}: {} = {zero};", storage.rust()));
+        }
+        let outer = std::mem::take(&mut self.own);
+        self.own = read.iter().chain(&written).copied().collect();
+        let op = self.expr(value);
+        let op = self.coerce(op, Repr::Value);
+        self.line(format!("Ok({})", op.take()));
+        self.own = outer;
+        self.indent -= 1;
+        self.line("}");
+        self.indent -= 1;
+        self.line("})?;");
+        Op::owned(result, Repr::Value)
     }
 
     /// A call of a function of the program (§11): the arguments, then the call.
@@ -1406,7 +1492,11 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
                                 write_backs.push((var, copy.clone(), repr));
                                 format!("&raw mut {copy}")
                             }
-                            Storage::Plain(_) if self.is_script && self.g.statics.contains(&local.0) => {
+                            Storage::Plain(_)
+                                if self.is_script
+                                    && self.g.statics.contains(&local.0)
+                                    && !self.own.contains(&local.0) =>
+                            {
                                 format!("&raw mut G{}", local.0)
                             }
                             Storage::Plain(_) => format!("&raw mut l{}", local.0),

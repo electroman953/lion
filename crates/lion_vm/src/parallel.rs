@@ -45,6 +45,45 @@ pub fn threads() -> usize {
     })
 }
 
+/// The tasks that run on threads of their own now.
+static RUNNING_TASKS: AtomicUsize = AtomicUsize::new(0);
+
+/// A task, as it is given to a thread.
+pub type BoxedTask<T> = Box<dyn FnOnce() -> T + Send>;
+
+/// Starts `task` on a thread of its own, with a stack of one of `stack_sizes`, unless
+/// `threads()` tasks run already or the system gives no thread: then the task comes
+/// back, to run now (C85).
+pub fn spawn_task<T: Send + 'static>(
+    stack_sizes: &[usize],
+    task: impl FnOnce() -> T + Send + 'static,
+) -> Result<std::thread::JoinHandle<T>, BoxedTask<T>> {
+    let task: BoxedTask<T> = Box::new(task);
+    let running = RUNNING_TASKS.fetch_add(1, Ordering::AcqRel);
+    if running >= threads() {
+        RUNNING_TASKS.fetch_sub(1, Ordering::AcqRel);
+        return Err(task);
+    }
+    // The task is shared with the attempts, and taken by the thread that starts.
+    let slot = std::sync::Arc::new(Mutex::new(Some(task)));
+    for &size in stack_sizes {
+        let taken = std::sync::Arc::clone(&slot);
+        let started = std::thread::Builder::new().stack_size(size).spawn(move || {
+            let task =
+                taken.lock().unwrap_or_else(PoisonError::into_inner).take().expect("the task is there");
+            let result = task();
+            RUNNING_TASKS.fetch_sub(1, Ordering::AcqRel);
+            result
+        });
+        if let Ok(thread) = started {
+            return Ok(thread);
+        }
+    }
+    RUNNING_TASKS.fetch_sub(1, Ordering::AcqRel);
+    let task = slot.lock().unwrap_or_else(PoisonError::into_inner).take().expect("no thread took the task");
+    Err(task)
+}
+
 /// How many chunks each thread gets on average: more chunks share the work better when
 /// the turns do not all take the same time.
 const CHUNKS_PER_THREAD: usize = 8;

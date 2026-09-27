@@ -134,3 +134,17 @@ fn turns_that_use_a_synced_object_run_in_their_order() {
     );
     assert!(!code.contains("rt.parallel("), "{code}");
 }
+
+#[test]
+fn a_task_that_reads_nothing_changing_runs_apart() {
+    let code = rust("fun square(n in Int) in Int = n * n\nlet n = 3\nlet t = task square(n)\nshow(wait t)");
+    assert!(code.contains("rt.task(move |rt: &mut Rt|"), "{code}");
+    assert!(code.contains("rt.wait("));
+}
+
+#[test]
+fn a_task_that_reads_a_var_global_runs_when_it_starts() {
+    let code = rust("var count = 1\nfun read() in Int = count\nlet t = task read()\ncount = 2\nshow(wait t)");
+    assert!(!code.contains("rt.task("), "{code}");
+    assert!(code.contains("new_task("));
+}
