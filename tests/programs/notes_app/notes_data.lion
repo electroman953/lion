@@ -1,0 +1,20 @@
+// `Student` and `load` of program 27.1, without its statements (§27.3).
+use csv
+
+struct Student:
+    name in Text
+    grade in Float, 0 <= grade <= 20
+;
+
+fun Student.passes() in Bool = self.grade >= 10
+
+fun load(path in Text) in List of Student or Error:
+    let rows = try csv.read(path)
+    var students = [] in List of Student
+    for r in rows:
+        let name = try r.get("name")
+        let grade = try r.get("grade") as Float
+        students.add(try Student(name, grade))     // une note de 25 devient une Error
+    ;
+    return students
+;

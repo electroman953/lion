@@ -4,10 +4,11 @@ Lion est un langage polyvalent, interprété ou compilé, dont l'écriture et la
 
 ## État
 
-Les étapes 2 à 6 de la feuille de route (§28) sont atteintes :
-- les programmes 27.1 et 27.2 de la spec tournent tels quels (`tests/programs`) ;
+Les étapes 2 à 7 de la feuille de route (§28) sont atteintes :
+- les trois programmes du §27 de la spec tournent tels quels (`tests/programs`), dont 27.3, l'application graphique ;
 - le compilateur natif `lion build` donne les mêmes résultats que le mode interprété sur tous les programmes de test ;
-- les parties parallèles utilisent tous les cœurs.
+- les parties parallèles utilisent tous les cœurs ;
+- la bibliothèque graphique `ui` ouvre de vraies fenêtres (X11, et Wayland par XWayland), dessinées par Lion lui-même, sans dépendance.
 
 Le bilan détaillé, avec les limites connues et les prochaines étapes, est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
 
@@ -38,7 +39,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
   - conversions `as` entre nombres et vers Text.
 - **Textes** : échappements et interpolation `"x = {x}"`.
 - **Modules** (§20) : `use geometry`, `use shapes.circle`, noms qualifiés (`geometry.area(...)`, `geometry.Point`), `private`, globales initialisées au premier usage, modules qui s'utilisent mutuellement.
-- **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles), `csv`, `sets` (tri, `min`, `max`, ensemble des parties, `any`, `all`, `count`, `group`), `json` (liste d'objets lue en lignes, `r.get("nom")`), `time` (horloge, mesure des durées, attente) et `dates` (dates vérifiées, `d + 30`, `b - a`, jour de la semaine, format ISO).
+- **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles), `csv`, `sets` (tri, `min`, `max`, ensemble des parties, `any`, `all`, `count`, `group`), `json` (liste d'objets lue en lignes, `r.get("nom")`), `time` (horloge, mesure des durées, attente) `dates` (dates vérifiées, `d + 30`, `b - a`, jour de la semaine, format ISO) et `ui` (fenêtres : titres, textes, boutons, champs, cases à cocher, colonnes et lignes).
 - **Tâches** (§19.1) : `task f(x)`, `wait t`, avec les règles de sûreté du §19.3 ; méthodes détachées `s.passes` (§12.6). Une tâche qui ne lit rien que le programme peut changer tourne sur son propre fil ; ce qu'elle écrit apparaît à son `wait` (C85).
 - **Partage explicite** (§17.2) : `var score = shared Counter()`, `shared synced` pour les tâches, `a same b`, méthodes détachées d'un objet partagé (`score.increment`), avec les règles de la spec vérifiées à la compilation.
 - **Parallélisme de données** (§19.2) : `parallel [...]`, `parallel {...}`, `parallel for`, avec les règles de sûreté du §19.3 vérifiées à la compilation. Les tours s'exécutent sur tous les cœurs (ou `LION_THREADS` fils), dans les deux modes, avec le résultat du calcul séquentiel : la sortie arrive dans l'ordre des tours, et le premier bug dans cet ordre arrête le programme (C83).
@@ -51,7 +52,22 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 - **Mode compilé** (§22) : `lion build f.lion` produit un exécutable natif, par Rust et LLVM, qui donne exactement la même sortie, les mêmes bugs et le même code de sortie que `lion run`, sans les alertes. Il va de 3 à 13 fois plus vite que la machine virtuelle sur nos mesures.
 
-**Pas encore implémenté** : types comme valeurs, lecture des éléments d'un n-uplet, modules `net` et `ui`, débogueur. La bibliothèque `ui` attend une décision de l'auteur : voir la [proposition](docs/design/ui.md). La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+**Pas encore implémenté** : types comme valeurs, lecture des éléments d'un n-uplet, module `net`, débogueur. La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+
+## Interfaces graphiques
+
+```lion
+use ui
+
+var count = 0
+fun increment() modifies count:
+    count += 1
+;
+fun view() in ui.Element = ui.column([ui.Title("Compteur"), ui.Label("Valeur : {count}"), ui.Button("Plus un", on_click: increment)])
+ui.run(view)
+```
+
+`ui.run(view)` ouvre une fenêtre et la redessine après chaque événement (voir C98 et la [conception](docs/design/ui.md)). Il faut un écran X11 : sous Wayland, XWayland suffit. Pour les tests, `LION_UI=headless` remplace l'écran par un fichier d'événements (`LION_UI_EVENTS`) et écrit chaque frame en texte ; `LION_UI_SNAPSHOT=image.ppm` enregistre l'image.
 
 ## Construire et utiliser
 
@@ -127,6 +143,7 @@ source .lion
                      opérations de lion_vm
   lion_runtime       sémantique des opérations primitives, partagée par les backends
   lion_std           les modules de la bibliothèque standard, écrits en Lion
+  lion_ui            fenêtres de la bibliothèque `ui` : protocole X11, dessin, police intégrée
   lion_diagnostics   positions, erreurs, bugs, alertes et leur rendu
   lion_cli           la commande `lion` ; charge le script et les modules qu'il utilise
 ```

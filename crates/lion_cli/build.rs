@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The crates of the runtime of compiled programs, each after the ones it uses.
-const CRATES: &[&str] = &["lion_diagnostics", "lion_runtime", "lion_ir", "lion_vm", "lion_native"];
+const CRATES: &[&str] = &["lion_diagnostics", "lion_runtime", "lion_ir", "lion_ui", "lion_vm", "lion_native"];
 
 fn main() {
     let crates = Path::new(&std::env::var("CARGO_MANIFEST_DIR").expect("set by cargo")).join("..");

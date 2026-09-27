@@ -1,0 +1,75 @@
+exit: 0
+----- stdout
+== frame
+# Inscription
+Nom : | <>
+Ville : | <>
+[ ] Recevoir les nouvelles
+[Compter] | [Fin]
+Bonjour  de , total 0
+== frame
+# Inscription
+Nom : | <>
+Ville : | <>
+[ ] Recevoir les nouvelles
+[Compter] | [Fin]
+Bonjour  de , total 0
+== frame
+# Inscription
+Nom : | <Léo>
+Ville : | <>
+[ ] Recevoir les nouvelles
+[Compter] | [Fin]
+Bonjour Léo de , total 0
+== frame
+# Inscription
+Nom : | <Lé>
+Ville : | <>
+[ ] Recevoir les nouvelles
+[Compter] | [Fin]
+Bonjour Lé de , total 0
+== frame
+# Inscription
+Nom : | <Léa>
+Ville : | <>
+[ ] Recevoir les nouvelles
+[Compter] | [Fin]
+Bonjour Léa de , total 0
+== frame
+# Inscription
+Nom : | <Léa>
+Ville : | <>
+[ ] Recevoir les nouvelles
+[Compter] | [Fin]
+Bonjour Léa de , total 0
+== frame
+# Inscription
+Nom : | <Léa>
+Ville : | <Paris>
+[ ] Recevoir les nouvelles
+[Compter] | [Fin]
+Bonjour Léa de Paris, total 0
+== frame
+# Inscription
+Nom : | <Léa>
+Ville : | <Paris>
+[x] Recevoir les nouvelles
+[Compter] | [Fin]
+Bonjour Léa de Paris, total 0
+== frame
+# Inscription
+Nom : | <Léa>
+Ville : | <Paris>
+[x] Recevoir les nouvelles
+[Compter] | [Fin]
+Bonjour Léa de Paris, total 0
+== frame
+# Inscription
+Nom : | <Léa>
+Ville : | <Paris>
+[x] Recevoir les nouvelles
+[Compter] | [Fin]
+Bonjour Léa de Paris, total 5050
+none
+after the window
+----- stderr

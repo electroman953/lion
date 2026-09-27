@@ -8,3 +8,4 @@ rust-version.workspace = true
 lion_diagnostics.workspace = true
 lion_ir.workspace = true
 lion_runtime.workspace = true
+lion_ui.workspace = true

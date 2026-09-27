@@ -13,9 +13,11 @@ pub fn module(name: &str) -> Option<&'static str> {
         "sets" => include_str!("../std/sets.lion"),
         "text" => include_str!("../std/text.lion"),
         "time" => include_str!("../std/time.lion"),
+        "ui" => include_str!("../std/ui.lion"),
         _ => return None,
     })
 }
 
 /// The names of the standard modules.
-pub const MODULES: &[&str] = &["csv", "dates", "files", "json", "math", "random", "sets", "text", "time"];
+pub const MODULES: &[&str] =
+    &["csv", "dates", "files", "json", "math", "random", "sets", "text", "time", "ui"];

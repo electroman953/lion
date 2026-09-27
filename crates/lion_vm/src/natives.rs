@@ -120,6 +120,60 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             )),
             Err(message) => error(message),
         },
+        Native::UiOpen => {
+            match lion_ui::open(text(0), int(1).clamp(1, 8192) as u32, int(2).clamp(1, 8192) as u32) {
+                Ok(window) => Value::Int(window),
+                Err(message) => error(message),
+            }
+        }
+        Native::UiWidth => Value::Int(i64::from(lion_ui::size(int(0)).0)),
+        Native::UiHeight => Value::Int(i64::from(lion_ui::size(int(0)).1)),
+        Native::UiClear => {
+            lion_ui::clear(int(0), color(int(1)));
+            Value::None
+        }
+        Native::UiFill => {
+            lion_ui::fill(int(0), int(1), int(2), int(3), int(4), color(int(5)));
+            Value::None
+        }
+        Native::UiFrame => {
+            lion_ui::frame(int(0), int(1), int(2), int(3), int(4), color(int(5)));
+            Value::None
+        }
+        Native::UiWrite => {
+            let Value::Bool(bold) = args[5] else { panic!("ui.write expected a Bool") };
+            lion_ui::text(int(0), int(1), int(2), text(3), int(4), bold, color(int(6)));
+            Value::None
+        }
+        Native::UiPresent => match lion_ui::present(int(0)) {
+            Ok(()) => Value::None,
+            Err(message) => error(message),
+        },
+        Native::UiNextEvent => {
+            let timeout = u64::try_from(int(1)).ok();
+            match lion_ui::next_event(int(0), timeout) {
+                Ok(event) => texts(event_words(event)),
+                Err(message) => error(message),
+            }
+        }
+        Native::UiClose => {
+            lion_ui::close(int(0));
+            Value::None
+        }
+        Native::UiTextWidth => {
+            let Value::Bool(bold) = args[2] else { panic!("ui.text_width expected a Bool") };
+            Value::Int(lion_ui::text_width(text(0), int(1), bold))
+        }
+        Native::UiLineHeight => Value::Int(lion_ui::line_height(int(0))),
+        Native::UiHeadless => Value::Bool(lion_ui::headless()),
+        Native::UiReady => {
+            let Value::Task(task) = &args[0] else { panic!("ui.ready expected a Task") };
+            Value::Bool(task.is_ready())
+        }
+        Native::UiNap => {
+            std::thread::sleep(Duration::from_millis(int(0).clamp(0, 1000) as u64));
+            Value::None
+        }
         Native::TimeNow => Value::Float(unix_seconds()),
         Native::TimeClock => {
             static ORIGIN: OnceLock<Instant> = OnceLock::new();
@@ -150,6 +204,30 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             Value::Int((seconds + local_offset(seconds)).div_euclid(86_400))
         }
     })
+}
+
+/// A color of the program, `0xRRGGBB`.
+fn color(value: i64) -> u32 {
+    (value & 0xFF_FF_FF) as u32
+}
+
+/// An event of the interface, as words that the module `ui` reads: its kind, then its
+/// details (C98).
+fn event_words(event: lion_ui::Event) -> Vec<String> {
+    use lion_ui::{Event, Key};
+    let words: Vec<String> = match event {
+        Event::Close => vec!["close".into()],
+        Event::Click { x, y } => vec!["click".into(), x.to_string(), y.to_string()],
+        Event::Key(Key::Char(c)) => vec!["type".into(), c.to_string()],
+        Event::Key(key) => vec!["key".into(), format!("{key:?}").to_lowercase()],
+        Event::Resize { width, height } => vec!["resize".into(), width.to_string(), height.to_string()],
+        Event::Redraw => vec!["redraw".into()],
+        Event::Timeout => vec!["timeout".into()],
+        Event::ClickText(text) => vec!["click-text".into(), text],
+        Event::Type(text) => vec!["type".into(), text],
+        Event::Wait => vec!["wait".into()],
+    };
+    words
 }
 
 /// The seconds since 1970-01-01 00:00 UTC, negative before.

@@ -353,6 +353,14 @@ impl TaskCell {
         }
     }
 
+    /// Whether the task ended, without waiting for it.
+    pub fn is_ready(&self) -> bool {
+        match &*self.state.lock().unwrap_or_else(PoisonError::into_inner) {
+            TaskState::Running(thread) => thread.is_finished(),
+            TaskState::Done(_) | TaskState::Finished(_) => true,
+        }
+    }
+
     /// The result of the task, when it has one, once it ended; nothing is written.
     pub fn result(&self) -> Option<Value> {
         match &*self.state() {

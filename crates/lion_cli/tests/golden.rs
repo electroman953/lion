@@ -41,6 +41,13 @@ fn golden() {
             };
             let mut command = Command::new(env!("CARGO_BIN_EXE_lion"));
             command.args(*args).current_dir(&folder);
+            // The interface runs without a screen, with the events written next to the
+            // program (C98).
+            command.env("LION_UI", "headless").env_remove("LION_UI_EVENTS").env_remove("LION_UI_SNAPSHOT");
+            let events = file.with_extension("events");
+            if events.exists() {
+                command.env("LION_UI_EVENTS", &events);
+            }
             if *suite == "interactive" {
                 command.stdin(fs::File::open(&file).unwrap());
             } else {
@@ -76,11 +83,24 @@ fn golden() {
     );
 }
 
+/// The programs of a folder: its `.lion` files, and each `name/name.lion` of its
+/// folders, which holds a program with its modules.
 fn lion_files(dir: &Path) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = fs::read_dir(dir)
         .map(|entries| entries.map(|entry| entry.unwrap().path()).collect())
         .unwrap_or_default();
-    files.retain(|path| path.extension().is_some_and(|ext| ext == "lion"));
+    files = files
+        .into_iter()
+        .filter_map(|path| {
+            if path.is_dir() {
+                let name = path.file_name()?.to_owned();
+                let program = path.join(name).with_extension("lion");
+                program.exists().then_some(program)
+            } else {
+                path.extension().is_some_and(|ext| ext == "lion").then_some(path)
+            }
+        })
+        .collect();
     files.sort();
     files
 }

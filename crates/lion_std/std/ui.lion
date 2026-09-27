@@ -1,0 +1,404 @@
+// The graphical interface (§23, step 7, C98). `ui.run(view)` opens a window that shows
+// the element that `view` gives; after each event, the functions of the elements run,
+// then `view` is called again and the window drawn again. They all run on the thread
+// of the interface, one after the other: the state of the program needs no `synced`.
+//
+// The window is drawn by Lion itself and shown through the X11 protocol. With
+// LION_UI=headless, nothing is shown: the events come from the file named by
+// LION_UI_EVENTS, and each frame is written on the output, for the tests.
+
+use text
+
+Element = Title or Label or Button or Input or Checkbox or Column or Row
+
+// A text in large letters, `size` pixels high.
+struct Title:
+    text in Text
+    size in Int = 24
+;
+
+// A text.
+struct Label:
+    text in Text
+;
+
+// A button: `on_click` runs when it is clicked.
+struct Button:
+    text in Text
+    on_click in fun()
+;
+
+// A field where a text is typed: `on_change` receives each new text. The program keeps
+// the text and gives it back in `value`.
+struct Input:
+    value in Text
+    on_change in fun(Text)
+;
+
+// A box to check: `on_toggle` receives its new state.
+struct Checkbox:
+    label in Text
+    checked in Bool
+    on_toggle in fun(Bool)
+;
+
+// Elements one under the other.
+struct Column:
+    children in List of Element
+;
+
+// Elements side by side.
+struct Row:
+    children in List of Element
+;
+
+fun column(children in List of Element) in Column = Column(children)
+fun row(children in List of Element) in Row = Row(children)
+
+// Shows `view` in a window until the window is closed, or `quit` is called.
+fun run(view in fun() in Element) in None or Error modifies pending, quit_asked:
+    quit_asked = false
+    var tree = view()
+    let first = measure(tree)
+    let width = larger(first.width + 2 * margin, 360)
+    let height = larger(first.height + 2 * margin, 200)
+    let window = try open_window("Lion", width, height)
+    var focus = 0
+    while not quit_asked:
+        var placed = [] in List of Placed
+        place(tree, margin, margin, placed)
+        try paint(window, placed, focus)
+        if headless(): show_frame(tree) ;
+        let timeout = if pending.size > 0 and not headless() then 30 else -1
+        let event = try next_event(window, timeout)
+        let kind = event[1]
+        if kind == "close": break ;
+        if kind == "click":
+            focus = click(placed, at(placed, number(event[2]), number(event[3])), focus)
+        elif kind == "click-text":
+            focus = click(placed, named(placed, event[2]), focus)
+        elif kind == "type":
+            type_in(placed, focus, event[2])
+        elif kind == "key":
+            focus = press(placed, focus, event[2])
+        elif kind == "wait":
+            settle()
+        ;
+        // Without a screen, the tasks finish at `wait` only, so that each run shows the
+        // same frames.
+        if not headless(): poll() ;
+        tree = view()
+    ;
+    close_window(window)
+    return none
+;
+
+// Calls `f` with the result of the task once the task is done, on the thread of the
+// interface, then draws the window again. A function of the interface never waits for a
+// task with `wait`, which would freeze the window (D54).
+fun when_done(t in Task of T, f in fun(T)), T in Type modifies pending:
+    fun check() in Bool:
+        if not ready(t): return false ;
+        f(wait t)
+        return true
+    ;
+    pending.add(check)
+;
+
+// Closes the window: `run` returns.
+fun quit() modifies quit_asked:
+    quit_asked = true
+;
+
+// What the interface waits for: each function tells whether its task was done.
+private var pending = [] in List of fun() in Bool
+private var quit_asked = false
+
+private let margin = 16
+private let gap = 10
+private let text_size = 18
+private let white = 0xFFFFFF
+private let ink = 0x202020
+private let surface = 0xE8E8E8
+private let border = 0x9A9A9A
+private let accent = 0x2F6FDE
+
+private foreign "lion" fun open_window(title in Text, width in Int, height in Int) in Int or Error
+private foreign "lion" fun window_width(window in Int) in Int
+private foreign "lion" fun window_height(window in Int) in Int
+private foreign "lion" fun clear(window in Int, color in Int) in None
+private foreign "lion" fun fill(window in Int, x in Int, y in Int, width in Int, height in Int, color in Int) in None
+private foreign "lion" fun frame(window in Int, x in Int, y in Int, width in Int, height in Int, color in Int) in None
+private foreign "lion" fun write(window in Int, x in Int, y in Int, t in Text, size in Int, bold in Bool, color in Int) in None
+private foreign "lion" fun present(window in Int) in None or Error
+// The next event, as words: its kind, then its details; `timeout` in milliseconds, or
+// -1 to wait as long as needed.
+private foreign "lion" fun next_event(window in Int, timeout in Int) in List of Text or Error
+private foreign "lion" fun close_window(window in Int) in None
+private foreign "lion" fun text_width(t in Text, size in Int, bold in Bool) in Int
+private foreign "lion" fun line_height(size in Int) in Int
+private foreign "lion" fun headless() in Bool
+private foreign "lion" fun ready(t in Task of T) in Bool, T in Type
+private foreign "lion" fun nap(milliseconds in Int) in None
+
+// The size of an element, for the layout.
+struct Size:
+    width in Int
+    height in Int
+;
+
+// An element drawn in the window, and its place.
+struct Placed:
+    x in Int
+    y in Int
+    width in Int
+    height in Int
+    element in Element
+;
+
+private fun measure(e in Element) in Size:
+    let line = line_height(text_size)
+    return match e:
+        in Title t then Size(text_width(t.text, t.size, true), line_height(t.size))
+        in Label l then Size(text_width(l.text, text_size, false), line)
+        in Button b then Size(text_width(b.text, text_size, false) + 24, line + 12)
+        in Input i then Size(larger(text_width(i.value, text_size, false) + 20, 240), line + 12)
+        in Checkbox c then Size(line + 8 + text_width(c.label, text_size, false), line)
+        in Column c then stacked(c.children)
+        in Row r then aligned(r.children)
+    ;
+;
+
+private fun larger(a in Int, b in Int) in Int = if a > b then a else b
+
+// The size of elements one under the other.
+private fun stacked(children in List of Element) in Size:
+    var width = 0
+    var height = 0
+    for child in children:
+        let size = measure(child)
+        width = larger(width, size.width)
+        height += size.height
+    ;
+    if children.size > 1: height += gap * (children.size - 1) ;
+    return Size(width, height)
+;
+
+// The size of elements side by side.
+private fun aligned(children in List of Element) in Size:
+    var width = 0
+    var height = 0
+    for child in children:
+        let size = measure(child)
+        width += size.width
+        height = larger(height, size.height)
+    ;
+    if children.size > 1: width += gap * (children.size - 1) ;
+    return Size(width, height)
+;
+
+// Places the element with its top left corner at `(x, y)`: the elements that are not
+// columns or rows join `placed`, in the order of the tree.
+private fun place(e in Element, x in Int, y in Int, var placed in List of Placed) in None:
+    match e:
+        in Column c:
+            var top = y
+            for child in c.children:
+                place(child, x, top, placed)
+                top += measure(child).height + gap
+            ;
+        ;
+        in Row r:
+            let height = aligned(r.children).height
+            var left = x
+            for child in r.children:
+                let size = measure(child)
+                place(child, left, y + (height - size.height) div 2, placed)
+                left += size.width + gap
+            ;
+        ;
+        otherwise:
+            let size = measure(e)
+            placed.add(Placed(x, y, size.width, size.height, e))
+        ;
+    ;
+;
+
+// Draws the elements; `focus` is the position of the field that has the focus, from 1,
+// or 0.
+private fun paint(window in Int, placed in List of Placed, focus in Int) in None or Error:
+    clear(window, white)
+    var fields = 0
+    for p in placed:
+        match p.element:
+            in Title t: write(window, p.x, p.y, t.text, t.size, true, ink) ;
+            in Label l: write(window, p.x, p.y, l.text, text_size, false, ink) ;
+            in Button b:
+                fill(window, p.x, p.y, p.width, p.height, surface)
+                frame(window, p.x, p.y, p.width, p.height, border)
+                write(window, p.x + 12, p.y + 6, b.text, text_size, false, ink)
+            ;
+            in Input i:
+                fields += 1
+                let focused = fields == focus
+                frame(window, p.x, p.y, p.width, p.height, if focused then accent else border)
+                write(window, p.x + 10, p.y + 6, i.value, text_size, false, ink)
+                if focused:
+                    let end = p.x + 10 + text_width(i.value, text_size, false)
+                    fill(window, end, p.y + 5, 2, p.height - 10, accent)
+                ;
+            ;
+            in Checkbox c:
+                let box = p.height
+                frame(window, p.x, p.y, box, box, border)
+                if c.checked: fill(window, p.x + 4, p.y + 4, box - 8, box - 8, accent) ;
+                write(window, p.x + box + 8, p.y, c.label, text_size, false, ink)
+            ;
+            otherwise:
+                // Columns and rows are not placed: their children are.
+            ;
+        ;
+    ;
+    return present(window)
+;
+
+// The position in `placed` of the last element under the point, or 0.
+private fun at(placed in List of Placed, x in Int, y in Int) in Int:
+    var found = 0
+    for i in 1..placed.size:
+        let p = placed[i]
+        if p.x <= x < p.x + p.width and p.y <= y < p.y + p.height: found = i ;
+    ;
+    return found
+;
+
+// The position in `placed` of the first button, box or field that shows this text, or 0.
+private fun named(placed in List of Placed, t in Text) in Int:
+    for i in 1..placed.size:
+        let shown = match placed[i].element:
+            in Button b then b.text
+            in Checkbox c then c.label
+            in Input f then f.value
+            otherwise then none
+        ;
+        if shown == t: return i ;
+    ;
+    return 0
+;
+
+// The position of the field at `index` among the fields, from 1, or 0.
+private fun field_number(placed in List of Placed, index in Int) in Int:
+    var fields = 0
+    for i in 1..placed.size:
+        if placed[i].element in Input:
+            fields += 1
+            if i == index: return fields ;
+        ;
+    ;
+    return 0
+;
+
+// The field that has the focus.
+private fun field(placed in List of Placed, focus in Int) in maybe Input:
+    var fields = 0
+    for p in placed:
+        if p.element in Input:
+            fields += 1
+            if fields == focus:
+                return match p.element:
+                    in Input f then f
+                    otherwise then none
+                ;
+            ;
+        ;
+    ;
+    return none
+;
+
+// A click on the element at `index`; gives the new focus.
+private fun click(placed in List of Placed, index in Int, focus in Int) in Int:
+    if index == 0: return 0 ;
+    match placed[index].element:
+        in Button b: b.on_click() ;
+        in Checkbox c: c.on_toggle(not c.checked) ;
+        otherwise:
+            // A text or a title.
+        ;
+    ;
+    return field_number(placed, index)
+;
+
+private fun type_in(placed in List of Placed, focus in Int, t in Text):
+    let f = field(placed, focus)
+    if f == none: return ;
+    f.on_change("{f.value}{t}")
+;
+
+// A key; gives the new focus: Tab goes to the next field.
+private fun press(placed in List of Placed, focus in Int, key in Text) in Int:
+    let f = field(placed, focus)
+    if key == "tab":
+        let next = focus + 1
+        return if field(placed, next) == none then (if field(placed, 1) == none then 0 else 1) else next
+    ;
+    if f == none: return focus ;
+    if key == "backspace" and f.value.size > 0:
+        f.on_change(f.value[1..f.value.size - 1])
+    ;
+    if key == "escape": return 0 ;
+    return focus
+;
+
+private fun number(t in Text) in Int:
+    return match t as Int:
+        in Int n then n
+        otherwise then 0
+    ;
+;
+
+// Runs the functions of the tasks that are done.
+private fun poll() modifies pending:
+    let current = pending
+    pending = []
+    for check in current:
+        if not check(): pending.add(check) ;
+    ;
+;
+
+// Waits until every task that the interface waits for is done.
+private fun settle() modifies pending:
+    while pending.size > 0:
+        poll()
+        if pending.size > 0: nap(5) ;
+    ;
+;
+
+// Without a screen: the frame, as text.
+private fun show_frame(tree in Element):
+    show("== frame")
+    for line in describe(tree):
+        show(line)
+    ;
+;
+
+private fun describe(e in Element) in List of Text:
+    return match e:
+        in Title t then ["# {t.text}"]
+        in Label l then [l.text]
+        in Button b then ["[{b.text}]"]
+        in Input f then ["<{f.value}>"]
+        in Checkbox c then [if c.checked then "[x] {c.label}" else "[ ] {c.label}"]
+        in Column c then described(c.children)
+        in Row r then [text.join(described(r.children), " | ")]
+    ;
+;
+
+private fun described(children in List of Element) in List of Text:
+    var lines = [] in List of Text
+    for child in children:
+        for line in describe(child):
+            lines.add(line)
+        ;
+    ;
+    return lines
+;

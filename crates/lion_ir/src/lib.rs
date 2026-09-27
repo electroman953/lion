@@ -584,6 +584,21 @@ pub enum Native {
     DatesLocalDay,
     DatesBeyond,
     JsonRows,
+    UiOpen,
+    UiWidth,
+    UiHeight,
+    UiClear,
+    UiFill,
+    UiFrame,
+    UiWrite,
+    UiPresent,
+    UiNextEvent,
+    UiClose,
+    UiTextWidth,
+    UiLineHeight,
+    UiHeadless,
+    UiReady,
+    UiNap,
 }
 
 impl Builtin {
@@ -601,6 +616,20 @@ impl Builtin {
                 Native::RandomSeed | Native::TimeNow | Native::TimeClock | Native::DatesLocalDay,
             ) => Some("reads the clock"),
             Builtin::Native(Native::TimeSleep) => Some("waits"),
+            Builtin::Native(
+                Native::UiOpen
+                | Native::UiWidth
+                | Native::UiHeight
+                | Native::UiClear
+                | Native::UiFill
+                | Native::UiFrame
+                | Native::UiWrite
+                | Native::UiPresent
+                | Native::UiNextEvent
+                | Native::UiClose
+                | Native::UiNap,
+            ) => Some("uses a window"),
+            Builtin::Native(Native::UiReady) => Some("looks at a task"),
             Builtin::Foreign { pure: false, .. } => Some("calls C code that may change a global state"),
             _ => None,
         }
@@ -611,7 +640,18 @@ impl Native {
     /// Whether it leaves the world as it is. A foreign function that is not pure may
     /// change a global state: it does not run in parallel (§19.3, §21.2, D48).
     pub fn is_pure(self) -> bool {
-        !matches!(self, Native::FilesWrite)
+        !matches!(
+            self,
+            Native::FilesWrite
+                | Native::UiOpen
+                | Native::UiClear
+                | Native::UiFill
+                | Native::UiFrame
+                | Native::UiWrite
+                | Native::UiPresent
+                | Native::UiNextEvent
+                | Native::UiClose
+        )
     }
 
     const ALL: &[(&str, &str, Native)] = &[
@@ -651,6 +691,21 @@ impl Native {
         ("dates", "local_day", Native::DatesLocalDay),
         ("dates", "beyond", Native::DatesBeyond),
         ("json", "rows", Native::JsonRows),
+        ("ui", "open_window", Native::UiOpen),
+        ("ui", "window_width", Native::UiWidth),
+        ("ui", "window_height", Native::UiHeight),
+        ("ui", "clear", Native::UiClear),
+        ("ui", "fill", Native::UiFill),
+        ("ui", "frame", Native::UiFrame),
+        ("ui", "write", Native::UiWrite),
+        ("ui", "present", Native::UiPresent),
+        ("ui", "next_event", Native::UiNextEvent),
+        ("ui", "close_window", Native::UiClose),
+        ("ui", "text_width", Native::UiTextWidth),
+        ("ui", "line_height", Native::UiLineHeight),
+        ("ui", "headless", Native::UiHeadless),
+        ("ui", "ready", Native::UiReady),
+        ("ui", "nap", Native::UiNap),
     ];
 
     /// The function `name` of the standard module `module`.

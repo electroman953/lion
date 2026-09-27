@@ -1,6 +1,8 @@
 # Proposition : la bibliothèque `ui` (étape 7)
 
-Statut : **proposition, à valider par l'auteur**. Rien n'est implémenté. La conception de `ui` est un point ouvert de la spec (§B.2), et l'étape 7 est terminée « quand le programme 27.3 tourne » (§28).
+Statut : **implémentée** (C98 dans les [notes](../implementation-notes.md)). L'auteur a choisi l'option A (fenêtre X11 native) le 2026-09-27, et le reste de la proposition s'applique tel quel. Le programme 27.3 tourne sans modification (`tests/programs/notes_app`), avec l'écran ou sans (`LION_UI=headless`). Ce document garde la proposition telle qu'elle a été validée.
+
+La conception de `ui` est un point ouvert de la spec (§B.2), et l'étape 7 est terminée « quand le programme 27.3 tourne » (§28).
 
 ## 1. Ce que l'essai de 27.3 a montré
 

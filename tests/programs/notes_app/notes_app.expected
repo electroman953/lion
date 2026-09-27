@@ -1,0 +1,15 @@
+exit: 0
+----- stdout
+== frame
+# Carnet de notes
+Aucune donnée
+[Charger]
+== frame
+# Carnet de notes
+Chargement…
+[Charger]
+== frame
+# Carnet de notes
+Moyenne : 12.625
+[Charger]
+----- stderr

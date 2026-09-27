@@ -1,0 +1,11 @@
+# A click in the first field, then a text, a correction, and the next field.
+click 120 50
+type Léo
+key backspace
+type a
+key tab
+type Paris
+click Recevoir les nouvelles
+click Compter
+wait
+click Fin

@@ -1,0 +1,49 @@
+use ui
+use notes_data
+
+Status = {idle, loading, ready, failed}
+
+struct AppState:
+    students in List of notes_data.Student = []
+    status in Status = idle
+    message in Text = ""
+;
+
+var state = shared AppState()
+
+fun average(l in List of notes_data.Student) in Float = sum([s.grade, s in l]) / l.size
+
+fun on_loaded(result in List of notes_data.Student or Error) modifies state:
+    match result:
+        in Error e:
+            state.status = failed
+            state.message = e.message()
+        ;
+        in List of notes_data.Student l:
+            state.students = l
+            state.status = ready
+        ;
+    ;
+;
+
+fun start_loading() modifies state:
+    state.status = loading
+    let t = task notes_data.load("notes.csv")    // load ne touche pas à state : pas besoin de synced
+    ui.when_done(t, on_loaded)
+;
+
+fun view() in ui.Element:
+    let body = match state.status:
+        idle then "Aucune donnée"
+        loading then "Chargement…"
+        ready then "Moyenne : {average(state.students)}"
+        failed then "Erreur : {state.message}"
+    ;
+    return ui.column([
+        ui.Title("Carnet de notes", 24),
+        ui.Label(body),
+        ui.Button("Charger", on_click: start_loading)
+    ])
+;
+
+ui.run(view)

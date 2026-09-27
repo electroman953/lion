@@ -1,0 +1,4 @@
+# Program 27.3 of the spec: load the grades, then close the window.
+click Charger
+wait
+close

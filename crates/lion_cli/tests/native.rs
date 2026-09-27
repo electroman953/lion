@@ -74,12 +74,15 @@ fn compiled_programs_behave_as_interpreted() {
 
     let mut failures = Vec::new();
     for (number, (folder, path, reported)) in programs.iter().enumerate() {
-        let output = Command::new(&executable)
-            .arg(number.to_string())
-            .current_dir(folder)
-            .stdin(Stdio::null())
-            .output()
-            .expect("the program runs");
+        let mut command = Command::new(&executable);
+        command.arg(number.to_string()).current_dir(folder).stdin(Stdio::null());
+        // The interface runs without a screen, with the events written next to the program.
+        command.env("LION_UI", "headless").env_remove("LION_UI_EVENTS").env_remove("LION_UI_SNAPSHOT");
+        let events = folder.join(path).with_extension("events");
+        if events.exists() {
+            command.env("LION_UI_EVENTS", &events);
+        }
+        let output = command.output().expect("the program runs");
         // `lion run` reports the warnings of the program before it runs it.
         let actual = transcript(&output, reported);
         let expected_path = folder.join(path).with_extension("expected");
@@ -131,11 +134,21 @@ fn cargo() -> String {
     std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
 }
 
+/// The programs of a folder: its `.lion` files, and each `name/name.lion` of its
+/// folders, which holds a program with its modules.
 fn lion_files(dir: &Path) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = fs::read_dir(dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "lion"))
+        .filter_map(|path| {
+            if path.is_dir() {
+                let name = path.file_name()?.to_owned();
+                let program = path.join(name).with_extension("lion");
+                program.exists().then_some(program)
+            } else {
+                path.extension().is_some_and(|ext| ext == "lion").then_some(path)
+            }
+        })
         .collect();
     files.sort();
     files

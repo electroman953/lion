@@ -1,0 +1,47 @@
+// The elements of `ui` (§23, C98), without a screen: the events come from
+// `ui_widgets.events`, and each frame is written.
+use ui
+
+struct Form:
+    name in Text = ""
+    city in Text = ""
+    subscribed in Bool = false
+    total in Int = 0
+;
+
+var form = shared Form()
+
+fun set_name(t in Text) modifies form:
+    form.name = t
+;
+fun set_city(t in Text) modifies form:
+    form.city = t
+;
+fun toggle(checked in Bool) modifies form:
+    form.subscribed = checked
+;
+fun count(n in Int) in Int = sum([i, i in 1..n])
+fun on_counted(n in Int) modifies form:
+    form.total = n
+;
+fun start() modifies form:
+    let t = task count(100)
+    ui.when_done(t, on_counted)
+;
+fun stop():
+    ui.quit()
+;
+
+fun view() in ui.Element:
+    return ui.column([
+        ui.Title("Inscription", 20),
+        ui.row([ui.Label("Nom :"), ui.Input(form.name, on_change: set_name)]),
+        ui.row([ui.Label("Ville :"), ui.Input(form.city, on_change: set_city)]),
+        ui.Checkbox("Recevoir les nouvelles", form.subscribed, on_toggle: toggle),
+        ui.row([ui.Button("Compter", on_click: start), ui.Button("Fin", on_click: stop)]),
+        ui.Label("Bonjour {form.name} de {form.city}, total {form.total}")
+    ])
+;
+
+show(ui.run(view))
+show("after the window")
