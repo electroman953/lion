@@ -1,0 +1,19 @@
+let positives = {x in Int, x > 0}
+for p in positives: show(p) ;
+show(positives)
+show(positives == positives)
+show(positives.size)
+let l = [x in Int, x > 0]
+let doubled = {x * 2, x in Int, x > 0}
+let pairs = {(a, b), a in Int, b in 1..3}
+show(positives subset {1, 2})
+let wrong = {x in Int, x > 0.5, x < 3}
+var total = 0
+fun bump(x in Int) in Bool modifies total:
+    total += 1
+    return x > 0
+;
+let noisy = {x in Int, bump(x)}
+let texts = {t in Text, t.size > 1}
+show(positives union texts)
+show("{positives}")

@@ -998,7 +998,8 @@ fn kinds_of(ty: ir::Type) -> u16 {
             ir::Type::Error => kinds::ERROR,
             ir::Type::Struct(_) => kinds::STRUCT,
             ir::Type::Enum(_) => kinds::ENUM,
-            ir::Type::Fun(_) => kinds::FUN,
+            // A Domain is the function that tells whether a value belongs to it (C74).
+            ir::Type::Fun(_) | ir::Type::Domain(_) => kinds::FUN,
             // A trait without members has no values.
             ir::Type::Trait(_) => 0,
             ir::Type::Var(_) => unreachable!("an instance has no type variables"),

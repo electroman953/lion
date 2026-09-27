@@ -393,10 +393,16 @@ impl Checker<'_> {
             Some(iterable) => match iterable.ty.element() {
                 Some(element) => Some(element),
                 None => {
+                    let note = match iterable.ty {
+                        Type::Domain(_) => {
+                            "a Domain is known by a property: only its membership can be tested (§16.5)"
+                        }
+                        _ => "`for` goes through an interval or a list (§10.2)",
+                    };
                     self.diagnostics.push(
                         Diagnostic::error(format!("`for` cannot go through {}", article(iterable.ty)))
                             .with_primary(iterable.span, "")
-                            .with_note("`for` goes through an interval or a list (§10.2)"),
+                            .with_note(note),
                     );
                     None
                 }

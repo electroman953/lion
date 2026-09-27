@@ -481,7 +481,7 @@ fn names_in_case(case: &ast::Case, names: &mut Vec<(String, Span)>) {
     }
 }
 
-fn names_in_expr(expr: &ast::Expr, names: &mut Vec<(String, Span)>) {
+pub(crate) fn names_in_expr(expr: &ast::Expr, names: &mut Vec<(String, Span)>) {
     use ast::ExprKind::*;
     match &expr.kind {
         Name(name) => names.push((name.clone(), expr.span)),

@@ -1,0 +1,42 @@
+// Domains and bounded generators over a type (§16.5, §16.6).
+let positives = {x in Int, x > 0}         // Domain
+show(3 in positives)
+show(-2 in positives)
+let n = 10
+let small = {x in Int, x > 0, x < n}      // Set: simple bounds
+show(small)
+let evens = {x in Int, 1 <= x, x <= 9, x mod 2 == 0}   // Set: bounds and a filter
+show(evens)
+let squares = {x in Int, x * x < 50}      // Domain: bounds not recognized
+show(7 in squares)
+show(8 in squares)
+let ordered = [x in Int, 1 <= x <= 5]
+show(ordered)
+let negatives = Int minus positives       // the complement (§16.6)
+show(-4 in negatives)
+show(4 in negatives)
+let digits = 0..9
+let big = {x in Int, x >= 5}
+show({d in digits, d > 2} inter big)
+show(big inter {1, 7, 3, 9})
+show({1, 7, 3, 9} minus big)
+show({6, 7} subset big)
+show({1, 7} subset big)
+let either = {1, 2} union big
+show(1 in either)
+show(3 in either)
+show(12 in either)
+let both = positives inter squares
+show(-1 in both)
+show(5 in both)
+let names = {t in Text, t.size > 3}
+show("Léa" in names)
+show("Lucas" in names)
+fun count_in(d in Domain of Int, values in List of Int) in Int = [v, v in values, v in d].size
+show(count_in(positives, [-1, 2, 3]))
+let pairs = {(a, b), a in 1..3, b in Int, b >= a, b <= 3}
+show(pairs)
+let threshold = 5
+let above = {x in Float, x > threshold}
+show(5.5 in above)
+show(5 in above)

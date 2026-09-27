@@ -12,6 +12,7 @@
 mod closures;
 mod collections;
 mod consteval;
+mod domains;
 mod enums;
 mod expr;
 mod flow;

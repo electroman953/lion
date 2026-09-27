@@ -20,6 +20,9 @@ pub enum Type {
     List(TypeRef),
     /// `Set of T`: without order nor repetition (§16.1).
     Set(TypeRef),
+    /// `Domain of T`: the values of `T` that have a property, as `{x in Int, x > 0}`;
+    /// only tested for membership (§16.5).
+    Domain(TypeRef),
     /// `Task of T`: a computation that gives a `T` (§19.1).
     Task(TypeRef),
     /// `(A, B)`: a tuple, whose elements have these types (§4.5).
@@ -55,6 +58,10 @@ impl Type {
 
     pub fn set(element: Type) -> Type {
         Type::Set(TypeRef::new(element))
+    }
+
+    pub fn domain(element: Type) -> Type {
+        Type::Domain(TypeRef::new(element))
     }
 
     pub fn tuple(elements: Vec<Type>) -> Type {
@@ -154,6 +161,10 @@ impl fmt::Display for Type {
             Type::Set(element) => match element.get() {
                 union @ Type::Union(_) => write!(f, "Set of ({union})"),
                 element => write!(f, "Set of {element}"),
+            },
+            Type::Domain(element) => match element.get() {
+                union @ Type::Union(_) => write!(f, "Domain of ({union})"),
+                element => write!(f, "Domain of {element}"),
             },
             Type::Task(result) => match result.get() {
                 union @ Type::Union(_) => write!(f, "Task of ({union})"),

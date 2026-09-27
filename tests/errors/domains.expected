@@ -1,0 +1,103 @@
+exit: 1
+----- stdout
+----- stderr
+error: `for` cannot go through a Domain of Int
+  --> tests/errors/domains.lion:2:10
+   |
+ 2 | for p in positives: show(p) ;
+   |          ^^^^^^^^^
+   |
+   = a Domain is known by a property: only its membership can be tested (§16.5)
+
+error: A Domain of Int cannot be shown
+  --> tests/errors/domains.lion:3:6
+   |
+ 3 | show(positives)
+   |      ^^^^^^^^^
+   |
+   = a Domain is known by a property: only its membership can be tested (§16.5, C74)
+
+error: Domains cannot be compared
+  --> tests/errors/domains.lion:4:16
+   |
+ 4 | show(positives == positives)
+   |                ^^
+   |
+   = a Domain is known by a property: only its membership can be tested (§16.5)
+
+error: A Domain of Int has no `size`
+  --> tests/errors/domains.lion:5:16
+   |
+ 5 | show(positives.size)
+   |                ^^^^
+   |
+   = a Domain is known by a property: only its membership can be tested (§16.5)
+
+error: a list goes through a type only between bounds
+  --> tests/errors/domains.lion:6:10
+   |
+ 6 | let l = [x in Int, x > 0]
+   |          ^^^^^^^^
+   |
+   = without bounds, the values of a type make a Domain, which has no order (§16.5)
+   = help: bound the variable on both sides: `[x in Int, 1 <= x, x <= 9]`
+
+error: a generator over a type without bounds makes a Domain, written `{x in T, conditions}`
+  --> tests/errors/domains.lion:7:23
+   |
+ 7 | let doubled = {x * 2, x in Int, x > 0}
+   |                       ^^^^^^^^
+   |
+   = a Domain holds the values of its variable that satisfy the conditions; it has one generator, whose values are the result (§16.5, C74)
+   = help: to make a Set, bound the variable on both sides: `x in Int, 1 <= x, x <= 9`
+
+error: a generator over a type without bounds makes a Domain, written `{x in T, conditions}`
+  --> tests/errors/domains.lion:8:22
+   |
+ 8 | let pairs = {(a, b), a in Int, b in 1..3}
+   |                      ^^^^^^^^
+   |
+   = a Domain holds the values of its variable that satisfy the conditions; it has one generator, whose values are the result (§16.5, C74)
+   = help: to make a Set, bound the variable on both sides: `x in Int, 1 <= x, x <= 9`
+
+error: whether a Domain is part of another set cannot be computed
+  --> tests/errors/domains.lion:9:6
+   |
+ 9 | show(positives subset {1, 2})
+   |      ^^^^^^^^^ this is a Domain of Int
+   |
+   = a Domain is known by a property: only its membership can be tested (§16.5, C74)
+
+error: the bounds of a generator over `Int` are Int values
+   --> tests/errors/domains.lion:10:28
+    |
+ 10 | let wrong = {x in Int, x > 0.5, x < 3}
+    |                            ^^^ this is a Float
+    |
+    = the conditions bound the variable on both sides, so the values between the bounds make a Set (§16.5, C74)
+
+error: the property of a Domain cannot modify `total` (through `bump`)
+   --> tests/errors/domains.lion:16:13
+    |
+ 16 | let noisy = {x in Int, bump(x)}
+    |             ^^^^^^^^^^^^^^^^^^^
+    |
+    = a Domain may be tested anywhere, even in a parallel part: its property changes nothing (C74)
+
+error: `union` needs Sets or Domains of the same type, not a Domain of Int and a Domain of Text
+   --> tests/errors/domains.lion:18:16
+    |
+ 18 | show(positives union texts)
+    |      --------- this is a Domain of Int
+    |                ^^^^^
+    |                      ----- this is a Domain of Text
+
+error: A Domain of Int cannot be shown
+   --> tests/errors/domains.lion:19:8
+    |
+ 19 | show("{positives}")
+    |        ^^^^^^^^^
+    |
+    = a Domain is known by a property: only its membership can be tested (§16.5, C74)
+
+12 errors found

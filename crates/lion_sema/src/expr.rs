@@ -197,6 +197,7 @@ impl Checker<'_> {
                 }
                 ast::TextPart::Interpolation(value) => match self.expr(value) {
                     Some(value) if value.ty == Type::Text => pieces.push(value),
+                    Some(value) if !self.check_not_domain(&value) => valid = false,
                     Some(value) => pieces.push(convert(ir::Conversion::ToText, value, Type::Text)),
                     None => valid = false,
                 },
@@ -275,6 +276,15 @@ impl Checker<'_> {
         if op == Same {
             return self.same(lhs, rhs, span);
         }
+        // A type is the Domain of all its values: `Int minus positives` (§16.6).
+        if matches!(op, Union | Inter | Minus | Subset) {
+            let mut operand = |expr: &ast::Expr| match &expr.kind {
+                ast::ExprKind::TypeName(name) => self.universe(name, expr.span),
+                _ => self.expr(expr),
+            };
+            let (lhs, rhs) = (operand(lhs), operand(rhs));
+            return self.set_operation(op, op_span, lhs?, rhs?, span);
+        }
         if matches!(op, And | Or) {
             // The right side is checked where the left side has decided nothing yet:
             // `x != none and x > 3` knows `x` is not `none` on the right (§7.4).
@@ -343,6 +353,7 @@ impl Checker<'_> {
                 Some(typed(kind, Type::Bool, span))
             }
             Type::List(_) | Type::Set(_) => self.list_membership(value, set, span),
+            Type::Domain(_) => self.domain_membership(value, set, span),
             Type::Range => {
                 self.diagnostics.push(
                     Diagnostic::error(format!("an interval holds Int values, not {}", article(value.ty)))
@@ -435,6 +446,9 @@ impl Checker<'_> {
         span: Span,
     ) -> Option<ir::Expr> {
         let (lhs, rhs) = (self.within_try(lhs), self.within_try(rhs));
+        if matches!(lhs.ty, Type::Domain(_)) || matches!(rhs.ty, Type::Domain(_)) {
+            return self.domain_operation(op, op_span, lhs, rhs, span);
+        }
         let word = op.as_str();
         if !matches!(lhs.ty, Type::Set(_)) || lhs.ty != rhs.ty {
             let mut error = Diagnostic::error(format!(
@@ -895,6 +909,14 @@ impl Checker<'_> {
                 Diagnostic::error("functions cannot be compared")
                     .with_primary(op_span, "")
                     .with_note("Lion 0.1 does not define `==` nor an order on functions (C65)"),
+            );
+            return None;
+        }
+        if matches!(lty, Type::Domain(_)) || matches!(rty, Type::Domain(_)) {
+            self.diagnostics.push(
+                Diagnostic::error("Domains cannot be compared")
+                    .with_primary(op_span, "")
+                    .with_note("a Domain is known by a property: only its membership can be tested (§16.5)"),
             );
             return None;
         }
@@ -1368,6 +1390,9 @@ impl Checker<'_> {
             return None;
         }
         let value = values.into_iter().next().flatten()?;
+        if !self.check_not_domain(&value) {
+            return None;
+        }
         let kind = ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Show, args: vec![value] };
         Some(typed(kind, Type::None, span))
     }

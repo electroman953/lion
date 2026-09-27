@@ -1,13 +1,13 @@
 //! Lists and texts as sequences (spec §16): literals, comprehensions, indices,
 //! extracts, properties and changes in place.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use lion_diagnostics::{Diagnostic, Span};
 use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
-use crate::{Checker, Scope, article, capitalize, typed};
+use crate::{Checker, Scope, article, capitalize, domains, typed};
 
 /// The two collections written with elements: `[...]` and `{...}` (§16.1).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -250,14 +250,44 @@ impl Checker<'_> {
             );
             return None;
         }
+        // A generator over a type goes through the values between its bounds; without
+        // bounds, the comprehension is a Domain (§16.5).
+        let mut bounded = HashMap::new();
+        for (index, element) in elements.iter().enumerate().filter(|(index, _)| generators[*index]) {
+            let Some((var, ty)) = domains::type_generator(element) else { continue };
+            if self.is_enumeration(ty) {
+                continue;
+            }
+            match domains::int_bounds(elements, generators, index, var, ty) {
+                Some(bounds) => {
+                    bounded.insert(index, bounds);
+                }
+                None => return self.unbounded_generator(kind, elements, generators, index, span),
+            }
+        }
         self.ctx.scopes.push(Scope::default());
-        let rest = if implicit_output { elements } else { &elements[1..] };
-        let rest_generators = if implicit_output { generators } else { &generators[1..] };
+        let offset = if implicit_output { 0 } else { 1 };
+        let rest = &elements[offset..];
+        let rest_generators = &generators[offset..];
         let mut parts = Vec::new();
         let mut valid = true;
         let mut first_var = None;
-        for (element, &is_generator) in rest.iter().zip(rest_generators) {
-            let part = if is_generator { self.generator(element) } else { self.filter(element) };
+        let mut bound_locals: Vec<domains::BoundLocals> = Vec::new();
+        for (position, (element, &is_generator)) in rest.iter().zip(rest_generators).enumerate() {
+            let index = position + offset;
+            let holds_bound = bound_locals
+                .iter()
+                .find(|locals| locals.bounds.lower.element == index || locals.bounds.upper.element == index)
+                .copied();
+            let part = if let Some(&bounds) = bounded.get(&index) {
+                self.bounded_generator(element, bounds, &mut bound_locals)
+            } else if let Some(locals) = holds_bound {
+                self.bound_condition(element, &locals).map(Part::Condition)
+            } else if is_generator {
+                self.generator(element)
+            } else {
+                self.filter(element)
+            };
             match part {
                 Some(Part::Generator { var, iterable }) => {
                     first_var.get_or_insert(var);
@@ -300,30 +330,81 @@ impl Checker<'_> {
         Some(typed(ir::ExprKind::Block { stmts, value: Box::new(value) }, list_type, span))
     }
 
+    /// Whether the type written is an enumeration, which a generator goes through.
+    fn is_enumeration(&self, ty: &ast::TypeExpr) -> bool {
+        matches!(&ty.kind, ast::TypeExprKind::Named { module, name, args }
+            if module.is_empty() && args.is_empty() && self.tables.named_types.contains_key(&name.name))
+    }
+
+    /// `x in Int` bounded by the conditions: the values between the bounds (§16.5).
+    fn bounded_generator<'e>(
+        &mut self,
+        element: &ast::Expr,
+        bounds: domains::Bounds<'e>,
+        found: &mut Vec<domains::BoundLocals<'e>>,
+    ) -> Option<Part> {
+        let ast::ExprKind::TypeTest { value, .. } = &element.kind else {
+            unreachable!("a generator over a type")
+        };
+        let ast::ExprKind::Name(name) = &value.kind else { unreachable!("a generator over a type") };
+        let (iterable, locals) = self.bounded_range(bounds, element.span)?;
+        found.push(locals);
+        let ident = ast::Ident { name: name.clone(), span: value.span };
+        let var = self.declare(&ident, Some(Type::Int), false, true);
+        self.ctx.locals[var.index()].loop_variable = true;
+        Some(Part::Generator { var, iterable })
+    }
+
+    /// A generator over a type without bounds: the comprehension is a Domain, written
+    /// `{x in T, conditions}` (§16.5).
+    fn unbounded_generator(
+        &mut self,
+        kind: Collection,
+        elements: &[ast::Expr],
+        generators: &[bool],
+        index: usize,
+        span: Span,
+    ) -> Option<ir::Expr> {
+        let element = &elements[index];
+        let single = generators.iter().filter(|&&is_generator| is_generator).count() == 1;
+        if kind == Collection::List {
+            self.diagnostics.push(
+                Diagnostic::error("a list goes through a type only between bounds")
+                    .with_primary(element.span, "")
+                    .with_note(
+                        "without bounds, the values of a type make a Domain, which has no order (§16.5)",
+                    )
+                    .with_help("bound the variable on both sides: `[x in Int, 1 <= x, x <= 9]`"),
+            );
+            return None;
+        }
+        if index != 0 || !single {
+            self.diagnostics.push(
+                Diagnostic::error("a generator over a type without bounds makes a Domain, written `{x in T, conditions}`")
+                    .with_primary(element.span, "")
+                    .with_note("a Domain holds the values of its variable that satisfy the conditions; it has one generator, whose values are the result (§16.5, C74)")
+                    .with_help("to make a Set, bound the variable on both sides: `x in Int, 1 <= x, x <= 9`"),
+            );
+            return None;
+        }
+        let (name, ty) = domains::type_generator(element).expect("a generator over a type");
+        let ast::ExprKind::TypeTest { value, .. } = &element.kind else {
+            unreachable!("a generator over a type")
+        };
+        let var = ast::Ident { name: name.to_string(), span: value.span };
+        self.domain_comprehension(&var, ty, &elements[1..], span)
+    }
+
     fn generator(&mut self, element: &ast::Expr) -> Option<Part> {
         let (lhs, iterable) = match &element.kind {
             ast::ExprKind::Binary { lhs, rhs, .. } => (lhs, self.expr(rhs)),
-            // `d in Days` goes through an enumeration; `x in Int` would make a Domain.
+            // `d in Days` goes through an enumeration; the other types are handled by
+            // `comprehension` (§16.5).
             ast::ExprKind::TypeTest { value, ty } => {
-                let values = match &ty.kind {
-                    ast::TypeExprKind::Named { module, name, args }
-                        if module.is_empty()
-                            && args.is_empty()
-                            && self.tables.named_types.contains_key(&name.name) =>
-                    {
-                        self.enum_values(&name.name, ty.span)
-                    }
-                    _ => None,
+                let ast::TypeExprKind::Named { name, .. } = &ty.kind else {
+                    unreachable!("a generator over a type that is not an enumeration")
                 };
-                if values.is_none() {
-                    self.not_implemented(
-                        element.span,
-                        "comprehensions over a type, which make a `Domain`",
-                        "§16.5",
-                    );
-                    return None;
-                }
-                (value, values)
+                (value, self.enum_values(&name.name, ty.span))
             }
             _ => unreachable!("a generator is `v in X`"),
         };
@@ -426,10 +507,17 @@ impl Checker<'_> {
                     Type::Text | Type::Range => "`size`",
                     _ => "no field",
                 };
+                let note = match other {
+                    Type::Domain(_) => {
+                        "a Domain is known by a property: only its membership can be tested (§16.5)"
+                            .to_string()
+                    }
+                    _ => format!("it has {known} (§16)"),
+                };
                 self.diagnostics.push(
                     Diagnostic::error(format!("{} has no `{field}`", capitalize(&article(other))))
                         .with_primary(name.span, "")
-                        .with_note(format!("it has {known} (§16)")),
+                        .with_note(note),
                 );
                 return None;
             }

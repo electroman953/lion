@@ -45,6 +45,8 @@ pub(crate) enum Variable {
 pub(crate) struct ParallelRegion {
     calls: Vec<usize>,
     span: Span,
+    /// The property of a Domain, which may be tested in parallel (C74).
+    domain: bool,
 }
 
 impl Checker<'_> {
@@ -54,9 +56,15 @@ impl Checker<'_> {
         let outer = self.ctx.parallel.replace(region);
         let result = check(self);
         let calls = self.ctx.calls[region.first_call..].to_vec();
-        self.parallel_regions.push(ParallelRegion { calls, span });
+        self.parallel_regions.push(ParallelRegion { calls, span, domain: false });
         self.ctx.parallel = outer;
         result
+    }
+
+    /// The function of a Domain: it follows the rules of a parallel part, since a Domain
+    /// may be tested in one (C74).
+    pub(crate) fn check_like_parallel(&mut self, instance: usize, span: Span) {
+        self.parallel_regions.push(ParallelRegion { calls: vec![instance], span, domain: true });
     }
 
     /// `parallel [...]` or `parallel {...}`: a comprehension (§19.2).
@@ -113,7 +121,7 @@ impl Checker<'_> {
         for region in regions {
             let mut reported = HashSet::new();
             for &instance in &region.calls {
-                self.check_shared_uses(instance, region.span, &mut reported);
+                self.check_shared_uses(instance, &region, &mut reported);
                 let Some((global, through)) = self.modified_global_of(instance) else { continue };
                 let name = self.instance_display_name(instance);
                 if !reported.insert((name.clone(), global)) {
@@ -126,6 +134,16 @@ impl Checker<'_> {
                     }
                     _ => String::new(),
                 };
+                if region.domain {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!(
+                            "the property of a Domain cannot modify `{global_name}`{via}"
+                        ))
+                        .with_primary(region.span, "")
+                        .with_note("a Domain may be tested anywhere, even in a parallel part: its property changes nothing (C74)"),
+                    );
+                    continue;
+                }
                 self.diagnostics.push(
                     Diagnostic::error(format!(
                         "`{name}` modifies `{global_name}`{via}, so it cannot run in parallel"
@@ -145,9 +163,10 @@ impl Checker<'_> {
     fn check_shared_uses(
         &mut self,
         instance: usize,
-        span: Span,
+        region: &ParallelRegion,
         reported: &mut HashSet<(String, ir::LocalId)>,
     ) {
+        let span = region.span;
         for (global, current) in self.globals_used_by(instance) {
             let Some(sharing) = self.global_sharing.get(&global).copied() else { continue };
             if sharing.synced {
@@ -164,16 +183,19 @@ impl Checker<'_> {
             } else {
                 format!(" (through `{}`)", self.instance_display_name(current))
             };
+            let message = if region.domain {
+                format!("the property of a Domain cannot use `{global_name}`{via}, which is shared")
+            } else {
+                format!("`{name}` uses `{global_name}`{via}, which is shared, so it cannot run in parallel")
+            };
             self.diagnostics.push(
-                Diagnostic::error(format!(
-                    "`{name}` uses `{global_name}`{via}, which is shared, so it cannot run in parallel"
-                ))
-                .with_primary(span, "")
-                .with_secondary(sharing.origin, "shared here")
-                .with_note("two tasks could use the object at the same time (§19.3)")
-                .with_help(format!(
-                    "declare `{global_name}` as `shared synced`: a lock then protects each access"
-                )),
+                Diagnostic::error(message)
+                    .with_primary(span, "")
+                    .with_secondary(sharing.origin, "shared here")
+                    .with_note("two tasks could use the object at the same time (§19.3)")
+                    .with_help(format!(
+                        "declare `{global_name}` as `shared synced`: a lock then protects each access"
+                    )),
             );
         }
     }

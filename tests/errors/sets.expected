@@ -9,14 +9,6 @@ error: with several generators, a comprehension starts with its result
    |
    = help: write the result first: `{(a, b), a in A, b in B}` (§16.4)
 
-error: not implemented yet: comprehensions over a type, which make a `Domain`
-  --> tests/errors/sets.lion:4:17
-   |
- 4 | let positive = {x in Int, x > 0}
-   |                 ^^^^^^^^
-   |
-   = this part of Lion (spec §16.5) is not supported by this version of the implementation
-
 error: the type of this empty set is not known
   --> tests/errors/sets.lion:5:9
    |
@@ -90,4 +82,4 @@ error: cannot compare a tuple (Int, Text) with a tuple (Int, Int)
     |
     = Lion 0.1 does not define comparisons between values of different types
 
-10 errors found
+9 errors found

@@ -15,21 +15,18 @@ const SUPPORTED: &[(&str, Type)] = &[
     ("Bool", Type::Bool),
     ("Text", Type::Text),
     ("None", Type::None),
+    ("Range", Type::Range),
 ];
 
 /// Types of the spec that this version does not support yet, with their section.
-const PLANNED: &[(&str, &str, &str)] = &[
-    ("Domain", "collections", "§16"),
-    ("Range", "collections", "§16"),
-    ("Map", "collections", "§16"),
-    ("Type", "the type `Type`", "§15"),
-];
+const PLANNED: &[(&str, &str, &str)] = &[("Map", "collections", "§16"), ("Type", "the type `Type`", "§15")];
 
 /// Whether `name` is a type of Lion, which a structure cannot be named after.
 pub(crate) fn is_standard_type(name: &str) -> bool {
     // `Bool = {true, false}` is an enumeration of the standard library (D45).
     name == "List"
         || name == "Set"
+        || name == "Domain"
         || name == "Task"
         || name == "Comparable"
         || name == "Type"
@@ -103,7 +100,7 @@ impl Checker<'_> {
         if name.name == "Error" && args.is_empty() {
             return Some(Type::Trait(self.error_trait));
         }
-        if name.name == "List" || name.name == "Set" || name.name == "Task" {
+        if matches!(name.name.as_str(), "List" | "Set" | "Domain" | "Task") {
             let [element] = args else {
                 self.diagnostics.push(
                     Diagnostic::error(format!(
@@ -119,6 +116,7 @@ impl Checker<'_> {
             return Some(match name.name.as_str() {
                 "List" => Type::list(element),
                 "Set" => Type::set(element),
+                "Domain" => Type::domain(element),
                 _ => Type::Task(lion_ir::TypeRef::new(element)),
             });
         }
@@ -151,7 +149,7 @@ impl Checker<'_> {
                 .iter()
                 .map(|(known, _)| *known)
                 .chain(PLANNED.iter().map(|(p, ..)| *p))
-                .chain(["List", "Set"])
+                .chain(["List", "Set", "Domain"])
                 .chain(self.tables.type_spans.keys().map(String::as_str));
             let mut error = Diagnostic::error(format!("cannot find the type `{}`", name.name))
                 .with_primary(name.span, "unknown type");
