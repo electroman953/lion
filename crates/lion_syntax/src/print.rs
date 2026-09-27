@@ -273,6 +273,8 @@ pub fn print_expr(expr: &Expr) -> String {
         }
         ExprKind::Parallel(inner) => format!("(parallel {})", print_expr(inner)),
         ExprKind::Fun(decl) => print_fun(decl),
+        ExprKind::Task(value) => format!("(task {})", print_expr(value)),
+        ExprKind::Wait(value) => format!("(wait {})", print_expr(value)),
         ExprKind::Set(elements) => {
             let elements: Vec<String> = elements.iter().map(print_expr).collect();
             if elements.is_empty() { "(set)".to_string() } else { format!("(set {})", elements.join(" ")) }

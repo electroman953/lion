@@ -280,6 +280,30 @@ impl Checker<'_> {
         Some(typed(ir::ExprKind::Partial { callee: Box::new(callee), args: values }, ty, span))
     }
 
+    /// `s.passes`: a function that reads a copy of `s` (§12.6).
+    pub(crate) fn detached_method(
+        &mut self,
+        method: usize,
+        object: ir::Expr,
+        name: &ast::Ident,
+        span: Span,
+    ) -> Option<ir::Expr> {
+        if self.functions[method].var_self {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`{}` changes its object: it cannot be detached from it", name.name))
+                    .with_primary(span, "")
+                    .with_note("a detached method reads a copy of its object; only a `shared` object could be changed through it (§12.6)")
+                    .with_help(format!("call it: `.{}(...)`", name.name)),
+            );
+            return None;
+        }
+        let value = self.function_value(method, name.span, None)?;
+        let Type::Fun(function) = value.ty else { unreachable!("a function value") };
+        let data = function.get();
+        let ty = Type::function(data.params[1..].to_vec(), data.required as usize - 1, data.ret);
+        Some(typed(ir::ExprKind::Partial { callee: Box::new(value), args: vec![object] }, ty, span))
+    }
+
     /// `f(args)` where `f` is a function value (§11.2). Its parameters have no names.
     pub(crate) fn call_value(&mut self, callee: ir::Expr, args: &[ast::Arg], span: Span) -> Option<ir::Expr> {
         let Type::Fun(function) = callee.ty else {
@@ -449,7 +473,9 @@ fn names_in_expr(expr: &ast::Expr, names: &mut Vec<(String, Span)>) {
                 }
             }
         }
-        Paren(inner) | Try(inner) | Parallel(inner) => names_in_expr(inner, names),
+        Paren(inner) | Try(inner) | Parallel(inner) | Task(inner) | Wait(inner) => {
+            names_in_expr(inner, names)
+        }
         List(elements) | Set(elements) => elements.iter().for_each(|element| names_in_expr(element, names)),
         Tuple(elements) => elements.iter().for_each(|element| names_in_expr(&element.value, names)),
         Unary { operand, .. } => names_in_expr(operand, names),

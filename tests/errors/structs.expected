@@ -77,14 +77,6 @@ error: `Student` has no field `grde`
     |
     = help: a similar field exists: `grade`
 
-error: not implemented yet: methods used as values (detached methods)
-   --> tests/errors/structs.lion:18:6
-    |
- 18 | show(s.passes)
-    |      ^^^^^^^^
-    |
-    = this part of Lion (spec §12.6) is not supported by this version of the implementation
-
 error: A Student has no method `nope`
    --> tests/errors/structs.lion:19:8
     |
@@ -166,4 +158,4 @@ error: A value of type `Error or Student` has no field `grade`
     |
     = help: an Error must be handled first: `if x in Error: ... ;`, or `try x` (§18.3)
 
-17 errors found
+16 errors found

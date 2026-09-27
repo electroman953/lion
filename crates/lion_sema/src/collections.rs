@@ -398,9 +398,8 @@ impl Checker<'_> {
     pub(crate) fn property(&mut self, object: &ast::Expr, name: &ast::Ident, span: Span) -> Option<ir::Expr> {
         let object = self.expr(object)?;
         let object = self.within_try(object);
-        if self.visible_method(object.ty, &name.name).is_some() {
-            self.not_implemented(span, "methods used as values (detached methods)", "§12.6");
-            return None;
+        if let Some(method) = self.visible_method(object.ty, &name.name) {
+            return self.detached_method(method, object, name, span);
         }
         if object.ty.members().iter().any(|member| matches!(member, Type::Struct(_))) {
             let (field, ty) = self.field_of(object.ty, name, object.span)?;

@@ -29,6 +29,8 @@ pub enum Value {
     Set(Rc<SetValue>),
     /// A tuple (§4.5).
     Tuple(Rc<Vec<Value>>),
+    /// A task and its result (§19.1).
+    Task(Rc<Value>),
     /// A function value, with the values it captured (§11).
     Function(Rc<Closure>),
     /// A variable shared by a function and the code around it (§11.5).
@@ -93,6 +95,7 @@ impl Value {
                 }
             }
             Value::Function(closure) => format!("<fun {}>", closure.name),
+            Value::Task(result) => format!("<task: {}>", result.literal()),
             Value::Cell(cell) => cell.borrow().to_text(),
             Value::Ref(_) => "<reference>".to_string(),
         }
@@ -122,6 +125,7 @@ impl Value {
                 | Value::Tuple(_)
                 | Value::Function(_)
                 | Value::Cell(_)
+                | Value::Task(_)
         )
     }
 
@@ -141,6 +145,7 @@ impl Value {
             Value::Set(_) => kinds::SET,
             Value::Tuple(_) => kinds::TUPLE,
             Value::Function(_) => kinds::FUN,
+            Value::Task(_) => kinds::TASK,
             Value::Cell(_) => 0,
             Value::Ref(_) => 0,
         }
@@ -187,6 +192,7 @@ impl Value {
             Value::Set(_) => "Set",
             Value::Tuple(_) => "tuple",
             Value::Function(_) => "function",
+            Value::Task(_) => "task",
             Value::Cell(_) => "cell",
             Value::Ref(_) => "reference",
         }
@@ -209,4 +215,5 @@ pub mod kinds {
     pub const SET: u16 = 1 << 10;
     pub const TUPLE: u16 = 1 << 11;
     pub const FUN: u16 = 1 << 12;
+    pub const TASK: u16 = 1 << 13;
 }

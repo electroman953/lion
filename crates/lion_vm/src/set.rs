@@ -144,7 +144,7 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
             });
             (10u8, set.len(), combined).hash(state);
         }
-        Value::Function(_) | Value::Cell(_) | Value::Ref(_) => {
+        Value::Function(_) | Value::Cell(_) | Value::Task(_) | Value::Ref(_) => {
             unreachable!("a function, a cell or a reference does not go in a Set")
         }
     }

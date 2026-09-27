@@ -207,6 +207,8 @@ impl Printer<'_> {
                 out + ")"
             }
             ExprKind::Cell(local) => format!("(cell {})", self.local(local.index())),
+            ExprKind::Task(value) => format!("(task {})", print(value)),
+            ExprKind::Wait(value) => format!("(wait {})", print(value)),
             ExprKind::Partial { callee, args } => {
                 let args: Vec<String> = args.iter().map(print).collect();
                 format!("(partial {} {})", print(callee), args.join(" "))

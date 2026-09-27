@@ -22,7 +22,6 @@ const PLANNED: &[(&str, &str, &str)] = &[
     ("Domain", "collections", "§16"),
     ("Range", "collections", "§16"),
     ("Map", "collections", "§16"),
-    ("Task", "tasks", "§19.1"),
     ("Type", "the type `Type`", "§15"),
 ];
 
@@ -31,6 +30,7 @@ pub(crate) fn is_standard_type(name: &str) -> bool {
     // `Bool = {true, false}` is an enumeration of the standard library (D45).
     name == "List"
         || name == "Set"
+        || name == "Task"
         || name == "Comparable"
         || name == "Type"
         || SUPPORTED.iter().any(|(known, _)| *known == name)
@@ -99,7 +99,7 @@ impl Checker<'_> {
         if name.name == "Comparable" {
             return Some(Type::Trait(self.comparable));
         }
-        if name.name == "List" || name.name == "Set" {
+        if name.name == "List" || name.name == "Set" || name.name == "Task" {
             let [element] = args else {
                 self.diagnostics.push(
                     Diagnostic::error(format!(
@@ -112,7 +112,11 @@ impl Checker<'_> {
                 return None;
             };
             let element = self.resolve_type(element)?;
-            return Some(if name.name == "List" { Type::list(element) } else { Type::set(element) });
+            return Some(match name.name.as_str() {
+                "List" => Type::list(element),
+                "Set" => Type::set(element),
+                _ => Type::Task(lion_ir::TypeRef::new(element)),
+            });
         }
         if let Some(&index) = self.tables.struct_names.get(&name.name) {
             if !args.is_empty() {

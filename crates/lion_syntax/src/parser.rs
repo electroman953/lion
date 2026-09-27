@@ -1116,11 +1116,18 @@ impl<'t> Parser<'t> {
                 let value = self.expr()?;
                 return Ok(Expr { span: start.to(value.span), kind: ExprKind::Parallel(Box::new(value)) });
             }
+            if matches!(keyword, Keyword::Task | Keyword::Wait) {
+                let is_task = *keyword == Keyword::Task;
+                let start = self.bump().span;
+                let value = Box::new(self.expr()?);
+                let span = start.to(value.span);
+                let kind = if is_task { ExprKind::Task(value) } else { ExprKind::Wait(value) };
+                return Ok(Expr { span, kind });
+            }
             if *keyword == Keyword::Fun {
                 return self.anonymous_function();
             }
             let unsupported = match keyword {
-                Keyword::Task | Keyword::Wait => Some(("tasks", "§19.1")),
                 Keyword::Compile => Some(("`compile`", "§21.1")),
                 Keyword::Shared | Keyword::Synced => Some(("shared values", "§17.2")),
                 _ => None,

@@ -1,0 +1,6 @@
+exit: 0
+----- stdout
+the program goes on
+14
+[1, error("\"a\" is not an Int: it is not a whole number")]
+----- stderr

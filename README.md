@@ -30,6 +30,7 @@ L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 2
 - **Textes** : échappements et interpolation `"x = {x}"`.
 - **Modules** (§20) : `use geometry`, `use shapes.circle`, noms qualifiés (`geometry.area(...)`, `geometry.Point`), `private`, globales initialisées au premier usage, modules qui s'utilisent mutuellement.
 - **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles) et `csv`.
+- **Tâches** (§19.1) : `task f(x)`, `wait t`, avec les règles de sûreté du §19.3 ; méthodes détachées `s.passes` (§12.6).
 - **Parallélisme de données** (§19.2) : `parallel [...]`, `parallel {...}`, `parallel for`, avec les règles de sûreté du §19.3 vérifiées à la compilation. L'exécution reste séquentielle pour l'instant (mêmes résultats).
 - **Tests intégrés** (§24.1) : `test "nom": ... ;`, `expect a == b` qui montre « expected 6, got 5 », commande `lion test`.
 - **Bibliothèque standard, noyau** (§23) : `show`, `ask`, `exit`, `error`, `sum`, `reverse`, `floor`, `ceil`, `round`, `isqrt`.
@@ -37,7 +38,7 @@ L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 2
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, exposant négatif, conversion Float → Int impossible, récursion sans fin (plus de 100 000 appels imbriqués). Chacun est signalé avec l'emplacement, les appels en cours, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 
-**Pas encore implémenté** : structures et traits génériques (`Pair of (A, B)`), fonctions anonymes génériques, méthodes détachées, égalité définie par `equals`, lecture des éléments d'un n-uplet, `Domain` et `Map`, valeurs `shared`, appel de code C, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, débogueur.
+**Pas encore implémenté** : structures et traits génériques (`Pair of (A, B)`), fonctions anonymes génériques, égalité définie par `equals`, lecture des éléments d'un n-uplet, `Domain` et `Map`, valeurs `shared`, appel de code C, exécution concurrente des tâches et sur plusieurs cœurs, compilateur natif, débogueur.
 
 ## Construire et utiliser
 

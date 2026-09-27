@@ -1,0 +1,30 @@
+exit: 1
+----- stdout
+----- stderr
+error: `bump` modifies `total`, so it cannot run in parallel
+  --> tests/errors/tasks.lion:7:11
+   |
+ 7 | let bad = task bump()
+   |           ^^^^^^^^^^^
+   |
+   = what runs in parallel changes nothing outside it (§19.3)
+   = help: use a local variable, or declare `total` as `shared synced` (§17.2)
+
+error: `wait` waits for a task, not for an Int
+  --> tests/errors/tasks.lion:8:14
+   |
+ 8 | let n = wait 3
+   |              ^ this is an Int
+   |
+   = help: start one with `task`: `let t = task f(x)` (§19.1)
+
+error: `increment` changes its object: it cannot be detached from it
+   --> tests/errors/tasks.lion:16:11
+    |
+ 16 | let inc = c.increment
+    |           ^^^^^^^^^^^
+    |
+    = a detached method reads a copy of its object; only a `shared` object could be changed through it (§12.6)
+    = help: call it: `.increment(...)`
+
+3 errors found

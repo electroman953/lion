@@ -1,0 +1,10 @@
+// Tasks: `task` and `wait` (§19.1); this version runs a task when it is created (C71).
+fun load_grade(text in Text) in Int or Error:
+    return try text as Int
+;
+let t = task load_grade("14")
+show("the program goes on")
+let g = wait t
+show(g)
+let tasks = [task load_grade(x), x in ["1", "a"]]
+show([wait x, x in tasks])

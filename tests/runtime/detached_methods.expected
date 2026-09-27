@@ -1,0 +1,7 @@
+exit: 0
+----- stdout
+false
+11.0
+true
+[true, false]
+----- stderr

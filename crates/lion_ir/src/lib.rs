@@ -317,6 +317,11 @@ pub enum ExprKind {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
+    /// `task value`: a task that computes the value (§19.1). This version computes it at
+    /// once, which gives the same results (C71).
+    Task(Box<Expr>),
+    /// `wait t`: the result of a task.
+    Wait(Box<Expr>),
     /// `f(1)` with fewer arguments than `f` requires: the function that waits for the
     /// others (§11.3).
     Partial {

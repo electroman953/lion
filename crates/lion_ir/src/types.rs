@@ -18,6 +18,8 @@ pub enum Type {
     List(TypeRef),
     /// `Set of T`: without order nor repetition (§16.1).
     Set(TypeRef),
+    /// `Task of T`: a computation that gives a `T` (§19.1).
+    Task(TypeRef),
     /// `(A, B)`: a tuple, whose elements have these types (§4.5).
     Tuple(TupleRef),
     /// A failure that the program must handle (§18.1). For now, the errors made by
@@ -149,6 +151,10 @@ impl fmt::Display for Type {
             Type::Set(element) => match element.get() {
                 union @ Type::Union(_) => write!(f, "Set of ({union})"),
                 element => write!(f, "Set of {element}"),
+            },
+            Type::Task(result) => match result.get() {
+                union @ Type::Union(_) => write!(f, "Task of ({union})"),
+                result => write!(f, "Task of {result}"),
             },
             Type::Tuple(tuple) => {
                 let elements: Vec<String> = tuple.elements().iter().map(Type::to_string).collect();
@@ -293,7 +299,7 @@ impl Type {
     pub fn has_vars(self) -> bool {
         match self {
             Type::Var(_) => true,
-            Type::List(inner) | Type::Set(inner) => inner.get().has_vars(),
+            Type::List(inner) | Type::Set(inner) | Type::Task(inner) => inner.get().has_vars(),
             Type::Tuple(tuple) => tuple.elements().into_iter().any(Type::has_vars),
             Type::Union(union) => union.members().into_iter().any(Type::has_vars),
             Type::Fun(function) => {
@@ -310,6 +316,7 @@ impl Type {
             Type::Var(var) => bindings.get(&var).copied().unwrap_or(self),
             Type::List(inner) => Type::list(inner.get().substitute(bindings)),
             Type::Set(inner) => Type::set(inner.get().substitute(bindings)),
+            Type::Task(inner) => Type::Task(TypeRef::new(inner.get().substitute(bindings))),
             Type::Tuple(tuple) => {
                 Type::tuple(tuple.elements().into_iter().map(|ty| ty.substitute(bindings)).collect())
             }
@@ -334,9 +341,9 @@ impl Type {
                     true
                 }
             },
-            (Type::List(pattern), Type::List(actual)) | (Type::Set(pattern), Type::Set(actual)) => {
-                pattern.get().unify(actual.get(), bindings)
-            }
+            (Type::List(pattern), Type::List(actual))
+            | (Type::Set(pattern), Type::Set(actual))
+            | (Type::Task(pattern), Type::Task(actual)) => pattern.get().unify(actual.get(), bindings),
             (Type::Tuple(pattern), Type::Tuple(actual)) => {
                 let (pattern, actual) = (pattern.elements(), actual.elements());
                 pattern.len() == actual.len()

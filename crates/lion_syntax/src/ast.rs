@@ -320,6 +320,10 @@ pub enum ExprKind {
     Parallel(Box<Expr>),
     /// `fun(x in Int) = x * 2`: an anonymous function (§11.1); its name is `fun`.
     Fun(Box<FunDecl>),
+    /// `task f(x)`: the expression runs as a task (§19.1).
+    Task(Box<Expr>),
+    /// `wait t`: the result of a task (§19.1).
+    Wait(Box<Expr>),
 }
 
 /// An element of a tuple, named or not (§26: `element`).

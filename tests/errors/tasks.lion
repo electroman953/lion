@@ -1,0 +1,16 @@
+// Mistakes with tasks (§19.1, §19.3).
+var total = 0
+fun bump() in Int modifies total:
+    total += 1
+    return total
+;
+let bad = task bump()
+let n = wait 3
+struct Counter:
+    count in Int
+;
+fun Counter.increment(var self):
+    self.count += 1
+;
+var c = Counter(0)
+let inc = c.increment

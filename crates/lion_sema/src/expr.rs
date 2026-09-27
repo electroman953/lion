@@ -83,6 +83,24 @@ impl Checker<'_> {
             ast::ExprKind::Tuple(elements) => self.tuple(elements, span),
             ast::ExprKind::Parallel(inner) => self.parallel_expr(inner, span),
             ast::ExprKind::Fun(decl) => self.anonymous_function(decl, span, None),
+            ast::ExprKind::Task(value) => {
+                // What runs as a task changes nothing outside it (§19.3).
+                let value = self.in_parallel(span, |checker| checker.expr(value))?;
+                let ty = Type::Task(ir::TypeRef::new(value.ty));
+                Some(typed(ir::ExprKind::Task(Box::new(value)), ty, span))
+            }
+            ast::ExprKind::Wait(value) => {
+                let value = self.expr(value)?;
+                let Type::Task(result) = value.ty else {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!("`wait` waits for a task, not for {}", article(value.ty)))
+                            .with_primary(value.span, format!("this is {}", article(value.ty)))
+                            .with_help("start one with `task`: `let t = task f(x)` (§19.1)"),
+                    );
+                    return None;
+                };
+                Some(typed(ir::ExprKind::Wait(Box::new(value)), result.get(), span))
+            }
         }
     }
 

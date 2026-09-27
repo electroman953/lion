@@ -1,0 +1,19 @@
+// Detached methods read a copy of their object (§12.6).
+struct Student:
+    name in Text
+    grade in Float
+;
+fun Student.passes() in Bool = self.grade >= 10
+fun Student.with_bonus(points in Float) in Float = self.grade + points
+fun Student.bump(var self):
+    self.grade += 1
+;
+var s = Student("Léa", 9)
+let check = s.passes
+let bonus = s.with_bonus
+s.grade = 15
+show(check())
+show(bonus(2))
+show(s.passes())
+let checks = [x.passes, x in [Student("a", 12), Student("b", 3)]]
+show([c(), c in checks])

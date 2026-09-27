@@ -516,6 +516,17 @@ impl<'a> Machine<'a> {
                     pc = self.call(function, dst, args, count, pc, at)?;
                     code = &self.chunk.code;
                 }
+                Instr::MakeTask { dst, src } => {
+                    let result = self.stack[self.base + src as usize].clone();
+                    self.set(dst, Value::Task(Rc::new(result)));
+                }
+                Instr::Wait { dst, src } => {
+                    let result = match &self.stack[self.base + src as usize] {
+                        Value::Task(result) => (**result).clone(),
+                        other => self.mismatch("task", other),
+                    };
+                    self.set(dst, result);
+                }
                 Instr::NewCell { dst } => {
                     self.set(dst, Value::Cell(Rc::new(RefCell::new(Value::None))));
                 }

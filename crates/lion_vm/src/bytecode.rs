@@ -193,6 +193,10 @@ pub enum Instr {
     Bind { dst: Reg, callee: Reg, start: Reg, count: u32 },
     /// Calls the function value in `callee` with `count` arguments from `args`.
     CallValue { dst: Reg, callee: Reg, args: Reg, count: u32 },
+    /// A task whose result is the value in `src` (§19.1, C71).
+    MakeTask { dst: Reg, src: Reg },
+    /// The result of the task in `src`.
+    Wait { dst: Reg, src: Reg },
     /// A new cell for a variable shared with a nested function (§11.5).
     NewCell { dst: Reg },
     LoadCell { dst: Reg, cell: Reg },

@@ -448,6 +448,14 @@ impl Compiler<'_> {
             ExprKind::Local(local) if self.boxed(*local) => {
                 self.emit(Instr::LoadCell { dst, cell: register(*local) }, span);
             }
+            ExprKind::Task(value) => {
+                let src = self.operand(value);
+                self.emit(Instr::MakeTask { dst, src }, span);
+            }
+            ExprKind::Wait(value) => {
+                let src = self.operand(value);
+                self.emit(Instr::Wait { dst, src }, span);
+            }
             ExprKind::Cell(local) => {
                 let src = register(*local);
                 if src != dst {
@@ -917,6 +925,7 @@ fn calls_function(expr: &ir::Expr) -> bool {
         ExprKind::Enum { .. } | ExprKind::Cell(_) => false,
         ExprKind::Closure { captures, .. } => captures.iter().any(calls_function),
         ExprKind::CallValue { .. } => true,
+        ExprKind::Task(value) | ExprKind::Wait(value) => calls_function(value),
         ExprKind::Partial { callee, args } => calls_function(callee) || args.iter().any(calls_function),
     }
 }
@@ -935,6 +944,7 @@ fn kinds_of(ty: ir::Type) -> u16 {
             ir::Type::Range => kinds::RANGE,
             ir::Type::List(_) => kinds::LIST,
             ir::Type::Set(_) => kinds::SET,
+            ir::Type::Task(_) => kinds::TASK,
             ir::Type::Tuple(_) => kinds::TUPLE,
             ir::Type::Error => kinds::ERROR,
             ir::Type::Struct(_) => kinds::STRUCT,
