@@ -1,0 +1,31 @@
+exit: 1
+----- stdout
+----- stderr
+error: cannot change the content of the constant `fixed`
+  --> tests/errors/set_remove.lion:3:1
+   |
+ 2 | let fixed = {1, 2}
+   |     ----- declared with `let`
+ 3 | fixed.remove(1)
+   | ^^^^^
+   |
+   = a value held by `let` never changes, nor does its content (§6.4)
+   = help: to change it, declare it with `var`: `var fixed = ...`
+
+error: mismatched types
+  --> tests/errors/set_remove.lion:5:10
+   |
+ 5 | s.remove("one")
+   | - the elements of this Set are an Int
+   |          ^^^^^ this is a Text
+   |
+   = expected: Int
+   = found: Text
+
+error: `remove` takes one value, not 2
+  --> tests/errors/set_remove.lion:6:1
+   |
+ 6 | s.remove(1, 2)
+   | ^^^^^^^^^^^^^^
+
+3 errors found

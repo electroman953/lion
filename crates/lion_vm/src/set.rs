@@ -44,6 +44,29 @@ impl SetValue {
         !holds_nan(value) && self.candidates(value).any(|element| element.equals(value))
     }
 
+    /// The positions of the elements that may equal `value`: those of its hash.
+    pub fn candidate_positions(&self, value: &Value) -> Vec<usize> {
+        let positions = self.index.get(&hash_of(value)).map(Vec::as_slice).unwrap_or_default();
+        positions.iter().map(|&position| position as usize).collect()
+    }
+
+    /// The position of the element equal to `value`, with the equality of content.
+    pub fn position(&self, value: &Value) -> Option<usize> {
+        if holds_nan(value) {
+            return None;
+        }
+        self.candidate_positions(value).into_iter().find(|&position| self.items[position].equals(value))
+    }
+
+    /// Removes the element at `position`; the others keep their order.
+    pub fn remove_at(&mut self, position: usize) {
+        self.items.remove(position);
+        self.index.clear();
+        for (position, value) in self.items.iter().enumerate() {
+            self.index.entry(hash_of(value)).or_default().push(position as u32);
+        }
+    }
+
     /// Adds a value that is not NaN and that no element equals.
     pub fn push_new(&mut self, value: Value) {
         self.index.entry(hash_of(&value)).or_default().push(self.items.len() as u32);

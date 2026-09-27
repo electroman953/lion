@@ -3,7 +3,7 @@
 Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélisme sur plusieurs cœurs (étape 6), les modules `sets`, `time` et `dates`, les structures et traits génériques complets (§15.1), et la proposition de la bibliothèque `ui` (étape 7). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C94) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C95) ;
 - [`docs/design/ui.md`](docs/design/ui.md) : la proposition de la bibliothèque `ui`, en attente des réponses de l'auteur ;
 - [`README.md`](README.md) : la présentation et l'usage.
 
@@ -220,7 +220,6 @@ Chacun de ces cas donne une erreur « not implemented yet » ou un refus explici
 | Lire un élément de n-uplet : la spec ne dit pas comment (C53) | §16 |
 | Modules `json`, `net`, `ui` de la bibliothèque standard | §23 |
 | Heures d'une journée, fuseaux horaires, ajout de mois dans `dates` | C89 |
-| Retirer un élément d'un Set (`s.remove(x)`) : une méthode du langage, laissée à l'auteur | C86 |
 | Écriture littérale d'une Map, que la spec laisse ouverte (§29) | C79 |
 
 ## 6. Tests
@@ -325,7 +324,7 @@ Ce qui peut se faire sans nouvelle règle de langage :
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C95**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C96**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README et des notes, puis un commit Conventional Commits. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

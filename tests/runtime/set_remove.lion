@@ -1,0 +1,22 @@
+// `s.remove(x)` removes an element from a Set, if it is there (C95); the others keep
+// their order (C57).
+var s = {3, 1, 4, 5}
+s.remove(1)
+show(s)
+s.remove(9)
+show(s)
+s.add(1)
+show(s)
+show(1 in s)
+var nested = [{1, 2}, {3}]
+nested[1].remove(2)
+show(nested)
+
+struct Word:
+    text in Text
+;
+fun Word.equals(other in Word) in Bool = text_lower(self.text) == text_lower(other.text)
+fun text_lower(t in Text) in Text = if t == "A" then "a" else t
+var words = {Word("a"), Word("b")}
+words.remove(Word("A"))
+show(words)

@@ -38,8 +38,8 @@ impl Checker<'_> {
                     let ast::ExprKind::Field { object, .. } = &callee.kind else { unreachable!() };
                     self.add_stmt(object, args, expr.span)
                 }
-                // `m.remove(key)` changes the Map in place (C79).
-                ast::ExprKind::Call { callee, args } if matches!(&callee.kind, ast::ExprKind::Field { name, object } if name.name == "remove" && matches!(self.place_type(object), Some(Type::Map(_)))) =>
+                // `m.remove(key)` and `s.remove(x)` change the Map or the Set in place (C79, C95).
+                ast::ExprKind::Call { callee, args } if matches!(&callee.kind, ast::ExprKind::Field { name, object } if name.name == "remove" && matches!(self.place_type(object), Some(Type::Map(_) | Type::Set(_)))) =>
                 {
                     let ast::ExprKind::Field { object, .. } = &callee.kind else { unreachable!() };
                     self.remove_stmt(object, args, expr.span)
@@ -319,19 +319,23 @@ impl Checker<'_> {
         self.change_in_place(list, &arg.value, true)
     }
 
-    /// `m.remove(key)`: removes the key, if the Map has it (C79).
+    /// `m.remove(key)`: removes the key, if the Map has it (C79); `s.remove(x)`: removes
+    /// the element, if the Set has it (C95).
     fn remove_stmt(&mut self, map: &ast::Expr, args: &[ast::Arg], span: Span) -> Option<ir::Stmt> {
         let [arg] = args else {
             self.diagnostics.push(
-                Diagnostic::error(format!("`remove` takes one key, not {}", args.len()))
+                Diagnostic::error(format!("`remove` takes one value, not {}", args.len()))
                     .with_primary(span, ""),
             );
             return None;
         };
         let path = self.place_path(map)?;
-        let (key, _) = path.ty().map_parts().expect("a Map");
+        let (key, what) = match path.ty() {
+            Type::Set(element) => (element.get(), "the elements of this Set are"),
+            ty => (ty.map_parts().expect("a Map").0, "the keys of this Map are"),
+        };
         let given = self.expr(&arg.value)?;
-        let context = (map.span, format!("the keys of this Map are {}", article(key)));
+        let context = (map.span, format!("{what} {}", article(key)));
         let given = self.coerce(given, key, Some(context))?;
         let (mut stmts, path) = self.stabilize(path);
         let after = self.check_invariants(&path, false);

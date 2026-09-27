@@ -291,8 +291,26 @@ pub fn add_element(
     Ok(())
 }
 
-/// `m.remove(key)`: removes the key from the Map that the steps reach in `root`, if it
-/// is there (C79).
+/// The position in the Set of the element equal to `value`, with `equals` if the program
+/// defines it (§12.5).
+pub fn set_position(c: &mut dyn Comparer, set: &SetValue, value: &Value) -> Result<Option<usize>, Box<Trap>> {
+    if !c.custom_equality() {
+        return Ok(set.position(value));
+    }
+    if holds_nan(value) {
+        return Ok(None);
+    }
+    for position in set.candidate_positions(value) {
+        let candidate = set.items()[position].clone();
+        if equal(c, &candidate, value)? {
+            return Ok(Some(position));
+        }
+    }
+    Ok(None)
+}
+
+/// `m.remove(key)`, `s.remove(x)`: removes the key from the Map, or the element from the
+/// Set, that the steps reach in `root`, if it is there (C79, C95).
 pub fn remove_element(
     c: &mut dyn Comparer,
     root: &mut Value,
@@ -306,7 +324,12 @@ pub fn remove_element(
                 make_mut(map).remove_at(position);
             }
         }
-        other => panic!("expected a Map but found {}", other.type_name()),
+        Value::Set(set) => {
+            if let Some(position) = set_position(c, set, key)? {
+                make_mut(set).remove_at(position);
+            }
+        }
+        other => panic!("expected a Map or a Set but found {}", other.type_name()),
     }
     Ok(())
 }

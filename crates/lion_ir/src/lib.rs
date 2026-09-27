@@ -182,7 +182,8 @@ pub enum Stmt {
         path: Vec<Step>,
         value: Expr,
     },
-    /// `m.remove(key)`: removes the key of a Map inside `root`, if it is there (C79).
+    /// `m.remove(key)`, `s.remove(x)`: removes the key of a Map, or the element of a Set,
+    /// inside `root`, if it is there (C79, C95).
     Remove {
         root: Place,
         path: Vec<Step>,

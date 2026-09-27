@@ -1,0 +1,6 @@
+// `remove` changes a Set held by a `var`, and takes one element of its type (C95).
+let fixed = {1, 2}
+fixed.remove(1)
+var s = {1, 2}
+s.remove("one")
+s.remove(1, 2)
