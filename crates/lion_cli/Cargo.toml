@@ -15,3 +15,4 @@ lion_ir.workspace = true
 lion_sema.workspace = true
 lion_runtime.workspace = true
 lion_vm.workspace = true
+lion_std.workspace = true

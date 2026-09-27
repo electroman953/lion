@@ -1,0 +1,24 @@
+exit: 2
+----- stdout
+["a", "b", "", "c"]
+a - b - c
+ÉLAN
+lion
+[x y]
+true
+true
+true
+a+b+c
+3
+none
+["one", "two", "", "three"]
+----- stderr
+bug: cannot split a text at an empty separator
+   --> tests/runtime/std_text.lion:14:6
+    |
+ 14 | show(text.split("abc", ""))
+    |      ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = `text.split(t, "")` has no parts to give
+    = help: check the value before the call
+

@@ -56,7 +56,15 @@ pub fn compile(program: &ir::Program) -> Program {
         .enumerate()
         .map(|(index, function)| compile_function(function, index == program.main.index(), &mut shared))
         .collect();
-    Program { functions, layouts, enums, type_sets: shared.type_sets, main: program.main.index() }
+    let module_inits = program.module_inits.iter().map(|init| init.map(|function| function.0)).collect();
+    Program {
+        functions,
+        layouts,
+        enums,
+        type_sets: shared.type_sets,
+        main: program.main.index(),
+        module_inits,
+    }
 }
 
 /// What the functions of a program share while they are compiled.
@@ -163,6 +171,10 @@ impl Compiler<'_> {
                 _ => self.for_list(*var, iterable, body),
             },
             ir::Stmt::Seq(stmts) => self.block(stmts),
+            ir::Stmt::InitModule { module } => {
+                let dst = self.temp();
+                self.emit(Instr::InitModule { module: *module, dst }, None);
+            }
             ir::Stmt::AssignElement { root, path, value } => {
                 let (target, start, depth) = self.path(*root, path);
                 let src = self.operand(value);
@@ -572,6 +584,17 @@ impl Compiler<'_> {
                     _ => Instr::Isqrt { dst, a },
                 };
                 self.emit(instr, span);
+            }
+            ExprKind::CallBuiltin { builtin: Builtin::Native(native), args } => {
+                let start = self.next_temp;
+                for _ in args {
+                    self.temp();
+                }
+                for (offset, arg) in args.iter().enumerate() {
+                    self.expr_into(arg, start + offset as u32);
+                }
+                let count = args.len() as u32;
+                self.emit(Instr::Native { dst, native: *native, start, count }, span);
             }
             ExprKind::CallBuiltin { builtin: Builtin::Broken, args } => {
                 let name = self.operand_before(&args[0], &args[1]);

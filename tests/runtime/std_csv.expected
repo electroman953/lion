@@ -1,0 +1,8 @@
+exit: 0
+----- stdout
+Léa 14 good, very good
+Tom 8 said "hi"
+Zoé 17 error("this line has no value in the column `comment`")
+error("there is no column `age`")
+error("cannot read `tests/runtime/data/missing.csv`: the file does not exist")
+----- stderr

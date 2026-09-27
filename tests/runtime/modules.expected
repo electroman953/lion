@@ -1,0 +1,14 @@
+exit: 0
+----- stdout
+start
+[1] geometry is initialized
+5.0
+6.0
+Point(x: 0.0, y: 0.0)
+square
+true
+(3.0, 4.0)
+[2] from the script
+1.0
+2
+----- stderr

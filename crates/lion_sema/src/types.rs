@@ -42,7 +42,29 @@ impl Checker<'_> {
             ast::TypeExprKind::Named { module, name, args } if module.is_empty() => {
                 return self.named_type(name, args, ty);
             }
-            ast::TypeExprKind::Named { .. } => ("modules", "§20"),
+            ast::TypeExprKind::Named { module, name, args } => {
+                let found = match module.as_slice() {
+                    [single] => self.modules[self.module].imports.get(&single.name).copied(),
+                    _ => None,
+                };
+                let Some(found) = found else {
+                    let path: Vec<&str> = module.iter().map(|part| part.name.as_str()).collect();
+                    self.diagnostics.push(
+                        Diagnostic::error(format!("no module is reached as `{}`", path.join(".")))
+                            .with_primary(ty.span, "")
+                            .with_help(format!(
+                                "add `use {}` at the start of the file (§20.2)",
+                                path.join(".")
+                            )),
+                    );
+                    return None;
+                };
+                if !args.is_empty() {
+                    self.not_implemented(ty.span, "generic types of modules", "§15.1");
+                    return None;
+                }
+                return self.module_type(found, name);
+            }
             // `maybe maybe T` is `maybe T` (§7.3).
             ast::TypeExprKind::Maybe(inner) => return self.resolve_type(inner).map(Type::maybe),
             ast::TypeExprKind::Union(members) => {
@@ -77,7 +99,7 @@ impl Checker<'_> {
             let element = self.resolve_type(element)?;
             return Some(if name.name == "List" { Type::list(element) } else { Type::set(element) });
         }
-        if let Some(&index) = self.struct_names.get(&name.name) {
+        if let Some(&index) = self.tables.struct_names.get(&name.name) {
             if !args.is_empty() {
                 self.diagnostics.push(
                     Diagnostic::error(format!("`{}` does not take type parameters", name.name))
@@ -107,7 +129,7 @@ impl Checker<'_> {
                 .map(|(known, _)| *known)
                 .chain(PLANNED.iter().map(|(p, ..)| *p))
                 .chain(["List", "Set"])
-                .chain(self.type_spans.keys().map(String::as_str));
+                .chain(self.tables.type_spans.keys().map(String::as_str));
             let mut error = Diagnostic::error(format!("cannot find the type `{}`", name.name))
                 .with_primary(name.span, "unknown type");
             if let Some(close) = closest(&name.name, known) {

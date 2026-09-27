@@ -112,6 +112,7 @@ impl Printer<'_> {
                     out.push_str(&format!("{indent}end\n"));
                 }
                 Stmt::Break => out.push_str(&format!("{indent}break\n")),
+                Stmt::InitModule { module } => out.push_str(&format!("{indent}init_module {module}\n")),
                 Stmt::Continue => out.push_str(&format!("{indent}continue\n")),
                 Stmt::Return(None) => out.push_str(&format!("{indent}return\n")),
                 Stmt::Return(Some(value)) => out.push_str(&format!("{indent}return {}\n", self.expr(value))),
@@ -178,6 +179,10 @@ impl Printer<'_> {
             ExprKind::Concat(parts) => {
                 let parts: Vec<String> = parts.iter().map(print).collect();
                 format!("(concat {})", parts.join(" "))
+            }
+            ExprKind::CallBuiltin { builtin: crate::Builtin::Native(native), args } => {
+                let args: Vec<String> = args.iter().map(print).collect();
+                format!("(native {} {})", native.name(), args.join(" "))
             }
             ExprKind::CallBuiltin { builtin, args } => {
                 let args: Vec<String> = args.iter().map(print).collect();

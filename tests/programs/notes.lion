@@ -1,0 +1,29 @@
+use csv
+
+struct Student:
+    name in Text
+    grade in Float, 0 <= grade <= 20
+;
+
+fun Student.passes() in Bool = self.grade >= 10
+
+fun load(path in Text) in List of Student or Error:
+    let rows = try csv.read(path)
+    var students = [] in List of Student
+    for r in rows:
+        let name = try r.get("name")
+        let grade = try r.get("grade") as Float
+        students.add(try Student(name, grade))     // une note de 25 devient une Error
+    ;
+    return students
+;
+
+let result = load("notes.csv")
+if result in Error:
+    show("Erreur : {result.message()}")
+    return
+;
+let admis = {s.name, s in result, s.passes()}
+let moyenne = sum([s.grade, s in result]) / result.size     // NaN si le fichier est vide, avec alerte
+show("Admis : {admis}")
+show("Moyenne : {moyenne}")

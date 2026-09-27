@@ -26,6 +26,18 @@ pub enum Trap {
 }
 
 impl Trap {
+    /// The same trap, placed in the code of the program rather than in hidden code,
+    /// such as the standard library: at the innermost call made from visible code.
+    pub fn located(self, hidden: &dyn Fn(Span) -> bool) -> Trap {
+        match self {
+            Trap::Bug { kind, span, calls } => {
+                let (span, calls) = relocate(span, calls, hidden);
+                Trap::Bug { kind, span, calls }
+            }
+            other => other,
+        }
+    }
+
     pub fn to_diagnostic(&self) -> Diagnostic {
         match self {
             Trap::Bug { kind, span, calls } => {
@@ -66,6 +78,32 @@ impl Trap {
 pub struct Alert {
     pub kind: AlertKind,
     pub span: Option<Span>,
+    /// The calls in progress, innermost first.
+    pub calls: Vec<Span>,
+}
+
+impl Alert {
+    /// The same alert, placed in the code of the program rather than in hidden code,
+    /// such as the standard library: at the innermost call made from visible code.
+    pub fn located(self, hidden: &dyn Fn(Span) -> bool) -> Alert {
+        let (span, calls) = relocate(self.span, self.calls, hidden);
+        Alert { span, calls, ..self }
+    }
+}
+
+/// `span`, or the innermost of `calls` that is not hidden when it is, and the calls
+/// outside the hidden code.
+fn relocate(
+    span: Option<Span>,
+    calls: Vec<Span>,
+    hidden: &dyn Fn(Span) -> bool,
+) -> (Option<Span>, Vec<Span>) {
+    if !span.is_some_and(hidden) {
+        return (span, calls.into_iter().filter(|call| !hidden(*call)).collect());
+    }
+    let mut visible = calls.into_iter().filter(|call| !hidden(*call));
+    let span = visible.next();
+    (span, visible.collect())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -115,6 +153,7 @@ pub fn run(
         input,
         on_alert,
         alerted: HashSet::new(),
+        initialized: vec![false; program.module_inits.len()],
     };
     machine.run().map_err(|fault| *fault)
 }
@@ -152,6 +191,8 @@ struct Machine<'a> {
     on_alert: &'a mut dyn FnMut(Alert),
     /// Instructions (function, index) that already reported an alert.
     alerted: HashSet<(usize, usize)>,
+    /// For each file, whether its globals have their values, or are getting them (D81).
+    initialized: Vec<bool>,
 }
 
 impl Machine<'_> {
@@ -315,6 +356,25 @@ impl Machine<'_> {
                 Instr::Round { dst, a } => {
                     let value = ops::float_round(self.float(a)).map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, Value::Int(value));
+                }
+                Instr::Native { dst, native, start, count } => {
+                    let first = self.base + start as usize;
+                    let args = &self.stack[first..first + count as usize];
+                    let result = crate::natives::call(native, args).map_err(|kind| self.bug(kind, at))?;
+                    if let Some(value) = crate::natives::made_special_float(native, args, &result) {
+                        self.alert(AlertKind::SpecialFloat { value }, at);
+                    }
+                    self.set(dst, result);
+                }
+                Instr::InitModule { module, dst } => {
+                    let module = module as usize;
+                    if !self.initialized[module] {
+                        self.initialized[module] = true;
+                        if let Some(init) = self.program.module_inits[module] {
+                            pc = self.call(init as usize, dst, dst, 0, pc, at)?;
+                            code = &self.chunk.code;
+                        }
+                    }
                 }
                 Instr::Isqrt { dst, a } => {
                     let value = ops::isqrt(self.int(a)).map_err(|kind| self.bug(kind, at))?;
@@ -892,14 +952,17 @@ impl Machine<'_> {
     }
 
     fn bug(&self, kind: BugKind, at: usize) -> Fault {
-        // Each frame but the script's was entered by a call in the frame below it.
-        let calls = self
-            .frames
+        Box::new(Trap::Bug { kind, span: self.chunk.spans[at], calls: self.calls() })
+    }
+
+    /// The places of the calls in progress, innermost first: each frame but the
+    /// script's was entered by a call in the frame below it.
+    fn calls(&self) -> Vec<Span> {
+        self.frames
             .windows(2)
             .rev()
             .filter_map(|pair| self.program.functions[pair[0].function as usize].spans[pair[1].call as usize])
-            .collect();
-        Box::new(Trap::Bug { kind, span: self.chunk.spans[at], calls })
+            .collect()
     }
 
     fn alert(&mut self, kind: AlertKind, at: usize) {
@@ -907,7 +970,8 @@ impl Machine<'_> {
         if self.alerted.insert((function as usize, at)) {
             // What the program wrote so far comes before the alert.
             let _ = self.out.flush();
-            (self.on_alert)(Alert { kind, span: self.chunk.spans[at] });
+            let calls = self.calls();
+            (self.on_alert)(Alert { kind, span: self.chunk.spans[at], calls });
         }
     }
 }

@@ -57,7 +57,9 @@ impl Checker<'_> {
             ast::StmtKind::Return(value) => match self.ctx.kind {
                 ContextKind::Function(index) => self.return_in_function(index, value.as_ref(), stmt.span),
                 ContextKind::Script => self.return_stmt(value.as_ref()),
-                ContextKind::Structure(_) => unreachable!("a structure has no statements"),
+                ContextKind::Structure(_) | ContextKind::Init(_) => {
+                    unreachable!("a structure and the globals of a module have no statements")
+                }
             },
             // Top-level functions are registered beforehand and checked on their own.
             ast::StmtKind::Fun(_) if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 => {
@@ -68,6 +70,18 @@ impl Checker<'_> {
                     decl.name.span,
                     "functions declared inside a block or a function (closures)",
                     "§11.5",
+                );
+                None
+            }
+            // `use` is resolved beforehand, from the top level only (§20.2).
+            ast::StmtKind::Use(_) if self.ctx.kind == ContextKind::Script && self.ctx.scopes.len() == 1 => {
+                None
+            }
+            ast::StmtKind::Use(path) => {
+                self.diagnostics.push(
+                    Diagnostic::error("`use` is written at the top level of the file")
+                        .with_primary(path[0].span, "")
+                        .with_help("move it to the start of the file (§20.2)"),
                 );
                 None
             }
@@ -198,7 +212,7 @@ impl Checker<'_> {
                 if op != ast::AssignOp::Set {
                     self.ctx.reads.push(local);
                 }
-                let global = &self.globals[&self.global_names[&local]];
+                let global = &self.global_info(local);
                 let GlobalType::Known(ty) = global.ty else { return None };
                 (ir::Place::Global(local), ty?, global.decl.name.span)
             }
@@ -341,7 +355,7 @@ impl Checker<'_> {
     ) -> Option<ir::Stmt> {
         // `for d in Days` goes through the values of an enumeration (§13.1).
         let iterable = match &iterable.kind {
-            ast::ExprKind::TypeName(name) if self.named_types.contains_key(name) => {
+            ast::ExprKind::TypeName(name) if self.tables.named_types.contains_key(name) => {
                 self.enum_values(name, iterable.span).or_else(|| {
                     self.diagnostics.push(
                         Diagnostic::error(format!("`for` cannot go through the type `{name}`"))

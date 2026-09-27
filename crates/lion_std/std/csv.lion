@@ -1,0 +1,32 @@
+// CSV files (§23): the first line names the columns; `r.get("col")` gives the value
+// of a line in a column, or an Error (D37).
+
+use files
+
+struct Row:
+    private columns in List of Text
+    private values in List of Text
+;
+
+// The lines of a CSV text, cut into values (RFC 4180: commas, quotes).
+private foreign "lion" fun parse(content in Text) in List of List of Text or Error
+
+// The lines of the file after the first one, which names the columns.
+fun read(path in Text) in List of Row or Error:
+    let content = try files.read(path)
+    let table = try parse(content)
+    if table.size == 0: return [] ;
+    let columns = table[1]
+    return [Row(columns, values), values in table[2..table.size]]
+;
+
+// The value of the line in the column named `column`.
+fun Row.get(column in Text) in Text or Error:
+    for i in 1..self.columns.size:
+        if self.columns[i] == column:
+            if i > self.values.size: return error("this line has no value in the column `{column}`") ;
+            return self.values[i]
+        ;
+    ;
+    return error("there is no column `{column}`")
+;

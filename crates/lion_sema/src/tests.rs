@@ -461,3 +461,51 @@ fn parallel_parts_change_nothing_outside() {
         ["`f` modifies `n`, so it cannot run in parallel"]
     );
 }
+
+/// The IR of a script that uses modules given as (name, text).
+fn check_files(script: &str, modules: &[(&str, &str)]) -> Result<String, Vec<String>> {
+    let mut map = SourceMap::new();
+    let mut parsed = Vec::new();
+    for (name, text) in std::iter::once(&("", script)).chain(modules) {
+        let id = map.add(format!("{name}.lion"), *text);
+        let lexed = lex(id, text);
+        let tree = parse(text, &lexed.tokens);
+        assert!(lexed.diagnostics.is_empty() && tree.diagnostics.is_empty(), "syntax error in {name}");
+        parsed.push((name.to_string(), tree.module));
+    }
+    let files: Vec<crate::Source> = parsed
+        .iter()
+        .map(|(name, module)| crate::Source { name: name.clone(), module, standard: false })
+        .collect();
+    let checked = crate::check_program(&files);
+    match checked.program {
+        Some(program) => Ok(print_program(&program)),
+        None => Err(checked.diagnostics.into_iter().map(|d| d.message).collect()),
+    }
+}
+
+#[test]
+fn modules_keep_their_names_qualified() {
+    let geometry = "struct Point:\n    x in Int\n;\nlet origin = Point(0)\nfun twice(n in Int) in Int = n * 2\nprivate fun hidden() = 1";
+    let ir = check_files(
+        "use geometry\nshow(geometry.twice(2))\nshow(geometry.origin)\nlet p = geometry.Point(1)",
+        &[("geometry", geometry)],
+    )
+    .unwrap();
+    assert!(ir.contains("fun geometry.twice in Int"), "{ir}");
+    // The module gives its globals their values before its first use (D81).
+    assert!(ir.contains("fun geometry.init in None"), "{ir}");
+    assert!(ir.contains("init_module 1"), "{ir}");
+    assert_eq!(
+        check_files("use geometry\nshow(geometry.hidden())", &[("geometry", geometry)]).unwrap_err(),
+        ["`geometry.hidden` is private"]
+    );
+    assert_eq!(
+        check_files("use geometry\nshow(twice(2))", &[("geometry", geometry)]).unwrap_err(),
+        ["cannot find `twice` in this scope"]
+    );
+    assert_eq!(
+        check_files("use geometry\nshow(1)", &[("geometry", "show(1)")]).unwrap_err(),
+        ["a module contains only declarations"]
+    );
+}

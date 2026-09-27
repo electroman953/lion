@@ -1,0 +1,8 @@
+// A module that the other one uses: modules may use each other (§20.2).
+var count = 0
+
+fun note(message in Text, value in Float) in Float modifies count:
+    count += 1
+    show("[{count}] {message}")
+    return value
+;

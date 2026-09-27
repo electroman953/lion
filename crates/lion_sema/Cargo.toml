@@ -9,3 +9,4 @@ lion_diagnostics.workspace = true
 lion_syntax.workspace = true
 lion_ir.workspace = true
 lion_runtime.workspace = true
+lion_std.workspace = true

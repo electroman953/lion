@@ -50,14 +50,14 @@ impl<'a> Checker<'a> {
                     seen.insert(&value.name, value.span);
                     names.push(value.name.clone());
                 }
-                let enumeration = EnumRef::new(name, names, *ordered);
+                let enumeration = EnumRef::new(&self.qualified(name), names, *ordered);
                 self.enums.push(enumeration);
                 NamedType::Enum(enumeration)
             }
             ast::TypeDefKind::Union(_) => NamedType::Union { decl, state: AliasState::Unresolved },
         };
-        self.type_spans.insert(name.clone(), decl.name.span);
-        self.named_types.insert(name.clone(), named);
+        self.tables.type_spans.insert(name.clone(), decl.name.span);
+        self.tables.named_types.insert(name.clone(), named);
     }
 
     /// A new type is named differently from the types of Lion and from the other types
@@ -71,7 +71,7 @@ impl<'a> Checker<'a> {
             );
             return false;
         }
-        if let Some(&first) = self.type_spans.get(&name.name) {
+        if let Some(&first) = self.tables.type_spans.get(&name.name) {
             self.diagnostics.push(
                 Diagnostic::error(format!("the type `{}` is already declared", name.name))
                     .with_primary(name.span, "declared again here")
@@ -84,7 +84,7 @@ impl<'a> Checker<'a> {
 
     /// The type named by a definition, resolving a named union the first time.
     pub(crate) fn defined_type(&mut self, name: &str, span: Span) -> Option<Option<Type>> {
-        let named = self.named_types.get(name)?;
+        let named = self.tables.named_types.get(name)?;
         let (decl, state) = match named {
             NamedType::Enum(enumeration) => return Some(Some(Type::Enum(*enumeration))),
             NamedType::Union { decl, state } => (*decl, *state),
@@ -112,7 +112,7 @@ impl<'a> Checker<'a> {
     }
 
     fn set_alias_state(&mut self, name: &str, new: AliasState) {
-        if let Some(NamedType::Union { state, .. }) = self.named_types.get_mut(name) {
+        if let Some(NamedType::Union { state, .. }) = self.tables.named_types.get_mut(name) {
             *state = new;
         }
     }
@@ -120,6 +120,7 @@ impl<'a> Checker<'a> {
     /// Resolves every named union, to report the errors of those that are never used.
     pub(crate) fn resolve_type_definitions(&mut self) {
         let mut names: Vec<(String, Span)> = self
+            .tables
             .named_types
             .iter()
             .filter_map(|(name, named)| match named {
@@ -169,7 +170,8 @@ impl<'a> Checker<'a> {
     /// `red` alone, where a value of an enumeration of `expected` is expected (D32).
     pub(crate) fn expected_enum_value(&self, expr: &ast::Expr, expected: Type) -> Option<ir::Expr> {
         let ast::ExprKind::Name(name) = &expr.kind else { return None };
-        if self.is_known(name) {
+        // A variable of that name wins; a function is not a value here (§11.3).
+        if self.is_variable(name) {
             return None;
         }
         expected.members().into_iter().find_map(|member| match member {

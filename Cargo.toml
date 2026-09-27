@@ -14,3 +14,9 @@ lion_ir = { path = "crates/lion_ir" }
 lion_sema = { path = "crates/lion_sema" }
 lion_runtime = { path = "crates/lion_runtime" }
 lion_vm = { path = "crates/lion_vm" }
+lion_std = { path = "crates/lion_std" }
+
+# The golden tests run real programs, such as those of §27, with the `dev` binary:
+# a little optimization keeps them fast without slowing builds much.
+[profile.dev]
+opt-level = 1

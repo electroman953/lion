@@ -1,0 +1,26 @@
+// Mathematics (§23): constants, trigonometry, logarithms, basic statistics.
+
+let pi = 3.141592653589793
+let e = 2.718281828459045
+
+foreign "lion" fun sqrt(x in Float) in Float
+foreign "lion" fun sin(x in Float) in Float
+foreign "lion" fun cos(x in Float) in Float
+foreign "lion" fun tan(x in Float) in Float
+foreign "lion" fun asin(x in Float) in Float
+foreign "lion" fun acos(x in Float) in Float
+foreign "lion" fun atan(x in Float) in Float
+// The angle of the point (x, y), from -pi to pi.
+foreign "lion" fun atan2(y in Float, x in Float) in Float
+foreign "lion" fun exp(x in Float) in Float
+// The natural logarithm.
+foreign "lion" fun log(x in Float) in Float
+foreign "lion" fun log10(x in Float) in Float
+
+// For Int and Float values alike.
+fun abs(x) = if x < 0 then -x else x
+fun min(a, b) = if b < a then b else a
+fun max(a, b) = if b > a then b else a
+
+// The mean of a list of numbers; NaN for an empty list, with an alert (§8.2).
+fun mean(values) in Float = sum(values) / values.size

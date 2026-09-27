@@ -10,6 +10,7 @@ dependencies = [
  "lion_ir",
  "lion_runtime",
  "lion_sema",
+ "lion_std",
  "lion_syntax",
  "lion_vm",
 ]
@@ -37,8 +38,13 @@ dependencies = [
  "lion_diagnostics",
  "lion_ir",
  "lion_runtime",
+ "lion_std",
  "lion_syntax",
 ]
+
+[[package]]
+name = "lion_std"
+version = "0.1.0"
 
 [[package]]
 name = "lion_syntax"

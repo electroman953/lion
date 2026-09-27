@@ -21,6 +21,9 @@ pub struct Program {
     pub structs: Vec<StructDef>,
     /// The enumerations, for the names of their values.
     pub enums: Vec<EnumRef>,
+    /// For each file, the function that gives its globals their values, if it has some:
+    /// it runs once, before the first use of the module (§20.2, D81).
+    pub module_inits: Vec<Option<FunctionId>>,
     /// The top-level statements of the file that is run (§20.1). The locals declared
     /// at its top level are the globals, which other functions reach with `Global`.
     pub main: FunctionId,
@@ -157,6 +160,10 @@ pub enum Stmt {
     Continue,
     /// Leaves the function with its value (§11.4); in the script, ends the program (§20.1).
     Return(Option<Expr>),
+    /// Gives the globals of a module their values, unless it is done (D81).
+    InitModule {
+        module: u32,
+    },
 }
 
 #[derive(Clone)]
@@ -406,6 +413,91 @@ pub enum Builtin {
     Round,
     /// `isqrt(n)`: the integer square root (§23).
     Isqrt,
+    /// A function of the standard library provided by the implementation, declared
+    /// `foreign "lion"` (§23).
+    Native(Native),
+}
+
+/// The functions of the standard modules that the implementation provides (§23).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Native {
+    FilesRead,
+    FilesWrite,
+    FilesExists,
+    TextSplit,
+    TextJoin,
+    TextUpper,
+    TextLower,
+    TextTrim,
+    TextContains,
+    TextStartsWith,
+    TextEndsWith,
+    TextReplace,
+    TextFind,
+    TextLines,
+    MathSqrt,
+    MathSin,
+    MathCos,
+    MathTan,
+    MathAsin,
+    MathAcos,
+    MathAtan,
+    MathAtan2,
+    MathExp,
+    MathLog,
+    MathLog10,
+    RandomAdvance,
+    RandomUnit,
+    RandomBelow,
+    RandomSeed,
+    CsvParse,
+}
+
+impl Native {
+    const ALL: &[(&str, &str, Native)] = &[
+        ("files", "read", Native::FilesRead),
+        ("files", "write", Native::FilesWrite),
+        ("files", "exists", Native::FilesExists),
+        ("text", "split", Native::TextSplit),
+        ("text", "join", Native::TextJoin),
+        ("text", "upper", Native::TextUpper),
+        ("text", "lower", Native::TextLower),
+        ("text", "trim", Native::TextTrim),
+        ("text", "contains", Native::TextContains),
+        ("text", "starts_with", Native::TextStartsWith),
+        ("text", "ends_with", Native::TextEndsWith),
+        ("text", "replace", Native::TextReplace),
+        ("text", "find", Native::TextFind),
+        ("text", "lines", Native::TextLines),
+        ("math", "sqrt", Native::MathSqrt),
+        ("math", "sin", Native::MathSin),
+        ("math", "cos", Native::MathCos),
+        ("math", "tan", Native::MathTan),
+        ("math", "asin", Native::MathAsin),
+        ("math", "acos", Native::MathAcos),
+        ("math", "atan", Native::MathAtan),
+        ("math", "atan2", Native::MathAtan2),
+        ("math", "exp", Native::MathExp),
+        ("math", "log", Native::MathLog),
+        ("math", "log10", Native::MathLog10),
+        ("random", "advance", Native::RandomAdvance),
+        ("random", "unit", Native::RandomUnit),
+        ("random", "below", Native::RandomBelow),
+        ("random", "seed", Native::RandomSeed),
+        ("csv", "parse", Native::CsvParse),
+    ];
+
+    /// The function `name` of the standard module `module`.
+    pub fn find(module: &str, name: &str) -> Option<Native> {
+        Native::ALL.iter().find(|(m, n, _)| *m == module && *n == name).map(|(_, _, native)| *native)
+    }
+
+    /// `module.name`.
+    pub fn name(self) -> String {
+        let (module, name, _) =
+            Native::ALL.iter().find(|(.., native)| *native == self).expect("every native is listed");
+        format!("{module}.{name}")
+    }
 }
 
 impl BinaryOp {
@@ -493,6 +585,7 @@ impl Builtin {
             Builtin::Ceil => "ceil",
             Builtin::Round => "round",
             Builtin::Isqrt => "isqrt",
+            Builtin::Native(_) => "native",
         }
     }
 }

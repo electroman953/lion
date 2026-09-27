@@ -17,6 +17,8 @@ const SUITES: &[(&str, &[&str])] = &[
     ("runtime", &["run"]),
     ("errors", &["check"]),
     ("integration", &["run"]),
+    // The programs of the spec (§27), run from their folder, where they find their files.
+    ("programs", &["run"]),
 ];
 
 #[test]
@@ -29,10 +31,15 @@ fn golden() {
         for file in lion_files(&root.join("tests").join(suite)) {
             count += 1;
             let relative = file.strip_prefix(&root).unwrap();
+            let (folder, path) = if *suite == "programs" {
+                (file.parent().unwrap().to_path_buf(), Path::new(file.file_name().unwrap()).to_path_buf())
+            } else {
+                (root.clone(), relative.to_path_buf())
+            };
             let output = Command::new(env!("CARGO_BIN_EXE_lion"))
                 .args(*args)
-                .arg(relative)
-                .current_dir(&root)
+                .arg(&path)
+                .current_dir(&folder)
                 .output()
                 .expect("the lion binary runs");
             let actual = transcript(&output);

@@ -1,0 +1,5 @@
+// A module that runs statements, which only a script may do (D31).
+show("hello")
+var total in Int
+private fun hidden() = 1
+fun visible() = hidden()

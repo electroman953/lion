@@ -1,0 +1,17 @@
+exit: 2
+----- stdout
+true
+[0.3898297483912715, 0.01678829452815611, 0.9007606806068834]
+[4, 5, 6, 3, 3, 5, 6, 4, 2, 5]
+5
+true
+----- stderr
+bug: no number to draw from an empty interval
+   --> tests/runtime/std_random.lion:15:6
+    |
+ 15 | show(dice.int(3, 2))
+    |      ^^^^^^^^^^^^^^
+    |
+    = the interval holds 0 numbers
+    = help: check the value before the call
+

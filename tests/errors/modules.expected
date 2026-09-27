@@ -1,0 +1,81 @@
+exit: 1
+----- stdout
+----- stderr
+error: `shapes.broken.hidden` is private
+  --> tests/errors/modules.lion:4:13
+   |
+ 4 | show(broken.hidden())
+   |             ^^^^^^
+  ::: tests/errors/shapes/broken.lion:4:1
+   |
+ 4 | private fun hidden() = 1
+   | ------- declared `private` here
+   |
+   = `private` limits a declaration to its file (§20.3, D10)
+
+error: the module `shapes.broken` has no `nope`
+  --> tests/errors/modules.lion:5:13
+   |
+ 5 | show(broken.nope)
+   |             ^^^^
+
+error: mismatched types
+   --> tests/errors/modules.lion:6:17
+    |
+  6 | show(text.upper(3))
+    |                 ^ this is an Int
+   ::: <std>/text.lion:10:26
+    |
+ 10 | foreign "lion" fun upper(t in Text) in Text
+    |                          - parameter declared here
+    |
+    = expected: Text
+    = found: Int
+
+error: the module `text` has no structure `Nope`
+  --> tests/errors/modules.lion:7:14
+   |
+ 7 | let t = text.Nope(1)
+   |              ^^^^
+
+error: no module is reached as `nowhere`
+  --> tests/errors/modules.lion:8:10
+   |
+ 8 | let x in nowhere.Type
+   |          ^^^^^^^^^^^^
+   |
+   = help: add `use nowhere` at the start of the file (§20.2)
+
+error: cannot find `csv` in this scope
+  --> tests/errors/modules.lion:9:6
+   |
+ 9 | show(csv.read("a"))
+   |      ^^^ not found
+   |
+   = help: `csv` is a module of the standard library: add `use csv` at the start of the file (§20.2)
+
+error: the field `state` of `random.Generator` is private
+   --> tests/errors/modules.lion:11:8
+    |
+ 11 | show(g.state)
+    |        ^^^^^
+    |
+    = `private` limits a field to the file of its structure (§20.3, D10)
+
+error: a module contains only declarations
+  --> tests/errors/shapes/broken.lion:2:1
+   |
+ 2 | show("hello")
+   | ^^^^^^^^^^^^^ this runs
+   |
+   = only the file that is run executes statements (§20.2, D31)
+
+error: the variable `total` of a module needs a value where it is declared
+  --> tests/errors/shapes/broken.lion:3:5
+   |
+ 3 | var total in Int
+   |     ^^^^^
+   |
+   = a module runs no statements, so nothing else can give it one (§20.2, C62)
+
+9 errors found

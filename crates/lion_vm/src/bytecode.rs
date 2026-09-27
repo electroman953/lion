@@ -178,6 +178,12 @@ pub enum Instr {
     Ceil { dst: Reg, a: Reg },
     Round { dst: Reg, a: Reg },
     Isqrt { dst: Reg, a: Reg },
+    /// A function of the standard library that the implementation provides, on the
+    /// `count` registers from `start` (§23).
+    Native { dst: Reg, native: lion_ir::Native, start: Reg, count: u32 },
+    /// Gives the globals of `module` their values, unless it is done: calls its
+    /// initialization function, whose result goes to `dst` (D81).
+    InitModule { module: u32, dst: Reg },
     Halt,
 }
 
@@ -227,6 +233,8 @@ pub struct Program {
     pub type_sets: Vec<Vec<u32>>,
     /// The script, which runs first.
     pub main: usize,
+    /// For each file, the function that gives its globals their values.
+    pub module_inits: Vec<Option<u32>>,
 }
 
 /// What a value of a structure needs to be shown and compared (§12).

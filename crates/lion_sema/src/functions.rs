@@ -23,12 +23,18 @@ use crate::{Checker, Context, ContextKind, GlobalInfo, GlobalType, LocalInfo, ar
 
 pub(crate) struct FunctionInfo<'a> {
     pub(crate) decl: &'a ast::FunDecl,
+    /// The file that declares it, and how names of that file are qualified: `geometry.`,
+    /// or nothing in the script.
+    pub(crate) module: usize,
+    prefix: String,
     /// For a method, the type of `self` (§12.4).
     pub(crate) receiver: Option<Type>,
     /// A method whose declaration does not write `self`: its first parameter is added.
     implicit_self: bool,
     /// A method declared with `var self`, which changes its object (§12.4).
     pub(crate) var_self: bool,
+    /// A function of the standard library that the implementation provides (§23).
+    native: Option<ir::Native>,
     /// `None` when the declaration has an error or needs what is not implemented.
     signature: Option<Vec<ParamInfo>>,
     /// The return type, when written.
@@ -46,11 +52,11 @@ impl FunctionInfo<'_> {
         self.signature.as_ref().is_some_and(|params| params.iter().any(|param| param.ty.is_none()))
     }
 
-    /// `passes`, or `Student.passes` for a method.
+    /// `passes`, `Student.passes` for a method, `geometry.area` in a module.
     fn full_name(&self) -> String {
         match self.receiver {
             Some(receiver) => format!("{receiver}.{}", self.decl.name.name),
-            None => self.decl.name.name.clone(),
+            None => format!("{}{}", self.prefix, self.decl.name.name),
         }
     }
 }
@@ -180,10 +186,65 @@ impl Instance {
 
 impl<'a> Checker<'a> {
     /// Registers the functions and globals of the file before anything is checked.
-    pub(crate) fn register_top_level(&mut self, module: &'a ast::Module) {
-        self.register_structures(module);
+    /// Registers the declarations of every file before anything is checked (C4): the
+    /// types, then the functions and the globals, then the signatures; then come the
+    /// values of the globals of the modules, and the structures.
+    pub(crate) fn register_program(&mut self) {
+        let count = self.modules.len();
+        for module in 0..count {
+            self.resolve_imports(module);
+            if module > 0 {
+                self.check_module_statements(module);
+            }
+        }
+        for module in 0..count {
+            self.enter_module(module);
+            self.register_types(self.modules[module].ast);
+        }
+        for module in 0..count {
+            self.enter_module(module);
+            self.resolve_type_definitions();
+        }
+        for index in 0..self.structs.len() {
+            self.resolve_fields(index);
+        }
+        for module in 0..count {
+            self.enter_module(module);
+            self.register_top_level(module);
+        }
+        self.enter_module(0);
+        for module in 1..count {
+            let has_globals =
+                self.modules[module].ast.stmts.iter().any(|stmt| matches!(stmt.kind, ast::StmtKind::Let(_)));
+            if has_globals {
+                let name = format!("{}.init", self.modules[module].name);
+                let span = self.modules[module].ast.stmts[0].span;
+                self.modules[module].init = Some(self.synthetic_instance(name, span, Type::None));
+            }
+        }
+        for index in 0..self.functions.len() {
+            let previous = self.enter_module(self.functions[index].module);
+            self.resolve_signature(index);
+            self.enter_module(previous);
+            let function = &self.functions[index];
+            if function.signature.is_some() && !function.is_generic() {
+                let ret = function.declared_ret.map_or(Ret::Unknown, Ret::Declared);
+                let instance = self.new_instance(index, Vec::new(), None, ret);
+                self.functions[index].instance = Some(instance);
+            }
+        }
+        for module in (1..count).rev() {
+            self.check_module_init(module);
+        }
+        self.check_structures();
+        self.enter_module(0);
+    }
+
+    /// The functions and the globals of the module being checked.
+    fn register_top_level(&mut self, module: usize) {
+        let ast = self.modules[module].ast;
         let mut declarations: Vec<&'a ast::LetStmt> = Vec::new();
-        for stmt in &module.stmts {
+        for stmt in &ast.stmts {
             match &stmt.kind {
                 ast::StmtKind::Fun(decl) => self.register_function(decl),
                 ast::StmtKind::Let(decl) => declarations.push(decl),
@@ -192,18 +253,26 @@ impl<'a> Checker<'a> {
         }
         for decl in &declarations {
             let count = declarations.iter().filter(|other| other.name.name == decl.name.name).count();
-            if self.globals.contains_key(&decl.name.name) {
+            if self.tables.globals.contains_key(&decl.name.name) {
                 continue;
             }
             // A name declared once gets its local now, so that functions can refer to it.
             let local = (count == 1).then(|| {
-                let info = LocalInfo::variable(&decl.name, None, decl.mutable, decl.value.is_some());
+                let mut info = LocalInfo::variable(&decl.name, None, decl.mutable, decl.value.is_some());
+                if module > 0 {
+                    info.name = format!("{}.{}", self.modules[module].name, decl.name.name);
+                }
                 let local = self.push_local(info);
                 self.global_names.insert(local, decl.name.name.clone());
+                if module > 0 {
+                    self.global_modules.insert(local, module);
+                }
                 local
             });
-            self.globals.insert(decl.name.name.clone(), GlobalInfo { decl, local, ty: GlobalType::Unknown });
-            if let Some(&function) = self.function_names.get(&decl.name.name) {
+            self.tables
+                .globals
+                .insert(decl.name.name.clone(), GlobalInfo { decl, local, ty: GlobalType::Unknown });
+            if let Some(&function) = self.tables.function_names.get(&decl.name.name) {
                 self.diagnostics.push(
                     Diagnostic::error(format!("`{}` names both a function and a variable", decl.name.name))
                         .with_primary(decl.name.span, "variable declared here")
@@ -212,24 +281,17 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        for index in 0..self.functions.len() {
-            self.resolve_signature(index);
-            let function = &self.functions[index];
-            if function.signature.is_some() && !function.is_generic() {
-                let ret = function.declared_ret.map_or(Ret::Unknown, Ret::Declared);
-                let instance = self.new_instance(index, Vec::new(), None, ret);
-                self.functions[index].instance = Some(instance);
-            }
-        }
-        self.check_structures();
     }
 
     fn register_function(&mut self, decl: &'a ast::FunDecl) {
         let info = FunctionInfo {
             decl,
+            module: self.module,
+            prefix: self.qualified(""),
             receiver: None,
             implicit_self: false,
             var_self: false,
+            native: None,
             signature: None,
             declared_ret: None,
             modifies: Vec::new(),
@@ -241,11 +303,11 @@ impl<'a> Checker<'a> {
             if !self.check_method_name(ty, decl) {
                 return;
             }
-            self.methods.insert((ty, decl.name.name.clone()), self.functions.len());
+            self.methods.entry((ty, decl.name.name.clone())).or_default().push(self.functions.len());
             self.functions.push(FunctionInfo { receiver: Some(ty), ..info });
             return;
         }
-        if let Some(&previous) = self.function_names.get(&decl.name.name) {
+        if let Some(&previous) = self.tables.function_names.get(&decl.name.name) {
             self.diagnostics.push(
                 Diagnostic::error(format!("the function `{}` is already declared", decl.name.name))
                     .with_primary(decl.name.span, "declared again here")
@@ -254,13 +316,13 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        self.function_names.insert(decl.name.name.clone(), self.functions.len());
+        self.tables.function_names.insert(decl.name.name.clone(), self.functions.len());
         self.functions.push(info);
     }
 
     /// The type of `self` in `fun Type.name(...)`: a structure, or a basic type (§12.4).
     fn receiver_type(&mut self, receiver: &ast::Ident) -> Option<Type> {
-        if let Some(&index) = self.struct_names.get(&receiver.name) {
+        if let Some(&index) = self.tables.struct_names.get(&receiver.name) {
             return Some(Type::Struct(self.structs[index].id));
         }
         let ty = ast::TypeExpr {
@@ -277,7 +339,10 @@ impl<'a> Checker<'a> {
     /// A method has its own name among the methods and the fields of its type.
     fn check_method_name(&mut self, ty: Type, decl: &ast::FunDecl) -> bool {
         let name = &decl.name.name;
-        if let Some(&previous) = self.methods.get(&(ty, name.clone())) {
+        let same_module = self.methods.get(&(ty, name.clone())).and_then(|methods| {
+            methods.iter().copied().find(|&method| self.functions[method].module == self.module)
+        });
+        if let Some(previous) = same_module {
             self.diagnostics.push(
                 Diagnostic::error(format!("the method `{ty}.{name}` is already declared"))
                     .with_primary(decl.name.span, "declared again here")
@@ -351,6 +416,9 @@ impl<'a> Checker<'a> {
         if let Some((name, _)) = decl.type_params.first() {
             self.not_implemented(name.span, "type variables", "§15.2");
             supported = false;
+        }
+        if let Some((abi, span)) = &decl.foreign {
+            supported &= self.foreign_function(index, abi, *span);
         }
         let mut params = Vec::new();
         // `self` is the first parameter of a method: written `var self` when the method
@@ -467,7 +535,7 @@ impl<'a> Checker<'a> {
 
     /// A name after `modifies`: a `var` of the script, declared once.
     fn modified_global(&mut self, name: &ast::Ident) -> Option<ir::LocalId> {
-        let Some(global) = self.globals.get(&name.name) else {
+        let Some(global) = self.tables.globals.get(&name.name) else {
             self.diagnostics.push(
                 Diagnostic::error(format!("`{}` is not a variable of the script", name.name))
                     .with_primary(name.span, "")
@@ -510,7 +578,9 @@ impl<'a> Checker<'a> {
             index += 1;
         }
         for function in &self.functions {
-            if function.is_generic() && function.instances.is_empty() {
+            // The functions of the standard library are checked by its own tests.
+            let standard = self.modules[function.module].standard;
+            if function.is_generic() && function.instances.is_empty() && !standard {
                 let name = &function.decl.name.name;
                 self.diagnostics.push(
                     Diagnostic::new(lion_diagnostics::Severity::Warning, format!("`{name}` is never called, so it is not checked"))
@@ -532,9 +602,11 @@ impl<'a> Checker<'a> {
             self.instances[instance].ret = Ret::Inferring;
         }
         let first_diagnostic = self.diagnostics.len();
+        let previous = self.enter_module(self.functions[function].module);
         let interrupted = std::mem::replace(&mut self.ctx, Context::new(ContextKind::Function(instance)));
         let (body, defaults, param_types) = self.function_body(instance, &params);
         let ctx = std::mem::replace(&mut self.ctx, interrupted);
+        self.enter_module(previous);
         // An error in a generic function shows which call created the instance.
         if let Some(origin) = self.instances[instance].origin {
             let name = &self.functions[function].decl.name.name;
@@ -625,7 +697,25 @@ impl<'a> Checker<'a> {
             ast::FunBody::Expr(value) => {
                 self.return_in_function(instance, Some(value), value.span).into_iter().collect()
             }
+            // The implementation computes the value from the parameters.
+            ast::FunBody::Foreign => {
+                let native = self.functions[function].native.expect("a checked foreign function is native");
+                let args = ids
+                    .iter()
+                    .zip(&param_types)
+                    .map(|(id, ty)| typed(ir::ExprKind::Local(*id), *ty, decl.name.span))
+                    .collect();
+                let ret = self.declared_return(instance).unwrap_or(Type::None);
+                let kind = ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Native(native), args };
+                self.ctx.flow = crate::flow::Flow::unreachable();
+                vec![ir::Stmt::Return(Some(typed(kind, ret, decl.name.span)))]
+            }
         };
+        // A function of a module gives the globals of its module their values first (D81).
+        let module = self.functions[function].module;
+        if module > 0 && self.modules[module].init.is_some() {
+            body.insert(0, ir::Stmt::InitModule { module: module as u32 });
+        }
         let falls_through = self.ctx.flow.is_reachable();
         self.close_scope();
         let ret = self.settle_return_type(instance);
@@ -851,11 +941,16 @@ impl<'a> Checker<'a> {
         };
         let ret = self.return_type_of(instance, callee)?;
         self.ctx.calls.push(instance);
+        self.record_early_call(instance, span);
         if self.ctx.kind == ContextKind::Script {
-            let unassigned = self.unassigned_globals();
-            self.script_calls.push(ScriptCall { instance, span, unassigned });
-            // The function may change the globals: what was known of them is forgotten.
-            let globals: Vec<ir::LocalId> = self.globals.values().filter_map(|global| global.local).collect();
+            // The function may change the `var` globals: what was known of them is forgotten.
+            let globals: Vec<ir::LocalId> = self
+                .tables
+                .globals
+                .values()
+                .filter(|global| global.decl.mutable)
+                .filter_map(|global| global.local)
+                .collect();
             for global in globals {
                 self.ctx.flow.narrow(global, None);
             }
@@ -974,7 +1069,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 self.ctx.reads.push(local);
-                let global = &self.globals[&self.global_names[&local]];
+                let global = &self.global_info(local);
                 let GlobalType::Known(ty) = global.ty else { return None };
                 (ir::Place::Global(local), ty?, true, global.decl.name.span)
             }
@@ -1071,6 +1166,38 @@ impl<'a> Checker<'a> {
         call
     }
 
+    /// `foreign "lion" fun`: a function of the standard library that the implementation
+    /// provides. Other foreign functions call C code (§21.2).
+    fn foreign_function(&mut self, index: usize, abi: &str, span: Span) -> bool {
+        let function = &self.functions[index];
+        let decl = function.decl;
+        let module = &self.modules[function.module];
+        if abi != "lion" {
+            self.not_implemented(span, "calling C code", "§21.2");
+            return false;
+        }
+        let native = ir::Native::find(&module.name, &decl.name.name).filter(|_| module.standard);
+        let Some(native) = native.filter(|_| decl.receiver.is_none()) else {
+            self.diagnostics.push(
+                Diagnostic::error(format!("`{}` is not a function that Lion provides", decl.name.name))
+                    .with_primary(decl.name.span, "")
+                    .with_note("`foreign \"lion\"` declares the functions of the standard library that the implementation provides (§23)"),
+            );
+            return false;
+        };
+        if decl.params.iter().any(|param| param.ty.is_none()) || decl.ret.is_none() {
+            self.diagnostics.push(
+                Diagnostic::internal(
+                    "a foreign function writes the types of its parameters and of its value",
+                )
+                .with_primary(decl.name.span, ""),
+            );
+            return false;
+        }
+        self.functions[index].native = Some(native);
+        true
+    }
+
     /// A global that `instance` modifies, directly or through the instances it calls,
     /// and the instance that modifies it directly (§11.5).
     pub(crate) fn modified_global_of(&self, instance: usize) -> Option<(ir::LocalId, Option<usize>)> {
@@ -1136,15 +1263,31 @@ impl<'a> Checker<'a> {
     /// script makes it (C3).
     pub(crate) fn calls_synthetic(&mut self, instance: usize, span: Span) {
         self.ctx.calls.push(instance);
-        if self.ctx.kind == ContextKind::Script {
-            let unassigned = self.unassigned_globals();
-            self.script_calls.push(ScriptCall { instance, span, unassigned });
-        }
+        self.record_early_call(instance, span);
+    }
+
+    /// A call made by the script or by the values of the globals of a module: the
+    /// function must not read a global that may have no value yet (C3).
+    fn record_early_call(&mut self, instance: usize, span: Span) {
+        let unassigned = match self.ctx.kind {
+            ContextKind::Script => self.unassigned_globals(),
+            // The globals of the module that come later have no value yet.
+            ContextKind::Init(_) => self
+                .tables
+                .globals
+                .values()
+                .filter(|global| matches!(global.ty, GlobalType::Unknown))
+                .filter_map(|global| global.local)
+                .collect(),
+            _ => return,
+        };
+        self.script_calls.push(ScriptCall { instance, span, unassigned });
     }
 
     /// The globals that may have no value at the current point of the script.
     fn unassigned_globals(&self) -> Vec<ir::LocalId> {
-        self.globals
+        self.tables
+            .globals
             .values()
             .filter_map(|global| global.local)
             .filter(|&local| self.ctx.flow.get(local) != Assigned::Yes)
@@ -1155,7 +1298,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_global_assignment(&mut self, local: ir::LocalId, span: Span) -> bool {
         let ContextKind::Function(instance) = self.ctx.kind else { return true };
         let function = &self.functions[self.instances[instance].function];
-        let global = &self.globals[&self.global_names[&local]];
+        let global = &self.global_info(local);
         let (decl, name) = (global.decl, &global.decl.name.name);
         let error = if !decl.mutable && decl.value.is_none() {
             Diagnostic::error(format!(
@@ -1209,7 +1352,7 @@ impl<'a> Checker<'a> {
                 .collect();
             unassigned.sort_by_key(|local| local.0);
             for global in unassigned {
-                let decl = self.globals[&self.global_names[&global]].decl;
+                let decl = self.global_info(global).decl;
                 let function = &self.instance_name(call.instance);
                 self.diagnostics.push(
                     Diagnostic::error(format!(
@@ -1257,6 +1400,7 @@ fn widen_returns(stmts: &mut [ir::Stmt]) {
                 widen_returns(body)
             }
             ir::Stmt::Assign { .. }
+            | ir::Stmt::InitModule { .. }
             | ir::Stmt::Expr(_)
             | ir::Stmt::AssignElement { .. }
             | ir::Stmt::Add { .. }

@@ -18,6 +18,8 @@ use crate::{Checker, Context, ContextKind, LocalInfo, article, capitalize, typed
 
 pub(crate) struct StructInfo<'a> {
     pub(crate) decl: &'a ast::StructDecl,
+    /// The file that declares it.
+    pub(crate) module: usize,
     pub(crate) id: StructRef,
     pub(crate) fields: Vec<FieldInfo>,
     state: State,
@@ -51,6 +53,8 @@ pub(crate) struct FieldInfo {
     /// Known once the structure is checked: a constant (C48).
     default: Option<Const>,
     has_default: bool,
+    /// `private`: read and changed only in the file of the structure (D10).
+    private: bool,
 }
 
 struct CheckedCondition {
@@ -96,7 +100,7 @@ enum Verdict {
 impl<'a> Checker<'a> {
     /// Registers the structures of the file, then the types of their fields, which may
     /// name any of them.
-    pub(crate) fn register_structures(&mut self, module: &'a ast::Module) {
+    pub(crate) fn register_types(&mut self, module: &'a ast::Module) {
         for stmt in &module.stmts {
             match &stmt.kind {
                 ast::StmtKind::Struct(decl) => self.register_structure(decl),
@@ -104,9 +108,18 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
-        self.resolve_type_definitions();
-        for index in 0..self.structs.len() {
-            self.resolve_fields(index);
+    }
+
+    /// The name of a type of the module being checked, as messages and values show it:
+    /// qualified by the module, except in the script.
+    pub(crate) fn qualified(&self, name: &str) -> String {
+        // A module is reached by the last part of its path (C61).
+        match self.module {
+            0 => name.to_string(),
+            module => {
+                let path = &self.modules[module].name;
+                format!("{}.{name}", path.rsplit('.').next().unwrap_or(path))
+            }
         }
     }
 
@@ -115,11 +128,13 @@ impl<'a> Checker<'a> {
         if !self.check_type_name(&decl.name) {
             return;
         }
-        self.type_spans.insert(name.clone(), decl.name.span);
-        self.struct_names.insert(name.clone(), self.structs.len());
+        self.tables.type_spans.insert(name.clone(), decl.name.span);
+        self.tables.struct_names.insert(name.clone(), self.structs.len());
+        let qualified = self.qualified(name);
         self.structs.push(StructInfo {
             decl,
-            id: StructRef::new(name),
+            id: StructRef::new(&qualified),
+            module: self.module,
             fields: Vec::new(),
             state: State::Unchecked,
             valid: true,
@@ -131,7 +146,13 @@ impl<'a> Checker<'a> {
         });
     }
 
-    fn resolve_fields(&mut self, index: usize) {
+    pub(crate) fn resolve_fields(&mut self, index: usize) {
+        let previous = self.enter_module(self.structs[index].module);
+        self.resolve_fields_here(index);
+        self.enter_module(previous);
+    }
+
+    fn resolve_fields_here(&mut self, index: usize) {
         let decl = self.structs[index].decl;
         let mut fields: Vec<FieldInfo> = Vec::new();
         let mut valid = true;
@@ -154,6 +175,7 @@ impl<'a> Checker<'a> {
                 ty,
                 default: None,
                 has_default: field.default.is_some(),
+                private: field.private.is_some(),
             });
         }
         let info = &mut self.structs[index];
@@ -189,6 +211,7 @@ impl<'a> Checker<'a> {
             }
             State::Unchecked => {
                 self.structs[index].state = State::Checking;
+                let previous = self.enter_module(self.structs[index].module);
                 let interrupted =
                     std::mem::replace(&mut self.ctx, Context::new(ContextKind::Structure(index)));
                 self.check_defaults(index);
@@ -196,6 +219,7 @@ impl<'a> Checker<'a> {
                 self.ctx = Context::new(ContextKind::Structure(index));
                 self.check_conditions(index);
                 self.ctx = interrupted;
+                self.enter_module(previous);
                 self.structs[index].state = State::Checked;
                 self.structs[index].valid
             }
@@ -685,12 +709,20 @@ impl<'a> Checker<'a> {
         let index = self.struct_index(structure);
         let fields = &self.structs[index].fields;
         if let Some(position) = fields.iter().position(|field| field.name == name.name) {
+            if fields[position].private && self.structs[index].module != self.module {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("the field `{}` of `{}` is private", name.name, structure.name()))
+                        .with_primary(name.span, "")
+                        .with_note("`private` limits a field to the file of its structure (§20.3, D10)"),
+                );
+                return None;
+            }
             return Some((position as u32, fields[position].ty?));
         }
         let mut error = Diagnostic::error(format!("`{}` has no field `{}`", structure.name(), name.name))
             .with_primary(name.span, "")
             .with_secondary(self.structs[index].decl.name.span, "declared here");
-        if self.methods.contains_key(&(ty, name.name.clone())) {
+        if self.visible_method(ty, &name.name).is_some() {
             error = error.with_note(format!("`{0}` is a method: call it with `.{0}()`", name.name));
         } else if let Some(close) = closest(&name.name, fields.iter().map(|field| field.name.as_str())) {
             error = error.with_help(format!("a similar field exists: `{close}`"));

@@ -1,0 +1,7 @@
+// Two modules that use each other (§20.2).
+use cycle.even
+use cycle.odd
+
+show(even.is_even(10))
+show(odd.is_odd(7))
+show(even.is_even(3))

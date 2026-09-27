@@ -1,0 +1,27 @@
+// Texts (§23): searching, splitting, replacing, changing the case. Positions count
+// characters, from 1, as `t[i]` (§16.2).
+
+// The parts of `t` between the separators; an empty separator is refused (bug).
+foreign "lion" fun split(t in Text, separator in Text) in List of Text
+
+// The parts, with the separator between them.
+foreign "lion" fun join(parts in List of Text, separator in Text) in Text
+
+foreign "lion" fun upper(t in Text) in Text
+foreign "lion" fun lower(t in Text) in Text
+
+// Without the spaces, tabs and line ends at both ends.
+foreign "lion" fun trim(t in Text) in Text
+
+foreign "lion" fun contains(t in Text, part in Text) in Bool
+foreign "lion" fun starts_with(t in Text, start in Text) in Bool
+foreign "lion" fun ends_with(t in Text, end in Text) in Bool
+
+// Every occurrence of `old` replaced by `new`.
+foreign "lion" fun replace(t in Text, old in Text, new in Text) in Text
+
+// The position of the first occurrence of `part`, or `none`.
+foreign "lion" fun find(t in Text, part in Text) in maybe Int
+
+// The lines, without their ends (`\n` or `\r\n`).
+foreign "lion" fun lines(t in Text) in List of Text

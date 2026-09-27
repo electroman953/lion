@@ -1,0 +1,8 @@
+use files
+let path = "target/lion-std-files-test.txt"
+show(files.write(path, "one\ntwo\n"))
+show(files.exists(path))
+show(files.read(path))
+show(files.lines(path))
+show(files.read("target/no-such-file.txt"))
+show(files.exists("target/no-such-file.txt"))

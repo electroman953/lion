@@ -1,0 +1,5 @@
+exit: 0
+----- stdout
+π ≈ 3.141204
+Couples de premiers jumeaux : 8169
+----- stderr

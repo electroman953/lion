@@ -135,7 +135,7 @@ impl Checker<'_> {
                     return None;
                 }
                 self.ctx.reads.push(local);
-                let GlobalType::Known(ty) = self.globals[&self.global_names[&local]].ty else { return None };
+                let GlobalType::Known(ty) = self.global_info(local).ty else { return None };
                 Some((ir::Place::Global(local), ty?, false))
             }
             Resolved::Function(_) | Resolved::Standard(_) => {

@@ -101,7 +101,9 @@ impl<'t> Parser<'t> {
                 Ok(Stmt { kind: StmtKind::Continue, span: self.bump().span })
             }
             TokenKind::Keyword(Keyword::Return) => self.return_statement(),
-            TokenKind::Keyword(Keyword::Fun | Keyword::Infix) => self.fun_statement(),
+            TokenKind::Keyword(Keyword::Fun | Keyword::Infix | Keyword::Foreign) => self.fun_statement(),
+            TokenKind::Keyword(Keyword::Use) => self.use_statement(),
+            TokenKind::Keyword(Keyword::Private) => self.private_statement(),
             TokenKind::Keyword(Keyword::Struct) => self.struct_statement(),
             TokenKind::UpperIdent(_) if self.kind_at(self.pos + 1) == &TokenKind::Assign => {
                 self.type_definition()
@@ -126,12 +128,52 @@ impl<'t> Parser<'t> {
         let TokenKind::Keyword(keyword) = self.peek() else { return None };
         Some(match keyword {
             Keyword::Trait => ("traits", "§14"),
-            Keyword::Use => ("modules", "§20"),
-            Keyword::Private => ("`private`", "§20.3"),
             Keyword::Test | Keyword::Expect => ("tests", "§24.1"),
-            Keyword::Foreign | Keyword::Unsafe => ("calling C code", "§21.2"),
+            Keyword::Unsafe => ("calling C code", "§21.2"),
             _ => return None,
         })
+    }
+
+    /// `use geometry`, `use shapes.circle` (§20.2).
+    fn use_statement(&mut self) -> PResult<Stmt> {
+        let start = self.bump().span;
+        let mut path = vec![self.binding_name()?];
+        while self.eat(&TokenKind::Dot) {
+            path.push(self.binding_name()?);
+        }
+        let end = path.last().expect("one name").span;
+        Ok(Stmt { kind: StmtKind::Use(path), span: start.to(end) })
+    }
+
+    /// `private` before a function or a variable of the file (§20.3, D10).
+    fn private_statement(&mut self) -> PResult<Stmt> {
+        let private = self.span();
+        match self.kind_at(self.pos + 1) {
+            TokenKind::Keyword(Keyword::Fun | Keyword::Infix | Keyword::Foreign) => {
+                self.bump();
+                let mut stmt = self.fun_statement()?;
+                if let StmtKind::Fun(decl) = &mut stmt.kind {
+                    decl.private = Some(private);
+                }
+                stmt.span = private.to(stmt.span);
+                Ok(stmt)
+            }
+            TokenKind::Keyword(Keyword::Let | Keyword::Var) => {
+                self.bump();
+                let mut stmt = self.let_statement()?;
+                if let StmtKind::Let(decl) = &mut stmt.kind {
+                    decl.private = Some(private);
+                }
+                stmt.span = private.to(stmt.span);
+                Ok(stmt)
+            }
+            _ => {
+                let error = Diagnostic::error("`private` goes before a function, a variable or a field")
+                    .with_primary(private, "")
+                    .with_note("`private` limits a declaration to its file (§20.3)");
+                Err(self.error(error))
+            }
+        }
     }
 
     /// `let x = value`, `var x = value in T`, `var x in T` (§6.1).
@@ -152,7 +194,7 @@ impl<'t> Parser<'t> {
             return Err(self.error(error));
         }
         let span = keyword.span.to(self.previous_span());
-        Ok(Stmt { kind: StmtKind::Let(LetStmt { mutable, name, value, annotation }), span })
+        Ok(Stmt { kind: StmtKind::Let(LetStmt { private: None, mutable, name, value, annotation }), span })
     }
 
     fn binding_name(&mut self) -> PResult<Ident> {
@@ -234,8 +276,28 @@ impl<'t> Parser<'t> {
     /// `[infix] fun [Type.]name(params) [in T] [, T in Trait] [modifies x, y]`, then
     /// `: body ;` or `= expr` (§11.1, §26).
     fn fun_statement(&mut self) -> PResult<Stmt> {
-        let index = self.pos;
         let start = self.span();
+        let foreign = if self.at_keyword(Keyword::Foreign) {
+            let keyword = self.bump().span;
+            let TokenKind::TextStart = self.peek() else {
+                return Err(
+                    self.expected("the text that names where the function comes from, as `foreign \"C\"`")
+                );
+            };
+            let text = self.text()?;
+            let ExprKind::Text(parts) = &text.kind else { unreachable!("a text") };
+            let [TextPart::Literal(name)] = parts.as_slice() else {
+                return Err(self
+                    .error(Diagnostic::error("this text has no interpolation").with_primary(text.span, "")));
+            };
+            let name = name.clone();
+            // `pure` says the function changes no state (D48).
+            self.eat_keyword(Keyword::Pure);
+            Some((name, keyword.to(text.span)))
+        } else {
+            None
+        };
+        let index = self.pos;
         let infix = self.eat_keyword(Keyword::Infix);
         if !self.eat_keyword(Keyword::Fun) {
             return Err(self.expected("`fun`"));
@@ -281,7 +343,9 @@ impl<'t> Parser<'t> {
                 }
             }
         }
-        let body = if self.eat(&TokenKind::Assign) {
+        let body = if foreign.is_some() {
+            FunBody::Foreign
+        } else if self.eat(&TokenKind::Assign) {
             let value = self.expr()?;
             if matches!(
                 self.peek(),
@@ -305,7 +369,18 @@ impl<'t> Parser<'t> {
         } else {
             return Err(self.expected("`:` and the body of the function, or `=` and its value"));
         };
-        let decl = FunDecl { infix, receiver, name, params, ret, type_params, modifies, body };
+        let decl = FunDecl {
+            private: None,
+            foreign,
+            infix,
+            receiver,
+            name,
+            params,
+            ret,
+            type_params,
+            modifies,
+            body,
+        };
         Ok(Stmt { kind: StmtKind::Fun(decl), span: start.to(self.previous_span()) })
     }
 

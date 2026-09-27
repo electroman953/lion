@@ -1,0 +1,32 @@
+// Random numbers (§23). A `Generator` gives the same numbers from the same seed, on
+// every system and in both modes (SplitMix64). The functions `float` and `int` use a
+// generator of the module, seeded differently at each run: they change a hidden
+// state, so they cannot run in parallel (§19.3).
+
+struct Generator:
+    private state in Int
+;
+
+private foreign "lion" fun advance(state in Int) in Int
+// A Float from 0.0 included to 1.0 excluded.
+private foreign "lion" fun unit(state in Int) in Float
+// An Int from 0 to `count - 1`; `count` below 1 is a bug.
+private foreign "lion" fun below(state in Int, count in Int) in Int
+private foreign "lion" fun seed() in Int
+
+// A Float from 0.0 included to 1.0 excluded.
+fun Generator.float(var self) in Float:
+    self.state = advance(self.state)
+    return unit(self.state)
+;
+
+// An Int from `low` to `high`, both included.
+fun Generator.int(var self, low in Int, high in Int) in Int:
+    self.state = advance(self.state)
+    return low + below(self.state, high - low + 1)
+;
+
+private var generator = Generator(seed())
+
+fun float() in Float modifies generator = generator.float()
+fun int(low in Int, high in Int) in Int modifies generator = generator.int(low, high)

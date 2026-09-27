@@ -1,0 +1,18 @@
+// Files (§23): every operation that can fail gives `T or Error`.
+
+use text
+
+// The content of the file, as a Text.
+foreign "lion" fun read(path in Text) in Text or Error
+
+// Replaces the content of the file, creating it when needed.
+foreign "lion" fun write(path in Text, content in Text) in None or Error
+
+// Whether a file or a folder exists at this path.
+foreign "lion" fun exists(path in Text) in Bool
+
+// The lines of the file, without their ends.
+fun lines(path in Text) in List of Text or Error:
+    let content = try read(path)
+    return text.lines(content)
+;

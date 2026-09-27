@@ -1,0 +1,26 @@
+exit: 0
+----- stdout
+3.141592653589793
+2.718281828459045
+4.0
+2
+2.5
+1
+2.5
+2.5
+1000
+3.141592653589793
+1.0
+3.0
+1.0
+NaN
+----- stderr
+alert: this operation produced NaN
+   --> tests/runtime/std_math.lion:15:6
+    |
+ 15 | show(math.sqrt(-1.0))
+    |      ^^^^^^^^^^^^^^^
+    |
+    = Float follows IEEE 754 (§8.2)
+    = alerts are reported only in interpreted mode, once per location (§22.3)
+

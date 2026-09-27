@@ -134,6 +134,9 @@ impl Checker<'_> {
             ast::ExprKind::Paren(inner) => {
                 self.expr_expecting(inner, expected).map(|value| ir::Expr { span: expr.span, ..value })
             }
+            ast::ExprKind::If { branches, otherwise } => {
+                self.if_expr(branches, otherwise.as_deref(), expr.span, Some(expected))
+            }
             // The elements of a list expect the type of the elements: `[red, blue] in List of Color`.
             ast::ExprKind::List(elements) | ast::ExprKind::Set(elements)
                 if !elements.is_empty() && !self.generators(elements).contains(&true) =>
@@ -169,7 +172,7 @@ impl Checker<'_> {
     /// the context gives (D32).
     pub(crate) fn is_bare_unknown_name(&self, expr: &ast::Expr) -> bool {
         match &expr.kind {
-            ast::ExprKind::Name(name) => !self.is_known(name) && !self.enums_with_value(name).is_empty(),
+            ast::ExprKind::Name(name) => !self.is_variable(name) && !self.enums_with_value(name).is_empty(),
             ast::ExprKind::Paren(inner) => self.is_bare_unknown_name(inner),
             _ => false,
         }
@@ -256,7 +259,9 @@ impl Checker<'_> {
                 }
             }
         }
-        let output = if implicit_output {
+        let output = if !valid {
+            None
+        } else if implicit_output {
             first_var.map(|var| {
                 let ty = self.ctx.locals[var.index()].ty.unwrap_or(Type::None);
                 typed(ir::ExprKind::Local(var), ty, elements[0].span)
@@ -292,7 +297,7 @@ impl Checker<'_> {
                     ast::TypeExprKind::Named { module, name, args }
                         if module.is_empty()
                             && args.is_empty()
-                            && self.named_types.contains_key(&name.name) =>
+                            && self.tables.named_types.contains_key(&name.name) =>
                     {
                         self.enum_values(&name.name, ty.span)
                     }
@@ -381,7 +386,7 @@ impl Checker<'_> {
     pub(crate) fn property(&mut self, object: &ast::Expr, name: &ast::Ident, span: Span) -> Option<ir::Expr> {
         let object = self.expr(object)?;
         let object = self.within_try(object);
-        if self.methods.contains_key(&(object.ty, name.name.clone())) {
+        if self.visible_method(object.ty, &name.name).is_some() {
             self.not_implemented(span, "methods used as values (detached methods)", "§12.6");
             return None;
         }

@@ -64,6 +64,8 @@ pub enum StmtKind {
     Struct(StructDecl),
     /// `Color = {red, green}`, `Days = [mon, tue]`, `Shape = Circle or Rect` (§13).
     TypeDef(TypeDef),
+    /// `use geometry`, `use shapes.circle` (§20.2).
+    Use(Vec<Ident>),
 }
 
 #[derive(Clone, Debug)]
@@ -136,6 +138,11 @@ pub enum Pattern {
 
 #[derive(Clone, Debug)]
 pub struct FunDecl {
+    /// `private fun`: visible only in its file (§20.3, D10).
+    pub private: Option<Span>,
+    /// `foreign "lion" fun`: provided by the implementation, in the standard library
+    /// (§21.2). The text is the one after `foreign`.
+    pub foreign: Option<(String, Span)>,
     /// `infix fun` (§9.5).
     pub infix: bool,
     /// The type of `self` in `fun Student.passes()` (§12.4).
@@ -166,6 +173,8 @@ pub enum FunBody {
     Block(Block),
     /// The short form `= expr` (§11.1, D7).
     Expr(Expr),
+    /// A `foreign` function has no body.
+    Foreign,
 }
 
 /// One `if` or `elif` branch of an `if` statement.
@@ -183,6 +192,8 @@ pub struct Block {
 
 #[derive(Clone, Debug)]
 pub struct LetStmt {
+    /// `private let`, `private var`: visible only in its file (§20.3, D10).
+    pub private: Option<Span>,
     /// `var` rather than `let`.
     pub mutable: bool,
     pub name: Ident,

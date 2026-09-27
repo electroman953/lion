@@ -7,5 +7,6 @@
 pub mod bug;
 pub mod format;
 pub mod ops;
+pub mod stdlib;
 
 pub use bug::{BugKind, IntOp, MAX_CALL_DEPTH};

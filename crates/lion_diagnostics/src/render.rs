@@ -22,16 +22,39 @@ pub fn render(diagnostic: &Diagnostic, sources: &SourceMap) -> String {
         render_footer(&mut out, 0, diagnostic);
         return out;
     };
-    let file = sources.get(primary.span.source);
-    let labels: Vec<&Label> =
-        diagnostic.labels.iter().filter(|label| label.span.source == primary.span.source).collect();
+    // The file of the primary label first, then the other files in the order of their
+    // labels, each with its own excerpt.
+    let mut files = vec![primary.span.source];
+    for label in &diagnostic.labels {
+        if !files.contains(&label.span.source) {
+            files.push(label.span.source);
+        }
+    }
+    let width = diagnostic
+        .labels
+        .iter()
+        .map(|label| sources.get(label.span.source).line_of(label.span.start).to_string().len())
+        .max()
+        .unwrap_or(1);
+    for (index, &source) in files.iter().enumerate() {
+        let file = sources.get(source);
+        let labels: Vec<&Label> =
+            diagnostic.labels.iter().filter(|label| label.span.source == source).collect();
+        let first = if index == 0 { primary } else { labels[0] };
+        let (line, column) = file.line_col(first.span.start);
+        let arrow = if index == 0 { "-->" } else { ":::" };
+        let _ = writeln!(out, "{}{arrow} {}:{}:{}", " ".repeat(width + 1), file.name(), line, column);
+        render_excerpt(&mut out, file, &labels, width);
+    }
+    render_footer(&mut out, width, diagnostic);
+    out
+}
+
+/// The lines of one file that have labels, with their markers.
+fn render_excerpt(out: &mut String, file: &SourceFile, labels: &[&Label], width: usize) {
     let mut lines: Vec<usize> = labels.iter().map(|label| file.line_of(label.span.start)).collect();
     lines.sort_unstable();
     lines.dedup();
-    let width = lines.last().map_or(1, |line| line.to_string().len());
-
-    let (line, column) = file.line_col(primary.span.start);
-    let _ = writeln!(out, "{}--> {}:{}:{}", " ".repeat(width + 1), file.name(), line, column);
     let gutter = " ".repeat(width + 2);
     let _ = writeln!(out, "{gutter}|");
     let mut previous: Option<usize> = None;
@@ -53,8 +76,6 @@ pub fn render(diagnostic: &Diagnostic, sources: &SourceMap) -> String {
             let _ = writeln!(out, "{gutter}| {}", underline(file, line, label));
         }
     }
-    render_footer(&mut out, width, diagnostic);
-    out
 }
 
 /// The marker line under a label: spaces up to the label, then `^^^` or `---`.

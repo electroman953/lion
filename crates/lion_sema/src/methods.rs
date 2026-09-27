@@ -22,7 +22,7 @@ impl Checker<'_> {
         span: Span,
     ) -> Option<lion_ir::Expr> {
         if let Some(ty) = self.place_type(object)
-            && let Some(&method) = self.methods.get(&(ty, name.name.clone()))
+            && let Some(method) = self.visible_method(ty, &name.name)
             && self.functions[method].var_self
         {
             let reported = self.diagnostics.len();
@@ -47,7 +47,7 @@ impl Checker<'_> {
         }
         let value = self.expr(object)?;
         let value = self.within_try(value);
-        let Some(&method) = self.methods.get(&(value.ty, name.name.clone())) else {
+        let Some(method) = self.visible_method(value.ty, &name.name) else {
             self.no_method(value.ty, name, value.span);
             return None;
         };
@@ -64,7 +64,7 @@ impl Checker<'_> {
                 .with_secondary(object, format!("this is {}", article(ty)));
         let members = ty.members();
         if members.len() > 1
-            && members.iter().any(|member| self.methods.contains_key(&(*member, name.name.clone())))
+            && members.iter().any(|member| self.visible_method(*member, &name.name).is_some())
             && let Some(help) = crate::expr::union_help(ty)
         {
             error = error.with_help(help);
@@ -79,16 +79,25 @@ impl Checker<'_> {
         self.diagnostics.push(error);
     }
 
+    /// The method `name` of the type `ty` that the module being checked sees: one of
+    /// its own, or of a module it uses (§20.3).
+    pub(crate) fn visible_method(&self, ty: Type, name: &str) -> Option<usize> {
+        let methods = self.methods.get(&(ty, name.to_string()))?;
+        methods.iter().copied().find(|&method| self.sees(self.functions[method].module))
+    }
+
     /// The type of `expr` when it is a variable or a part of one, found without checking
     /// anything or reporting; `None` otherwise.
     fn place_type(&self, expr: &ast::Expr) -> Option<Type> {
         match &expr.kind {
             ast::ExprKind::Name(name) => match self.lookup(name) {
                 Some(local) => self.local_type(local),
-                None if self.ctx.kind != crate::ContextKind::Script => match self.globals.get(name)?.ty {
-                    GlobalType::Known(ty) => ty,
-                    GlobalType::Unknown => None,
-                },
+                None if self.ctx.kind != crate::ContextKind::Script => {
+                    match self.tables.globals.get(name)?.ty {
+                        GlobalType::Known(ty) => ty,
+                        GlobalType::Unknown => None,
+                    }
+                }
                 None => None,
             },
             ast::ExprKind::Paren(inner) => self.place_type(inner),

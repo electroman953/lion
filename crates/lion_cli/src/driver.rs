@@ -1,10 +1,12 @@
 //! Runs the stages of the toolchain on a file and reports their diagnostics.
 
 use std::io::{self, BufWriter, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
 use lion_diagnostics::{Diagnostic, SourceId, SourceMap, render};
 use lion_ir as ir;
+use lion_syntax::ast;
 
 /// Exit codes of the `lion` command.
 pub mod exit {
@@ -19,8 +21,8 @@ pub mod exit {
 }
 
 pub fn check(path: &str) -> ExitCode {
-    let Some((sources, id)) = load(path) else { return ExitCode::from(exit::REFUSED) };
-    match front_end(&sources, id) {
+    let Some((mut sources, id)) = load(path) else { return ExitCode::from(exit::REFUSED) };
+    match front_end(&mut sources, id) {
         Some(_) => {
             println!("no errors in `{path}`");
             ExitCode::SUCCESS
@@ -30,12 +32,14 @@ pub fn check(path: &str) -> ExitCode {
 }
 
 pub fn run(path: &str) -> ExitCode {
-    let Some((sources, id)) = load(path) else { return ExitCode::from(exit::REFUSED) };
-    let Some(program) = front_end(&sources, id) else { return ExitCode::from(exit::REFUSED) };
+    let Some((mut sources, id)) = load(path) else { return ExitCode::from(exit::REFUSED) };
+    let Some(program) = front_end(&mut sources, id) else { return ExitCode::from(exit::REFUSED) };
     let chunk = lion_vm::compile(&program);
     let mut out = BufWriter::new(io::stdout().lock());
+    // A bug or an alert in the standard library is shown at the call that led there.
+    let hidden = |span: lion_diagnostics::Span| sources.get(span.source).name().starts_with("<std>/");
     let mut report_alert = |alert: lion_vm::Alert| {
-        eprintln!("{}", render(&alert.to_diagnostic(), &sources));
+        eprintln!("{}", render(&alert.located(&hidden).to_diagnostic(), &sources));
     };
     let mut input = io::stdin().lock();
     let result = lion_vm::run(&chunk, &mut out, &mut input, &mut report_alert);
@@ -45,6 +49,7 @@ pub fn run(path: &str) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(lion_vm::Trap::Exit(code)) => ExitCode::from(code),
         Err(trap) => {
+            let trap = trap.located(&hidden);
             eprintln!("{}", render(&trap.to_diagnostic(), &sources));
             match trap {
                 lion_vm::Trap::Bug { .. } => ExitCode::from(exit::BUG),
@@ -60,7 +65,7 @@ pub fn debug(stage: &str, path: &str) -> ExitCode {
         eprintln!("error: unknown stage `{stage}`; the stages are tokens, ast, ir and bytecode");
         return ExitCode::from(exit::USAGE);
     }
-    let Some((sources, id)) = load(path) else { return ExitCode::from(exit::REFUSED) };
+    let Some((mut sources, id)) = load(path) else { return ExitCode::from(exit::REFUSED) };
     let file = sources.get(id);
     let lexed = lion_syntax::lex(id, file.text());
     let output = match stage {
@@ -82,8 +87,8 @@ pub fn debug(stage: &str, path: &str) -> ExitCode {
             print!("{}", lion_syntax::print_module(&parsed.module));
             return exit_code(&diagnostics);
         }
-        "ir" => front_end(&sources, id).map(|program| ir::print_program(&program)),
-        _ => front_end(&sources, id).map(|program| lion_vm::disassemble(&lion_vm::compile(&program))),
+        "ir" => front_end(&mut sources, id).map(|program| ir::print_program(&program)),
+        _ => front_end(&mut sources, id).map(|program| lion_vm::disassemble(&lion_vm::compile(&program))),
     };
     match output {
         Some(output) => {
@@ -133,23 +138,88 @@ fn load(path: &str) -> Option<(SourceMap, SourceId)> {
     Some((sources, id))
 }
 
-/// Lexes, parses and checks a file. Returns the program if it has no errors, after
-/// reporting every diagnostic.
-fn front_end(sources: &SourceMap, id: SourceId) -> Option<ir::Program> {
-    let text = sources.get(id).text();
-    let lexed = lion_syntax::lex(id, text);
-    let parsed = lion_syntax::parse(text, &lexed.tokens);
-    let mut diagnostics: Vec<Diagnostic> = lexed.diagnostics.into_iter().chain(parsed.diagnostics).collect();
+/// Lexes, parses and checks a script and the modules it uses. Returns the program if
+/// it has no errors, after reporting every diagnostic.
+fn front_end(sources: &mut SourceMap, id: SourceId) -> Option<ir::Program> {
+    let mut diagnostics = Vec::new();
+    // The files of the program: the script, then each module that a file uses, once.
+    let mut files: Vec<(String, SourceId, bool)> = vec![(String::new(), id, false)];
+    let mut modules = Vec::new();
+    let folder = Path::new(sources.get(id).name()).parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut index = 0;
+    while index < files.len() {
+        let file = files[index].1;
+        let text = sources.get(file).text().to_string();
+        let lexed = lion_syntax::lex(file, &text);
+        let parsed = lion_syntax::parse(&text, &lexed.tokens);
+        diagnostics.extend(lexed.diagnostics);
+        diagnostics.extend(parsed.diagnostics);
+        for stmt in &parsed.module.stmts {
+            let ast::StmtKind::Use(path) = &stmt.kind else { continue };
+            let parts: Vec<&str> = path.iter().map(|part| part.name.as_str()).collect();
+            let name = parts.join(".");
+            if files.iter().any(|(known, ..)| *known == name) {
+                continue;
+            }
+            match find_module(&folder, &parts) {
+                Ok((file_name, text, standard)) => {
+                    let module = sources.add(file_name, text);
+                    files.push((name, module, standard));
+                }
+                Err(looked_at) => {
+                    let span = path[0].span.to(path[path.len() - 1].span);
+                    diagnostics.push(
+                        Diagnostic::error(format!("cannot find the module `{name}`"))
+                            .with_primary(span, "")
+                            .with_note(format!("there is no file `{looked_at}`"))
+                            .with_note(format!(
+                                "the modules of the standard library are {}",
+                                lion_std::MODULES.join(", ")
+                            )),
+                    );
+                }
+            }
+        }
+        modules.push(parsed.module);
+        index += 1;
+    }
     // Checking a tree with syntax errors would only add confusing messages.
     let program = if diagnostics.iter().any(Diagnostic::is_fatal) {
         None
     } else {
-        let checked = lion_sema::check(&parsed.module);
+        let files: Vec<lion_sema::Source> = files
+            .iter()
+            .zip(&modules)
+            .map(|((name, _, standard), module)| lion_sema::Source {
+                name: name.clone(),
+                module,
+                standard: *standard,
+            })
+            .collect();
+        let checked = lion_sema::check_program(&files);
         diagnostics.extend(checked.diagnostics);
         checked.program
     };
     report(&diagnostics, sources);
     program
+}
+
+/// The module `a.b`: a module of the standard library, or the file `a/b.lion` in the
+/// folder of the script (C61). On failure, the file that was looked for.
+fn find_module(folder: &Path, parts: &[&str]) -> Result<(String, String, bool), String> {
+    let name = parts.join(".");
+    if let Some(text) = lion_std::module(&name) {
+        return Ok((format!("<std>/{name}.lion"), text.to_string(), true));
+    }
+    let mut path = folder.to_path_buf();
+    for part in parts {
+        path.push(part);
+    }
+    path.set_extension("lion");
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok((path.display().to_string(), text, false)),
+        Err(_) => Err(path.display().to_string()),
+    }
 }
 
 fn report(diagnostics: &[Diagnostic], sources: &SourceMap) {

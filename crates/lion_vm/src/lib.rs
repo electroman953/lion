@@ -8,6 +8,7 @@
 mod bytecode;
 mod compile;
 mod machine;
+mod natives;
 mod set;
 mod value;
 

@@ -44,11 +44,28 @@ impl Checker<'_> {
             ast::ExprKind::Call { callee, args } => self.call(callee, args, span),
             ast::ExprKind::Field { object, name } => match &object.kind {
                 ast::ExprKind::TypeName(type_name) => self.enum_member(type_name, object.span, name),
+                // `m.x`: a variable of a module (§20.2).
+                ast::ExprKind::Name(module) if self.imported_module(module).is_some() => {
+                    let module = self.imported_module(module).expect("checked");
+                    self.module_global(module, name, span)
+                }
+                // `m.Color.red`: a value of an enumeration of a module.
+                ast::ExprKind::Field { object: inner, name: type_name } if matches!(&inner.kind, ast::ExprKind::Name(module) if self.imported_module(module).is_some()) =>
+                {
+                    let ast::ExprKind::Name(module) = &inner.kind else { unreachable!("checked") };
+                    let module = self.imported_module(module).expect("checked");
+                    let previous = self.enter_module(module);
+                    let value = self.enum_member(&type_name.name, object.span, name);
+                    self.enter_module(previous);
+                    value
+                }
                 _ => self.property(object, name, span),
             },
             ast::ExprKind::Index { object, index } => self.index(object, index, span),
             ast::ExprKind::List(elements) => self.list(elements, span),
-            ast::ExprKind::If { branches, otherwise } => self.if_expr(branches, otherwise.as_deref(), span),
+            ast::ExprKind::If { branches, otherwise } => {
+                self.if_expr(branches, otherwise.as_deref(), span, None)
+            }
             ast::ExprKind::TypeTest { value, ty } => self.type_test(value, ty, span),
             ast::ExprKind::Try(value) => self.try_expr(value, span),
             ast::ExprKind::Match { scrutinee, cases } => self.match_expr(scrutinee, cases, span),
@@ -75,12 +92,19 @@ impl Checker<'_> {
 
     /// `if c then a elif d then b else e` (§10.1). The branches have one type; an Int
     /// branch next to a Float one is converted, as everywhere else (§8.5).
-    fn if_expr(
+    /// `if c then a elif d then b else e`; each value expects the type the whole
+    /// expression is expected to have, if any.
+    pub(crate) fn if_expr(
         &mut self,
         branches: &[(ast::Expr, ast::Expr)],
         otherwise: Option<&ast::Expr>,
         span: Span,
+        expected: Option<Type>,
     ) -> Option<ir::Expr> {
+        let value_of = |checker: &mut Self, value: &ast::Expr| match expected {
+            Some(expected) => checker.expr_expecting(value, expected),
+            None => checker.expr(value),
+        };
         // Each value is checked where its condition holds, and the next condition
         // where the previous ones failed (§7.4).
         let before = self.ctx.flow.clone();
@@ -90,14 +114,14 @@ impl Checker<'_> {
             let facts = cond.as_ref().map(|cond| self.facts(cond)).unwrap_or_default();
             let outside = self.ctx.flow.clone();
             self.apply(&facts.when_true);
-            let value = self.expr(value);
+            let value = value_of(self, value);
             self.ctx.flow = outside;
             self.apply(&facts.when_false);
             checked.push((cond, value));
         }
         // Without `else`, the value is `none` when no condition holds (§10.1).
         let otherwise = match otherwise {
-            Some(otherwise) => self.expr(otherwise),
+            Some(otherwise) => value_of(self, otherwise),
             None => Some(typed(ir::ExprKind::None, Type::None, span)),
         };
         self.ctx.flow = before;
@@ -167,7 +191,7 @@ impl Checker<'_> {
             // Whether it has a value is checked at the calls of the script (C3).
             Resolved::Global(local) => {
                 self.ctx.reads.push(local);
-                let GlobalType::Known(ty) = self.globals[&self.global_names[&local]].ty else { return None };
+                let GlobalType::Known(ty) = self.global_info(local).ty else { return None };
                 Some(typed(ir::ExprKind::Global(local), ty?, span))
             }
             Resolved::Function(_) | Resolved::Standard(_) => {
@@ -437,6 +461,16 @@ impl Checker<'_> {
         let instance = match self.ctx.kind {
             ContextKind::Script => return true,
             ContextKind::Function(instance) => instance,
+            ContextKind::Init(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "`try` has no function to leave in the value of a variable of a module",
+                    )
+                    .with_primary(span, "")
+                    .with_help("handle the error with `if x in Error`, or `match` (§18.3)"),
+                );
+                return false;
+            }
             ContextKind::Structure(_) => {
                 self.diagnostics.push(
                     Diagnostic::error("`try` has no function to leave in the conditions of a structure")
@@ -818,6 +852,11 @@ impl Checker<'_> {
                     return self.message(object, args, span);
                 }
                 ast::ExprKind::Field { ref object, ref name } => {
+                    if let ast::ExprKind::Name(module) = &object.kind
+                        && let Some(module) = self.imported_module(module)
+                    {
+                        return self.module_member_call(module, name, args, span);
+                    }
                     return self.method_call(object, name, args, span);
                 }
                 _ => ("calling a computed function", "§11.3"),
@@ -845,7 +884,7 @@ impl Checker<'_> {
                 (info.decl_span, info.ty)
             }
             Resolved::Global(local) => {
-                let global = &self.globals[&self.global_names[&local]];
+                let global = &self.global_info(local);
                 let ty = match global.ty {
                     GlobalType::Known(ty) => ty,
                     GlobalType::Unknown => None,
@@ -863,9 +902,31 @@ impl Checker<'_> {
         None
     }
 
+    /// `m.f(...)` or `m.Student(...)`: a function or a structure of a module (§20.2).
+    fn module_member_call(
+        &mut self,
+        module: usize,
+        name: &ast::Ident,
+        args: &[ast::Arg],
+        span: Span,
+    ) -> Option<ir::Expr> {
+        if !name.name.starts_with(char::is_uppercase) {
+            return self.module_call(module, name, args, span);
+        }
+        let Some(&index) = self.table_of(module).struct_names.get(&name.name) else {
+            let module_name = self.modules[module].name.clone();
+            self.diagnostics.push(
+                Diagnostic::error(format!("the module `{module_name}` has no structure `{}`", name.name))
+                    .with_primary(name.span, ""),
+            );
+            return None;
+        };
+        self.construct(index, &Given::args(args), span)
+    }
+
     /// `Student(...)`: builds a structure (§12.2).
     fn type_call(&mut self, name: &str, callee: Span, args: &[ast::Arg], span: Span) -> Option<ir::Expr> {
-        if let Some(&index) = self.struct_names.get(name) {
+        if let Some(&index) = self.tables.struct_names.get(name) {
             return self.construct(index, &Given::args(args), span);
         }
         let ty = ast::TypeExpr {

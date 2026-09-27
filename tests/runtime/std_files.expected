@@ -1,0 +1,11 @@
+exit: 0
+----- stdout
+none
+true
+one
+two
+
+["one", "two"]
+error("cannot read `target/no-such-file.txt`: the file does not exist")
+false
+----- stderr

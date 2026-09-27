@@ -17,6 +17,7 @@ mod flow;
 mod functions;
 mod matching;
 mod methods;
+mod modules;
 mod names;
 mod narrowing;
 mod parallel;
@@ -32,9 +33,11 @@ use lion_diagnostics::{Diagnostic, Span};
 use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
-use crate::enums::NamedType;
+pub use crate::modules::Source;
+
 use crate::flow::{Assigned, Flow};
 use crate::functions::{FunctionInfo, Instance, ScriptCall};
+use crate::modules::{ModuleInfo, Tables};
 use crate::structs::StructInfo;
 
 pub struct Checked {
@@ -43,8 +46,15 @@ pub struct Checked {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// Checks a program of one file.
 pub fn check(module: &ast::Module) -> Checked {
-    let mut checker = Checker::new(module);
+    check_program(&[Source { name: String::new(), module, standard: false }])
+}
+
+/// Checks a program: the script first, then the modules that the files use (§20).
+pub fn check_program(files: &[Source]) -> Checked {
+    let module = files[0].module;
+    let mut checker = Checker::new(files);
     let body = checker.stmts(&module.stmts);
     checker.close_scope();
     checker.ctx.body = body;
@@ -110,6 +120,8 @@ enum ContextKind {
     Function(usize),
     /// The default values and the conditions of a structure, by index (§12.1).
     Structure(usize),
+    /// The values of the globals of a module, by index (§20.2, D81).
+    Init(usize),
 }
 
 /// The state of the function being checked.
@@ -160,7 +172,7 @@ impl Context {
 }
 
 /// A variable declared at the top level of the script.
-struct GlobalInfo<'a> {
+pub(crate) struct GlobalInfo<'a> {
     /// The first declaration.
     decl: &'a ast::LetStmt,
     /// Allocated among the script's locals when the name is declared once; functions
@@ -170,7 +182,7 @@ struct GlobalInfo<'a> {
 }
 
 #[derive(Clone, Copy)]
-enum GlobalType {
+pub(crate) enum GlobalType {
     /// The script has not reached the declaration yet.
     Unknown,
     /// `None` when the declaration has an error.
@@ -181,20 +193,21 @@ struct Checker<'a> {
     diagnostics: Vec<Diagnostic>,
     /// The function being checked. The contexts it interrupted are on the Rust stack.
     ctx: Context,
-    globals: HashMap<String, GlobalInfo<'a>>,
+    /// The files of the program: the script, then the modules (§20).
+    modules: Vec<ModuleInfo<'a>>,
+    /// The module being checked, and its names.
+    module: usize,
+    tables: Tables<'a>,
     /// The name of each global, by its local in the script.
     global_names: HashMap<ir::LocalId, String>,
+    /// The module of each global of a module other than the script.
+    global_modules: HashMap<ir::LocalId, usize>,
     functions: Vec<FunctionInfo<'a>>,
-    function_names: HashMap<String, usize>,
-    /// The methods, by the type of `self` and their name (§12.4).
-    methods: HashMap<(Type, String), usize>,
+    /// The methods, by the type of `self` and their name (§12.4); several modules may
+    /// add a method of the same name to a type (§20.3).
+    methods: HashMap<(Type, String), Vec<usize>>,
     structs: Vec<StructInfo<'a>>,
-    struct_names: HashMap<String, usize>,
-    /// The types defined with `=` (§13), and the enumerations among them.
-    named_types: HashMap<String, NamedType<'a>>,
     enums: Vec<ir::EnumRef>,
-    /// Where each type of the file is declared.
-    type_spans: HashMap<String, Span>,
     /// The checked versions of the functions: one per function, or one per set of
     /// argument types for a generic function (C1).
     instances: Vec<Instance>,
@@ -207,26 +220,36 @@ struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
-    fn new(module: &'a ast::Module) -> Checker<'a> {
+    fn new(files: &'a [Source<'a>]) -> Checker<'a> {
+        let modules = files
+            .iter()
+            .map(|file| ModuleInfo {
+                name: file.name.clone(),
+                ast: file.module,
+                standard: file.standard,
+                imports: HashMap::new(),
+                tables: Tables::default(),
+                init: None,
+            })
+            .collect();
         let mut checker = Checker {
             diagnostics: Vec::new(),
             ctx: Context::new(ContextKind::Script),
-            globals: HashMap::new(),
+            modules,
+            module: 0,
+            tables: Tables::default(),
             global_names: HashMap::new(),
+            global_modules: HashMap::new(),
             functions: Vec::new(),
-            function_names: HashMap::new(),
             methods: HashMap::new(),
             structs: Vec::new(),
-            struct_names: HashMap::new(),
-            named_types: HashMap::new(),
             enums: Vec::new(),
-            type_spans: HashMap::new(),
             instances: Vec::new(),
             script_calls: Vec::new(),
             demands: Vec::new(),
             parallel_regions: Vec::new(),
         };
-        checker.register_top_level(module);
+        checker.register_program();
         checker
     }
 
@@ -244,7 +267,7 @@ impl<'a> Checker<'a> {
         let id = match self.preallocated_global(name) {
             Some(id) => {
                 self.ctx.locals[id.index()] = info;
-                if let Some(global) = self.globals.get_mut(&name.name) {
+                if let Some(global) = self.tables.globals.get_mut(&name.name) {
                     global.ty = GlobalType::Known(ty);
                 }
                 id
@@ -273,7 +296,7 @@ impl<'a> Checker<'a> {
             ),
             // At the top level, `register_top_level` reports it already.
             None if self.ctx.kind == ContextKind::Script && !enclosing.is_empty() => {
-                let Some(&function) = self.function_names.get(&name.name) else { return };
+                let Some(&function) = self.tables.function_names.get(&name.name) else { return };
                 (self.functions[function].decl.name.span, "choose another name".to_string())
             }
             None => return,
@@ -293,7 +316,7 @@ impl<'a> Checker<'a> {
         if self.ctx.kind != ContextKind::Script || self.ctx.scopes.len() != 1 {
             return None;
         }
-        let global = self.globals.get(&name.name)?;
+        let global = self.tables.globals.get(&name.name)?;
         if global.decl.name.span == name.span { global.local } else { None }
     }
 
@@ -370,7 +393,9 @@ impl<'a> Checker<'a> {
         functions.push(main);
         let main = ir::FunctionId(functions.len() as u32 - 1);
         let enums = self.enums;
-        Checked { program: Some(ir::Program { functions, structs, enums, main }), diagnostics }
+        let module_inits =
+            self.modules.iter().map(|module| module.init.map(|init| ir::FunctionId(init as u32))).collect();
+        Checked { program: Some(ir::Program { functions, structs, enums, module_inits, main }), diagnostics }
     }
 }
 

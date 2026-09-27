@@ -1,0 +1,11 @@
+use csv
+match csv.read("tests/runtime/data/students.csv"):
+    in Error e: show("error: {e.message()}") ;
+    in List of csv.Row rows:
+        for r in rows:
+            show("{r.get("name")} {r.get("grade")} {r.get("comment")}")
+        ;
+        show(rows[1].get("age"))
+    ;
+;
+show(csv.read("tests/runtime/data/missing.csv"))

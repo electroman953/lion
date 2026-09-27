@@ -4,7 +4,7 @@ Lion est un langage polyvalent, interprété ou compilé, dont l'écriture et la
 
 ## État
 
-L'implémentation est au début de l'étape 2 de la feuille de route (§28). Elle construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
+L'étape 2 de la feuille de route (§28) est atteinte : les programmes 27.1 et 27.2 de la spec tournent tels quels (`tests/programs`). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
 
 **Ce qui fonctionne aujourd'hui**
 
@@ -25,13 +25,15 @@ L'implémentation est au début de l'étape 2 de la feuille de route (§28). Ell
   - `and`, `or` (court-circuit), `not` ;
   - conversions `as` entre nombres et vers Text.
 - **Textes** : échappements et interpolation `"x = {x}"`.
+- **Modules** (§20) : `use geometry`, `use shapes.circle`, noms qualifiés (`geometry.area(...)`, `geometry.Point`), `private`, globales initialisées au premier usage, modules qui s'utilisent mutuellement.
+- **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles) et `csv`.
 - **Parallélisme de données** (§19.2) : `parallel [...]`, `parallel {...}`, `parallel for`, avec les règles de sûreté du §19.3 vérifiées à la compilation. L'exécution reste séquentielle pour l'instant (mêmes résultats).
 - **Bibliothèque standard, noyau** (§23) : `show`, `ask`, `exit`, `error`, `sum`, `reverse`, `floor`, `ceil`, `round`, `isqrt`.
 - **Vérifications à la compilation** : types, noms inconnus (avec suggestions), constantes réaffectées, lecture d'une variable qui peut ne pas avoir de valeur sur un des chemins (§6.1), `;` oublié localisé grâce à l'indentation (§5.3).
 - **Bugs à l'exécution** (§18) : débordement, division entière par zéro, exposant négatif, conversion Float → Int impossible, récursion sans fin (plus de 100 000 appels imbriqués). Chacun est signalé avec l'emplacement, les appels en cours, les valeurs en cause et une suggestion.
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 
-**Pas encore implémenté** : variables de type (`T in Comparable`), fonctions comme valeurs, closures et curryfication, méthodes détachées et méthodes d'opérateurs, lecture des éléments d'un n-uplet, `Domain` et `Map`, traits, modules, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, formateur, tests intégrés, mode interactif.
+**Pas encore implémenté** : variables de type (`T in Comparable`), fonctions comme valeurs, closures et curryfication, méthodes détachées et méthodes d'opérateurs, lecture des éléments d'un n-uplet, `Domain` et `Map`, traits, valeurs `shared`, appel de code C, tâches (`task`, `wait`) et exécution sur plusieurs cœurs, compilateur natif, formateur, tests intégrés, mode interactif.
 
 ## Construire et utiliser
 
@@ -75,6 +77,7 @@ cargo test --workspace
 | `tests/runtime` | `lion run` (sémantique, bugs, alertes) |
 | `tests/errors` | `lion check` (erreurs de compilation) |
 | `tests/integration` | `lion run` (programmes complets) |
+| `tests/programs` | `lion run`, depuis leur dossier (les programmes du §27 de la spec) |
 
 Après un changement voulu de sortie, régénérer avec `LION_BLESS=1 cargo test --test golden`, puis relire le diff.
 
@@ -88,6 +91,7 @@ source .lion
       ├→ lion_vm      bytecode à registres + machine virtuelle (mode interprété)
       └→ (à venir)    compilateur natif
   lion_runtime       sémantique des opérations primitives, partagée par les backends
+  lion_std           les modules de la bibliothèque standard, écrits en Lion
   lion_diagnostics   positions, erreurs, bugs, alertes et leur rendu
-  lion_cli           la commande `lion`
+  lion_cli           la commande `lion` ; charge le script et les modules qu'il utilise
 ```

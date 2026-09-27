@@ -1,0 +1,16 @@
+// Modules (§20): qualified names (D84), values of globals at first use (D81).
+use shapes.geometry
+use shapes.log
+
+show("start")
+let p = geometry.Point(3, 4)
+show(p.norm())
+show(geometry.area(2, 3))
+show(geometry.origin)
+show(geometry.kind(4))
+let k = geometry.Kind.round
+show(k == geometry.kind(0))
+fun describe(point in geometry.Point) in Text = "({point.x}, {point.y})"
+show(describe(p))
+show(log.note("from the script", 1.0))
+show(log.count)

@@ -1,0 +1,11 @@
+use shapes.broken
+use text
+use random
+show(broken.hidden())
+show(broken.nope)
+show(text.upper(3))
+let t = text.Nope(1)
+let x in nowhere.Type
+show(csv.read("a"))
+var g = random.Generator(3)
+show(g.state)

@@ -1,0 +1,18 @@
+// A module: only declarations (§20.2).
+use shapes.log
+
+struct Point:
+    x in Float = 0
+    y in Float = 0
+;
+
+Kind = {round, square}
+
+// Its value is computed at the first use of the module (D81).
+let origin = Point(log.note("geometry is initialized", 0.0), 0.0)
+private let secret = 42
+
+fun Point.norm() in Float = (self.x * self.x + self.y * self.y) ^ 0.5
+fun area(width in Float, height in Float) in Float = width * height
+fun kind(sides in Int) in Kind = if sides == 0 then round else square
+private fun helper() = secret

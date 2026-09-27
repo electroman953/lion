@@ -36,7 +36,7 @@ impl Checker<'_> {
             return Resolved::Local(local);
         }
         if let ContextKind::Structure(_) = self.ctx.kind
-            && self.globals.contains_key(name)
+            && self.tables.globals.contains_key(name)
         {
             self.diagnostics.push(
                 Diagnostic::error(format!("a structure cannot read the variable `{name}`"))
@@ -45,13 +45,13 @@ impl Checker<'_> {
             );
             return Resolved::Nothing;
         }
-        if self.ctx.kind != ContextKind::Script && self.globals.contains_key(name) {
+        if self.ctx.kind != ContextKind::Script && self.tables.globals.contains_key(name) {
             return match self.global(name, span) {
                 Some(local) => Resolved::Global(local),
                 None => Resolved::Nothing,
             };
         }
-        if let Some(&index) = self.function_names.get(name) {
+        if let Some(&index) = self.tables.function_names.get(name) {
             return Resolved::Function(index);
         }
         if let Some(&standard) = IMPLEMENTED_FUNCTIONS.iter().chain(PLANNED_FUNCTIONS).find(|n| **n == name) {
@@ -62,11 +62,17 @@ impl Checker<'_> {
         Resolved::Nothing
     }
 
+    /// Whether `name` designates a variable here, without reporting.
+    pub(crate) fn is_variable(&self, name: &str) -> bool {
+        self.lookup(name).is_some()
+            || (self.ctx.kind != ContextKind::Script && self.tables.globals.contains_key(name))
+    }
+
     /// Whether `name` designates anything here, without reporting.
     pub(crate) fn is_known(&self, name: &str) -> bool {
         self.lookup(name).is_some()
-            || (self.ctx.kind != ContextKind::Script && self.globals.contains_key(name))
-            || self.function_names.contains_key(name)
+            || (self.ctx.kind != ContextKind::Script && self.tables.globals.contains_key(name))
+            || self.tables.function_names.contains_key(name)
             || IMPLEMENTED_FUNCTIONS.contains(&name)
             || PLANNED_FUNCTIONS.contains(&name)
     }
@@ -74,7 +80,7 @@ impl Checker<'_> {
     /// A global seen from a function: declared exactly once (C5), and already reached
     /// by the script when the function body is checked early (C17).
     fn global(&mut self, name: &str, span: Span) -> Option<ir::LocalId> {
-        let global = &self.globals[name];
+        let global = &self.tables.globals[name];
         let decl_span = global.decl.name.span;
         let Some(local) = global.local else {
             self.diagnostics.push(
@@ -109,16 +115,18 @@ impl Checker<'_> {
     pub(crate) fn unknown_name_error(&self, name: &str, span: Span) -> Diagnostic {
         let mut visible: Vec<&str> =
             self.ctx.scopes.iter().flat_map(|scope| scope.names.keys().map(String::as_str)).collect();
-        visible.extend(self.function_names.keys().map(String::as_str));
+        visible.extend(self.tables.function_names.keys().map(String::as_str));
         visible.extend(IMPLEMENTED_FUNCTIONS);
         if self.ctx.kind != ContextKind::Script {
-            visible.extend(self.globals.keys().map(String::as_str));
+            visible.extend(self.tables.globals.keys().map(String::as_str));
         }
         let mut error =
             Diagnostic::error(format!("cannot find `{name}` in this scope")).with_primary(span, "not found");
         let enums = self.enums_with_value(name);
         if let Some(help) = other_language_help(name) {
             error = error.with_help(help);
+        } else if lion_std::MODULES.contains(&name) {
+            error = error.with_help(format!("`{name}` is a module of the standard library: add `use {name}` at the start of the file (§20.2)"));
         } else if let Some(enumeration) = enums.first() {
             let ty = enumeration.name();
             error = error

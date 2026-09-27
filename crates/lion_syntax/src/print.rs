@@ -17,7 +17,9 @@ pub fn print_module(module: &Module) -> String {
 pub fn print_stmt(stmt: &Stmt) -> String {
     match &stmt.kind {
         StmtKind::Let(decl) => {
-            let mut out = format!("({} {}", if decl.mutable { "var" } else { "let" }, decl.name.name);
+            let private = if decl.private.is_some() { "private " } else { "" };
+            let mut out =
+                format!("({private}{} {}", if decl.mutable { "var" } else { "let" }, decl.name.name);
             if let Some(value) = &decl.value {
                 out.push(' ');
                 out.push_str(&print_expr(value));
@@ -63,6 +65,10 @@ pub fn print_stmt(stmt: &Stmt) -> String {
             format!("(match {} {})", print_expr(scrutinee), cases.join(" "))
         }
         StmtKind::Struct(decl) => print_struct(decl),
+        StmtKind::Use(path) => {
+            let names: Vec<&str> = path.iter().map(|name| name.name.as_str()).collect();
+            format!("(use {})", names.join("."))
+        }
         StmtKind::TypeDef(def) => match &def.kind {
             TypeDefKind::Enum { ordered, values } => {
                 let values: Vec<&str> = values.iter().map(|value| value.name.as_str()).collect();
@@ -98,7 +104,14 @@ fn print_struct(decl: &StructDecl) -> String {
 }
 
 fn print_fun(decl: &FunDecl) -> String {
-    let mut out = String::from(if decl.infix { "(infix-fun " } else { "(fun " });
+    let mut out = String::from("(");
+    if decl.private.is_some() {
+        out.push_str("private ");
+    }
+    if let Some((abi, _)) = &decl.foreign {
+        out.push_str(&format!("foreign {abi:?} "));
+    }
+    out.push_str(if decl.infix { "infix-fun " } else { "fun " });
     if let Some(receiver) = &decl.receiver {
         out.push_str(&format!("{}.", receiver.name));
     }
@@ -131,6 +144,7 @@ fn print_fun(decl: &FunDecl) -> String {
     match &decl.body {
         FunBody::Block(block) => out.push_str(&format!(" {}", print_block(block))),
         FunBody::Expr(expr) => out.push_str(&format!(" = {}", print_expr(expr))),
+        FunBody::Foreign => {}
     }
     out + ")"
 }

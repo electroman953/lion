@@ -1,0 +1,13 @@
+exit: 1
+----- stdout
+----- stderr
+error: cannot find the module `missing.thing`
+  --> tests/errors/missing_module.lion:1:5
+   |
+ 1 | use missing.thing
+   |     ^^^^^^^^^^^^^
+   |
+   = there is no file `tests/errors/missing/thing.lion`
+   = the modules of the standard library are csv, files, math, random, text
+
+1 error found
