@@ -258,7 +258,7 @@ Le mode compilé a ses propres tests (`cargo test --test native`, `crates/lion_c
 
 Ces tests demandent cargo, qu'ils trouvent dans la variable `CARGO` posée par `cargo test`. Un programme ajouté à `tests/runtime` est donc testé dans les deux modes.
 
-Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (20), `lion_vm` (15), `lion_codegen` (12), `lion_native` (5), `lion_diagnostics` (4) et `lion_ir` (3), `lion_ui` (5) et `lion_cli` (1).
+Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (20), `lion_vm` (15), `lion_codegen` (12), `lion_native` (5), `lion_diagnostics` (4), `lion_ir` (3), `lion_ui` (5) et `lion_cli` (1).
 
 Les tests golden tournent avec autant de fils que de cœurs ; `LION_THREADS=1` les fait tourner sur un seul, avec la même sortie.
 
