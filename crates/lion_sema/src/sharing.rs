@@ -34,6 +34,25 @@ impl Checker<'_> {
     /// `let x = ...` or `var x = ...`: with `shared`, the variable names a new object;
     /// `let t = s`, with `s` a `let shared`, names the same one (§17.2).
     pub(crate) fn let_stmt(&mut self, decl: &ast::LetStmt) -> Option<ir::Stmt> {
+        // `let twice = fun(x) = x * 2`: a generic function (§11.1, C78).
+        if let Some(function) = crate::closures::generic_function_value(decl) {
+            if decl.mutable {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("`{}` holds a function whose parameters have no type: it is a `let`", decl.name.name))
+                        .with_primary(decl.name.span, "")
+                        .with_note("such a function is generic, like `fun twice(x) = x * 2`: it does not change (§15.3, C78)")
+                        .with_help("declare it with `let`, or give its parameters a type"),
+                );
+                return None;
+            }
+            // At the top level of a file, it is registered with the functions.
+            let top_level = matches!(self.ctx.kind, ContextKind::Script | ContextKind::Init(_))
+                && self.ctx.scopes.len() == 1;
+            if !top_level {
+                self.generic_local_function(&decl.name, function);
+            }
+            return None;
+        }
         if let Some(ast::Expr { kind: ast::ExprKind::Shared { value, synced }, span }) = &decl.value {
             let plain = ast::LetStmt { value: Some((**value).clone()), ..decl.clone() };
             let stmt = self.plain_let(&plain);

@@ -1,0 +1,17 @@
+// A function whose parameters have no type is generic, even anonymous (§11.1, C78).
+let twice = fun(x) = x * 2                // anonyme, forme courte
+let log = fun(msg): show("> {msg}") ;     // anonyme, forme bloc
+show(twice(3))
+show(twice(2.5))
+log("start")
+log(42)
+fun apply(f in fun(Int) in Int, x in Int) in Int = f(x)
+show(apply(twice, 20))
+fun quadruple(x in Int) in Int = twice(twice(x))
+show(quadruple(5))
+fun inner() in Float:
+    let half = fun(x) = x / 2
+    fun square(y) = y * y
+    return half(square(3))
+;
+show(inner())

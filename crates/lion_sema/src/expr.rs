@@ -1177,6 +1177,14 @@ impl Checker<'_> {
             Resolved::Nothing => return None,
             Resolved::Local(local) => {
                 let info = &self.ctx.locals[local.index()];
+                // Its declaration had an error, already reported; the arguments are
+                // still checked.
+                if info.ty.is_none() && info.initialized {
+                    for arg in args {
+                        self.expr(&arg.value);
+                    }
+                    return None;
+                }
                 (info.decl_span, info.ty)
             }
             Resolved::Global(local) => {

@@ -1,0 +1,6 @@
+fun outer(k in Int) in Int:
+    let scale = fun(x) = x * k
+    return scale(2)
+;
+var bad = fun(x) = x
+show(outer(3))

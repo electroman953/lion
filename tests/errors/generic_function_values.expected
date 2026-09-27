@@ -1,0 +1,22 @@
+exit: 1
+----- stdout
+----- stderr
+error: `scale` has parameters without a type, so it cannot use `k`, declared around it
+  --> tests/errors/generic_function_values.lion:2:30
+   |
+ 2 |     let scale = fun(x) = x * k
+   |                              ^
+   |
+   = a function whose parameters have no type is generic: it captures no variable (§15.3, C78)
+   = help: give its parameters a type, or give the value as an argument
+
+error: `bad` holds a function whose parameters have no type: it is a `let`
+  --> tests/errors/generic_function_values.lion:5:5
+   |
+ 5 | var bad = fun(x) = x
+   |     ^^^
+   |
+   = such a function is generic, like `fun twice(x) = x * 2`: it does not change (§15.3, C78)
+   = help: declare it with `let`, or give its parameters a type
+
+2 errors found

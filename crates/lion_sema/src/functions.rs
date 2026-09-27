@@ -278,6 +278,13 @@ impl<'a> Checker<'a> {
         for stmt in &ast.stmts {
             match &stmt.kind {
                 ast::StmtKind::Fun(decl) => self.register_function(decl),
+                // `let twice = fun(x) = x * 2` is a generic function (§11.1, C78).
+                ast::StmtKind::Let(decl)
+                    if !decl.mutable && crate::closures::generic_function_value(decl).is_some() =>
+                {
+                    let function = crate::closures::generic_function_value(decl).expect("checked");
+                    self.register_function(&ast::FunDecl { name: decl.name.clone(), ..function.clone() });
+                }
                 ast::StmtKind::Let(decl) => declarations.push(decl),
                 _ => {}
             }
@@ -397,7 +404,7 @@ impl<'a> Checker<'a> {
             .collect()
     }
 
-    fn register_function(&mut self, decl: &'a ast::FunDecl) {
+    fn register_function(&mut self, decl: &ast::FunDecl) {
         let info = FunctionInfo {
             decl: Rc::new(decl.clone()),
             module: self.module,

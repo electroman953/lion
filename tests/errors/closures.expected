@@ -27,15 +27,6 @@ error: cannot find `unknown_later` in this scope
  11 |     fun later() = unknown_later
     |                   ^^^^^^^^^^^^^ not found
 
-error: the type of this parameter must be written
-   --> tests/errors/closures.lion:13:17
-    |
- 13 |     let f = fun(x) = x
-    |                 ^
-    |
-    = a function declared inside a body, or used as a value, is not generic (C65)
-    = help: write it: `x in Int`
-
 error: a function declared inside a body has no default values
    --> tests/errors/closures.lion:14:38
     |
@@ -102,4 +93,4 @@ error: `twice` has `var` parameters: it cannot be used as a value
     |
     = the variables of a call are known only where the function is called by its name (C65)
 
-11 errors found
+10 errors found

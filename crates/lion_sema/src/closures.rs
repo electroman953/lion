@@ -43,10 +43,56 @@ impl Checker<'_> {
             );
             return None;
         }
+        if decl.params.iter().any(|param| param.ty.is_none()) {
+            self.generic_local_function(&decl.name, decl);
+            return None;
+        }
         let value = self.closure(decl, span, None)?;
         let ty = value.ty;
         let local = self.declare(&decl.name, Some(ty), false, true);
         Some(ir::Stmt::Assign { place: ir::Place::Local(local), value })
+    }
+
+    /// `let twice = fun(x) = x * 2`, or `fun square(x) = x * x`, in a block: a function
+    /// whose parameters have no type is generic, as at the top level (§11.1, §15.3). It
+    /// captures no variable, since each call makes a version of its own (C78).
+    pub(crate) fn generic_local_function(&mut self, name: &ast::Ident, decl: &ast::FunDecl) {
+        if !self.register_generic_local(name, decl) {
+            // A name without a type: its uses are not reported again.
+            self.declare(name, None, false, true);
+        }
+    }
+
+    fn register_generic_local(&mut self, name: &ast::Ident, decl: &ast::FunDecl) -> bool {
+        let Some(captures) = self.captures(decl) else { return false };
+        if let Some(capture) = captures.first() {
+            self.diagnostics.push(
+                Diagnostic::error(format!(
+                    "`{}` has parameters without a type, so it cannot use `{}`, declared around it",
+                    name.name, capture.name
+                ))
+                .with_primary(capture.span, "")
+                .with_note("a function whose parameters have no type is generic: it captures no variable (§15.3, C78)")
+                .with_help("give its parameters a type, or give the value as an argument"),
+            );
+            return false;
+        }
+        if !decl.modifies.is_empty() {
+            self.diagnostics.push(
+                Diagnostic::error("a function whose parameters have no type modifies no variable around it")
+                    .with_primary(decl.modifies[0].span, "")
+                    .with_note("it is generic: it captures no variable (§15.3, C78)"),
+            );
+            return false;
+        }
+        self.check_hiding(name);
+        let index = self.functions.len();
+        let named = ast::FunDecl { name: name.clone(), ..decl.clone() };
+        self.register_nested_function(Rc::new(named), Vec::new(), None);
+        self.resolve_signature(index);
+        let scope = self.ctx.scopes.last_mut().expect("a scope is open");
+        scope.functions.insert(name.name.clone(), index);
+        true
     }
 
     /// `fun(x in Int) = x * 2`: an anonymous function (§11.1). Without the types of its
@@ -206,7 +252,7 @@ impl Checker<'_> {
     ) -> Option<ir::Expr> {
         let params = self.functions[index].signature.clone()?;
         let name = self.functions[index].decl.name.name.clone();
-        if self.functions[index].closure.is_some() {
+        if self.functions[index].closure.as_ref().is_some_and(|closure| !closure.captures.is_empty()) {
             self.not_implemented(
                 span,
                 "a function declared inside a body, used as a value in its own body",
@@ -399,6 +445,14 @@ impl Checker<'_> {
         let kind = ir::ExprKind::CallValue { callee: Box::new(callee), args: values };
         Some(typed(kind, data.ret, span))
     }
+}
+
+/// `let twice = fun(x) = x * 2`: the anonymous function, when some parameter has no
+/// type, so that it is generic like a declared function (§11.1, C78).
+pub(crate) fn generic_function_value(decl: &ast::LetStmt) -> Option<&ast::FunDecl> {
+    let ast::ExprKind::Fun(function) = &decl.value.as_ref()?.kind else { return None };
+    let generic = decl.annotation.is_none() && function.params.iter().any(|param| param.ty.is_none());
+    generic.then_some(&**function)
 }
 
 /// The names that the body of a function reads or assigns, with where, in order.

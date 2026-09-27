@@ -223,7 +223,9 @@ impl<'a> Checker<'a> {
             .stmts
             .iter()
             .filter_map(|stmt| match &stmt.kind {
-                ast::StmtKind::Let(decl) => Some(decl),
+                ast::StmtKind::Let(decl) if crate::closures::generic_function_value(decl).is_none() => {
+                    Some(decl)
+                }
                 _ => None,
             })
             .collect();
