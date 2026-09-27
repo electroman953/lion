@@ -309,7 +309,7 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
 - Interface `ui` (C98) :
   - X11 seulement (Linux, BSD, Wayland par XWayland), en couleurs vraies sur 24 bits ;
   - pas de touches mortes, de défilement, de styles ni d'images ;
-  - une fenêtre X11 n'a pas pu être vérifiée à l'œil pendant la session du 2026-09-27 : KWin masquait toutes les fenêtres X (même `xlogo`). Le protocole est accepté par le serveur, et le rendu est vérifié par les images du mode sans écran.
+  - vérifié à l'écran le 2026-09-27 sous KDE Plasma (Wayland, par XWayland) : le programme 27.3 s'affiche comme dans le mode sans écran.
 - Paquets (C101) :
   - il faut la commande `git` pour les paquets de git ;
   - pas de registre central, ni de publication ;
@@ -325,7 +325,7 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
 ## 9. Prochaine étape recommandée
 
 Les huit étapes de la feuille de route sont atteintes. La suite dépend de ce que l'auteur veut privilégier :
-- **vérifier `ui` à l'écran** avec l'auteur (`cd tests/programs/notes_app && lion run notes_app.lion`), puis l'étendre : Windows et macOS, touches mortes, défilement, styles ;
+- **étendre `ui`** : Windows et macOS, touches mortes, défilement, styles, images ;
 - **l'outillage des éditeurs** : VS Code et LSP (point 5 ci-dessous) ;
 - **les paquets** : un registre central et la publication, quand il y aura des paquets à partager ;
 - **la spec** : l'étape 1 de la feuille de route demande qu'elle n'ait plus de point ouvert bloquant. Les choix délégués (Dn, Cn) et les décisions de l'auteur de cette session pourraient y entrer.
