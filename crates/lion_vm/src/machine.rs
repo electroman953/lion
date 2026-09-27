@@ -2,7 +2,6 @@
 
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::ffi::CString;
 use std::io::{self, BufRead, Write};
 use std::rc::Rc;
 
@@ -12,9 +11,9 @@ use lion_runtime::ops::RationalOp;
 use lion_runtime::{BugKind, MAX_CALL_DEPTH, ops};
 
 use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
-use crate::ffi::{self, CResult, CValue};
 use crate::map::MapValue;
-use crate::set::{SetValue, holds_nan};
+use crate::set::SetValue;
+use crate::shared::{self, Comparer, Stop};
 use crate::value::{Closure, Record, Value};
 
 /// Why execution stopped before the end of the program.
@@ -479,23 +478,17 @@ impl<'a> Machine<'a> {
                     self.failures.push(Failure { span: self.chunk.spans[at], message });
                 }
                 Instr::Ask { dst, prompt } => {
-                    let line = self.ask(prompt).map_err(|error| Box::new(Trap::Io(error)))?;
+                    let prompt = self.text(prompt).to_string();
+                    let line = shared::ask(self.out, self.input, &prompt)
+                        .map_err(|error| Box::new(Trap::Io(error)))?;
                     self.set(dst, Value::Text(Rc::new(line)));
                 }
                 Instr::Exit { code } => {
-                    let code = self.int(code);
-                    let code =
-                        u8::try_from(code).map_err(|_| self.bug(BugKind::InvalidExitCode { code }, at))?;
+                    let code = shared::exit_code(self.int(code)).map_err(|kind| self.bug(kind, at))?;
                     return Err(Box::new(Trap::Exit(code)));
                 }
                 Instr::Reverse { dst, a } => {
-                    let reversed = match &self.stack[self.base + a as usize] {
-                        Value::List(elements) => {
-                            Value::List(Rc::new(elements.iter().rev().cloned().collect()))
-                        }
-                        Value::Text(text) => Value::Text(Rc::new(text.chars().rev().collect())),
-                        other => self.mismatch("List or Text", other),
-                    };
+                    let reversed = shared::reverse(&self.stack[self.base + a as usize]);
                     self.set(dst, reversed);
                 }
                 Instr::Floor { dst, a } => {
@@ -685,61 +678,42 @@ impl<'a> Machine<'a> {
                 Instr::GetIndex { dst, object, index }
                     if matches!(self.stack[self.base + object as usize], Value::Map(_)) =>
                 {
-                    let map = self.map_rc(object);
-                    let key = self.stack[self.base + index as usize].clone();
-                    match self.map_position(&map, &key, at)? {
-                        Some(position) => self.set(dst, map.value_at(position).clone()),
-                        None => return Err(self.bug(BugKind::MissingKey { key: key.literal() }, at)),
-                    }
+                    let (map, key) = (self.map_rc(object), self.stack[self.base + index as usize].clone());
+                    let result = shared::map_index(&mut self.comparer(at), &map, &key);
+                    let value = result.map_err(|stop| self.stop(stop, at))?;
+                    self.set(dst, value);
                 }
                 Instr::GetIndex { dst, object, index } => {
-                    let value = self.get_index(object, index).map_err(|kind| self.bug(kind, at))?;
+                    let index = self.int(index);
+                    let value = shared::get_index(&self.stack[self.base + object as usize], index)
+                        .map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, value);
                 }
                 Instr::GetSlice { dst, object, range } => {
-                    let value = self.get_slice(object, range).map_err(|kind| self.bug(kind, at))?;
+                    let bounds = self.range(range);
+                    let value = shared::get_slice(&self.stack[self.base + object as usize], bounds)
+                        .map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, value);
                 }
                 Instr::GetSize { dst, object } => {
-                    let size = match &self.stack[self.base + object as usize] {
-                        Value::List(elements) => elements.len() as i64,
-                        Value::Set(set) => set.len() as i64,
-                        Value::Map(map) => map.len() as i64,
-                        Value::Text(text) => text.chars().count() as i64,
-                        Value::Range(bounds) => {
-                            range_size(bounds[0], bounds[1]).map_err(|kind| self.bug(kind, at))?
-                        }
-                        other => self.mismatch("List, Text or Range", other),
-                    };
+                    let size = shared::size(&self.stack[self.base + object as usize])
+                        .map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, Value::Int(size));
                 }
                 Instr::GetFirst { dst, list } => {
-                    let value =
-                        self.list(list).first().cloned().ok_or_else(|| self.bug(BugKind::EmptyList, at))?;
+                    let value = shared::first(&self.stack[self.base + list as usize])
+                        .map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, value);
                 }
                 Instr::GetLast { dst, list } => {
-                    let value =
-                        self.list(list).last().cloned().ok_or_else(|| self.bug(BugKind::EmptyList, at))?;
+                    let value = shared::last(&self.stack[self.base + list as usize])
+                        .map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, value);
                 }
-                Instr::InList { dst, a, b } if self.program.custom_equality => {
-                    let value = self.stack[self.base + a as usize].clone();
-                    let Value::List(list) = self.stack[self.base + b as usize].clone() else {
-                        self.mismatch("List", &self.stack[self.base + b as usize])
-                    };
-                    let mut found = false;
-                    for element in list.iter() {
-                        if self.equal(element, &value, at)? {
-                            found = true;
-                            break;
-                        }
-                    }
-                    self.set(dst, Value::Bool(found));
-                }
                 Instr::InList { dst, a, b } => {
-                    let value = &self.stack[self.base + a as usize];
-                    let found = self.list(b).iter().any(|element| element.equals(value));
+                    let value = self.stack[self.base + a as usize].clone();
+                    let list = self.stack[self.base + b as usize].clone();
+                    let found = shared::in_list(&mut self.comparer(at), &value, shared::elements(&list))?;
                     self.set(dst, Value::Bool(found));
                 }
                 Instr::EqValue { dst, a, b } | Instr::NeValue { dst, a, b } => {
@@ -747,12 +721,12 @@ impl<'a> Machine<'a> {
                         self.stack[self.base + a as usize].clone(),
                         self.stack[self.base + b as usize].clone(),
                     );
-                    let equal = self.equal(&first, &second, at)?;
+                    let equal = shared::equal(&mut self.comparer(at), &first, &second)?;
                     let negate = matches!(code[at], Instr::NeValue { .. });
                     self.set(dst, Value::Bool(equal != negate));
                 }
                 Instr::ForList { list, counter, target } => {
-                    if self.sequence_len(list) == 0 {
+                    if shared::sequence_len(&self.stack[self.base + list as usize]) == 0 {
                         pc = target as usize;
                     } else {
                         self.set(counter, Value::Int(0));
@@ -760,188 +734,68 @@ impl<'a> Machine<'a> {
                 }
                 Instr::ElementAt { dst, list, counter } => {
                     let position = self.int(counter) as usize;
-                    let value = self.sequence_at(list, position);
+                    let value = shared::sequence_at(&self.stack[self.base + list as usize], position);
                     self.set(dst, value);
                 }
                 Instr::NextList { list, counter, target } => {
                     let next = self.int(counter) + 1;
-                    if (next as usize) < self.sequence_len(list) {
+                    if (next as usize) < shared::sequence_len(&self.stack[self.base + list as usize]) {
                         self.set(counter, Value::Int(next));
                         pc = target as usize;
                     }
                 }
                 Instr::StoreElement { target, indices, depth, src } => {
                     let value = self.stack[self.base + src as usize].clone();
-                    let keys = self.key_positions(target, indices, depth, at)?;
-                    let stored = self
-                        .element_mut(target, indices, depth, keys.as_deref(), true)
-                        .map(|slot| *slot = value);
-                    stored.map_err(|kind| self.bug(kind, at))?;
+                    let steps = self.steps(indices, depth);
+                    self.change(target, at, |c, root| shared::store_element(c, root, &steps, value))?;
                 }
                 Instr::RemoveElement { target, indices, depth, src } => {
                     let key = self.stack[self.base + src as usize].clone();
-                    let keys = self.key_positions(target, indices, depth, at)?;
-                    let map = match self.element_mut(target, indices, depth, keys.as_deref(), false) {
-                        Ok(Value::Map(map)) => Rc::clone(map),
-                        Ok(other) => {
-                            panic!("the virtual machine expected a Map but found {}", other.type_name())
-                        }
-                        Err(kind) => return Err(self.bug(kind, at)),
-                    };
-                    let found = self.map_position(&map, &key, at)?;
-                    drop(map);
-                    if let Some(position) = found {
-                        let removed =
-                            self.element_mut(target, indices, depth, keys.as_deref(), false).map(|slot| {
-                                if let Value::Map(map) = slot {
-                                    Rc::make_mut(map).remove_at(position);
-                                }
-                            });
-                        removed.map_err(|kind| self.bug(kind, at))?;
-                    }
+                    let steps = self.steps(indices, depth);
+                    self.change(target, at, |c, root| shared::remove_element(c, root, &steps, &key))?;
                 }
-                Instr::CallForeign { dst, index, start, count: _ } => {
-                    let value = self.call_foreign(index as usize, start, at)?;
+                Instr::CallForeign { dst, index, start, count } => {
+                    let (index, first) = (index as usize, self.base + start as usize);
+                    let program = self.program;
+                    let args = &self.stack[first..first + count as usize];
+                    let result = shared::call_foreign(
+                        &mut self.foreign_functions[index],
+                        &program.foreign[index],
+                        args,
+                    );
+                    let value = result.map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, value);
                 }
                 Instr::MakeMap { dst, start, count } => {
                     let first = self.base + start as usize;
-                    let values = self.stack[first..first + 2 * count as usize].to_vec();
-                    let mut map = MapValue::default();
-                    for pair in values.chunks(2) {
-                        let (key, value) = (pair[0].clone(), pair[1].clone());
-                        if holds_nan(&key) {
-                            return Err(self.bug(BugKind::NanKey, at));
-                        }
-                        match self.map_position(&map, &key, at)? {
-                            Some(position) => *map.value_mut(position) = value,
-                            None => {
-                                map.push_new(key, value);
-                            }
-                        }
-                    }
+                    let values = &self.stack[first..first + 2 * count as usize];
+                    let pairs = values.chunks(2).map(|pair| (pair[0].clone(), pair[1].clone())).collect();
+                    let result = shared::make_map(&mut self.comparer(at), pairs);
+                    let map = result.map_err(|stop| self.stop(stop, at))?;
                     self.set(dst, Value::Map(Rc::new(map)));
                 }
                 Instr::InMap { dst, a, b } => {
                     let key = self.stack[self.base + a as usize].clone();
                     let map = self.map_rc(b);
-                    let found = self.map_position(&map, &key, at)?.is_some();
+                    let found = shared::map_position(&mut self.comparer(at), &map, &key)?.is_some();
                     self.set(dst, Value::Bool(found));
                 }
                 Instr::MapGet { dst, map, key } => {
                     let key = self.stack[self.base + key as usize].clone();
                     let map = self.map_rc(map);
-                    let value = match self.map_position(&map, &key, at)? {
-                        Some(position) => map.value_at(position).clone(),
-                        None => Value::None,
-                    };
+                    let value = shared::map_get(&mut self.comparer(at), &map, &key)?;
                     self.set(dst, value);
-                }
-                Instr::AddElement { target, indices, depth, src } if self.program.custom_equality => {
-                    let value = self.stack[self.base + src as usize].clone();
-                    let keys = self.key_positions(target, indices, depth, at)?;
-                    // A Set gets the value unless an element equals it, as its `equals` says.
-                    let set = match self.element_mut(target, indices, depth, keys.as_deref(), false) {
-                        Ok(Value::Set(set)) => Some(Rc::clone(set)),
-                        _ => None,
-                    };
-                    if let Some(set) = set {
-                        if holds_nan(&value) {
-                            return Err(self.bug(BugKind::NanInSet, at));
-                        }
-                        let present = self.set_contains(&set, &value, at)?;
-                        drop(set);
-                        if !present {
-                            let added = self.element_mut(target, indices, depth, keys.as_deref(), false).map(
-                                |slot| {
-                                    let Value::Set(set) = slot else { unreachable!("a Set above") };
-                                    Rc::make_mut(set).push_new(value);
-                                },
-                            );
-                            added.map_err(|kind| self.bug(kind, at))?;
-                        }
-                    } else {
-                        let added =
-                            self.element_mut(target, indices, depth, keys.as_deref(), false).map(|slot| {
-                                match slot {
-                                    Value::List(elements) => Rc::make_mut(elements).push(value),
-                                    other => {
-                                        panic!(
-                                            "the virtual machine expected a List but found {}",
-                                            other.type_name()
-                                        )
-                                    }
-                                }
-                            });
-                        added.map_err(|kind| self.bug(kind, at))?;
-                    }
                 }
                 Instr::AddElement { target, indices, depth, src } => {
                     let value = self.stack[self.base + src as usize].clone();
-                    let added =
-                        self.element_mut(target, indices, depth, None, false).and_then(|slot| match slot {
-                            Value::List(elements) => {
-                                Rc::make_mut(elements).push(value);
-                                Ok(())
-                            }
-                            Value::Set(set) => Rc::make_mut(set).insert(value).map_err(|_| BugKind::NanInSet),
-                            other => {
-                                panic!(
-                                    "the virtual machine expected a List or a Set but found {}",
-                                    other.type_name()
-                                )
-                            }
-                        });
-                    added.map_err(|kind| self.bug(kind, at))?;
-                }
-                Instr::MakeSet { dst, start, count } if self.program.custom_equality => {
-                    let first = self.base + start as usize;
-                    let values = self.stack[first..first + count as usize].to_vec();
-                    let mut set = SetValue::default();
-                    for value in values {
-                        self.set_insert(&mut set, value, at)?;
-                    }
-                    self.set(dst, Value::Set(Rc::new(set)));
-                }
-                Instr::InSet { dst, a, b } if self.program.custom_equality => {
-                    let value = self.stack[self.base + a as usize].clone();
-                    let set = self.set_rc(b);
-                    let found = self.set_contains(&set, &value, at)?;
-                    self.set(dst, Value::Bool(found));
-                }
-                Instr::SetUnion { dst, a, b }
-                | Instr::SetInter { dst, a, b }
-                | Instr::SetMinus { dst, a, b }
-                | Instr::Subset { dst, a, b }
-                    if self.program.custom_equality =>
-                {
-                    let (first, second) = (self.set_rc(a), self.set_rc(b));
-                    let result = match code[at] {
-                        Instr::SetUnion { .. } => {
-                            let mut result = (*first).clone();
-                            for value in second.items() {
-                                self.set_insert(&mut result, value.clone(), at)?;
-                            }
-                            Value::Set(Rc::new(result))
-                        }
-                        Instr::Subset { .. } => Value::Bool(self.set_subset(&first, &second, at)?),
-                        ref instr => {
-                            let keep_common = matches!(instr, Instr::SetInter { .. });
-                            let mut result = SetValue::default();
-                            for value in first.items() {
-                                if self.set_contains(&second, value, at)? == keep_common {
-                                    result.push_new(value.clone());
-                                }
-                            }
-                            Value::Set(Rc::new(result))
-                        }
-                    };
-                    self.set(dst, result);
+                    let steps = self.steps(indices, depth);
+                    self.change(target, at, |c, root| shared::add_element(c, root, &steps, value))?;
                 }
                 Instr::MakeSet { dst, start, count } => {
                     let first = self.base + start as usize;
                     let values = self.stack[first..first + count as usize].to_vec();
-                    let set = SetValue::from_values(values).map_err(|_| self.bug(BugKind::NanInSet, at))?;
+                    let result = shared::make_set(&mut self.comparer(at), values);
+                    let set = result.map_err(|stop| self.stop(stop, at))?;
                     self.set(dst, Value::Set(Rc::new(set)));
                 }
                 Instr::MakeTuple { dst, start, count } => {
@@ -950,57 +804,41 @@ impl<'a> Machine<'a> {
                     self.set(dst, Value::Tuple(Rc::new(elements)));
                 }
                 Instr::InSet { dst, a, b } => {
-                    let found = self.set_value(b).contains(&self.stack[self.base + a as usize]);
+                    let value = self.stack[self.base + a as usize].clone();
+                    let set = self.set_rc(b);
+                    let found = shared::set_contains(&mut self.comparer(at), &set, &value)?;
                     self.set(dst, Value::Bool(found));
                 }
                 Instr::SetUnion { dst, a, b } => {
-                    let result = self.set_value(a).union(self.set_value(b));
+                    let (first, second) = (self.set_rc(a), self.set_rc(b));
+                    let result = shared::set_union(&mut self.comparer(at), &first, &second)?;
                     self.set(dst, Value::Set(Rc::new(result)));
                 }
-                Instr::SetInter { dst, a, b } => {
-                    let result = self.set_value(a).inter(self.set_value(b));
-                    self.set(dst, Value::Set(Rc::new(result)));
-                }
-                Instr::SetMinus { dst, a, b } => {
-                    let result = self.set_value(a).minus(self.set_value(b));
+                Instr::SetInter { dst, a, b } | Instr::SetMinus { dst, a, b } => {
+                    let (first, second) = (self.set_rc(a), self.set_rc(b));
+                    let keep_common = matches!(code[at], Instr::SetInter { .. });
+                    let result = shared::set_filter(&mut self.comparer(at), &first, &second, keep_common)?;
                     self.set(dst, Value::Set(Rc::new(result)));
                 }
                 Instr::Subset { dst, a, b } => {
-                    let result = self.set_value(a).subset(self.set_value(b));
+                    let (first, second) = (self.set_rc(a), self.set_rc(b));
+                    let result = shared::set_subset(&mut self.comparer(at), &first, &second)?;
                     self.set(dst, Value::Bool(result));
                 }
                 Instr::SumInt { dst, values } => {
-                    let total = match &self.stack[self.base + values as usize] {
-                        Value::Range(bounds) => range_sum(bounds[0], bounds[1]),
-                        _ => self.list(values).iter().try_fold(0i64, |total, element| match element {
-                            Value::Int(value) => ops::int_add(total, *value),
-                            other => self.mismatch("Int", other),
-                        }),
-                    }
-                    .map_err(|kind| self.bug(kind, at))?;
+                    let total = shared::sum_int(&self.stack[self.base + values as usize])
+                        .map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, Value::Int(total));
                 }
                 Instr::SumFloat { dst, values } => {
-                    let mut total = 0.0;
-                    let mut finite = true;
-                    for element in self.list(values).iter() {
-                        let Value::Float(value) = element else { self.mismatch("Float", element) };
-                        finite &= value.is_finite();
-                        total += value;
-                    }
-                    if finite && !total.is_finite() {
+                    let (total, special) = shared::sum_float(&self.stack[self.base + values as usize]);
+                    if special {
                         self.alert(AlertKind::SpecialFloat { value: total }, at);
                     }
                     self.set(dst, Value::Float(total));
                 }
                 Instr::SumRational { dst, values } => {
-                    let total = self
-                        .list(values)
-                        .iter()
-                        .try_fold([0, 1], |total, element| match element {
-                            Value::Rational(value) => ops::rational_op(RationalOp::Add, total, **value),
-                            other => self.mismatch("Rational", other),
-                        })
+                    let total = shared::sum_rational(&self.stack[self.base + values as usize])
                         .map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, Value::Rational(Rc::new(total)));
                 }
@@ -1010,14 +848,7 @@ impl<'a> Machine<'a> {
                 }
                 Instr::TypeTestNamed { dst, src, kinds, set } => {
                     let value = &self.stack[self.base + src as usize];
-                    let number = match value {
-                        Value::Struct(record) => Some(record.layout.index),
-                        Value::Enum(enumeration, _) => Some(enumeration.index),
-                        _ => None,
-                    };
-                    let result = value.kind() & kinds != 0
-                        || number
-                            .is_some_and(|number| self.program.type_sets[set as usize].contains(&number));
+                    let result = shared::type_test_named(value, kinds, &self.program.type_sets[set as usize]);
                     self.set(dst, Value::Bool(result));
                 }
                 Instr::LoadEnum { dst, enumeration, value } => {
@@ -1057,22 +888,15 @@ impl<'a> Machine<'a> {
                 }
                 Instr::Try { dst, src, errors } => {
                     let value = self.stack[self.base + src as usize].clone();
-                    // An Error of the program: a structure or an enumeration of the set.
-                    let own = errors != u32::MAX && {
-                        let number = match &value {
-                            Value::Struct(record) => Some(record.layout.index),
-                            Value::Enum(enumeration, _) => Some(enumeration.index),
-                            _ => None,
-                        };
-                        number.is_some_and(|number| self.program.type_sets[errors as usize].contains(&number))
+                    // An Error of the program is a structure or an enumeration of the set.
+                    let errors = match errors {
+                        u32::MAX => &[][..],
+                        set => &self.program.type_sets[set as usize][..],
                     };
-                    if matches!(value, Value::Error(_)) || own {
+                    if shared::is_failure(&value, errors) {
                         if self.frames.len() == 1 {
                             let span = self.chunk.spans[at];
-                            let message = match &value {
-                                Value::Error(message) => message.to_string(),
-                                other => other.to_text(),
-                            };
+                            let message = shared::failure_message(&value);
                             return Err(Box::new(Trap::Failure { message, span }));
                         }
                         pc = self.return_to_caller(value);
@@ -1090,24 +914,15 @@ impl<'a> Machine<'a> {
                     self.set(dst, Value::Error(Rc::new(message)));
                 }
                 Instr::ErrorMessage { dst, a } => {
-                    let message = match &self.stack[self.base + a as usize] {
-                        Value::Error(message) => message.to_string(),
-                        other => self.mismatch("Error", other),
-                    };
-                    self.set(dst, Value::Text(Rc::new(message)));
+                    let message = shared::error_message(&self.stack[self.base + a as usize]);
+                    self.set(dst, message);
                 }
                 Instr::TextToInt { dst, a } => {
-                    let value = match ops::parse_int(self.text(a)) {
-                        Ok(value) => Value::Int(value),
-                        Err(message) => Value::Error(Rc::new(message)),
-                    };
+                    let value = shared::text_to_int(self.text(a));
                     self.set(dst, value);
                 }
                 Instr::TextToFloat { dst, a } => {
-                    let value = match ops::parse_float(self.text(a)) {
-                        Ok(value) => Value::Float(value),
-                        Err(message) => Value::Error(Rc::new(message)),
-                    };
+                    let value = shared::text_to_float(self.text(a));
                     self.set(dst, value);
                 }
                 Instr::Halt => return Ok(()),
@@ -1149,46 +964,6 @@ impl<'a> Machine<'a> {
         Ok(0)
     }
 
-    /// Calls the C function `index` with the values of the registers from `start` (§21.2).
-    fn call_foreign(&mut self, index: usize, start: Reg, at: usize) -> Result<Value, Fault> {
-        let program = self.program;
-        let signature = &program.foreign[index];
-        let function = match self.foreign_functions[index] {
-            Some(function) => function,
-            None => {
-                let found = ffi::find(&signature.library, &signature.name)
-                    .map_err(|reason| self.bug(BugKind::ForeignUnavailable { reason }, at))?;
-                self.foreign_functions[index] = Some(found);
-                found
-            }
-        };
-        let mut args = Vec::new();
-        for offset in 0..signature.params.len() {
-            let arg = match &self.stack[self.base + start as usize + offset] {
-                Value::Int(value) => CValue::Int(*value),
-                Value::Bool(value) => CValue::Int(i64::from(*value)),
-                Value::Float(value) => CValue::Float(*value),
-                Value::Text(text) => match CString::new(text.as_str()) {
-                    Ok(text) => CValue::Text(text),
-                    Err(_) => return Err(self.bug(BugKind::ForeignText, at)),
-                },
-                other => self.mismatch("Int, Float, Bool or Text", other),
-            };
-            args.push(arg);
-        }
-        Ok(match ffi::call(function, signature, &args) {
-            CResult::Int(value) => Value::Int(value),
-            CResult::Float(value) => Value::Float(value),
-            CResult::Bool(value) => Value::Bool(value),
-            CResult::None => Value::None,
-            CResult::Text(Some(text)) => Value::Text(Rc::new(text)),
-            CResult::Text(None) if signature.ret == lion_ir::Type::Text => {
-                return Err(self.bug(BugKind::ForeignNoText, at));
-            }
-            CResult::Text(None) => Value::None,
-        })
-    }
-
     /// Calls a function of the program from an instruction, as `equals`, and gives its
     /// result. Its frame starts above the registers of the current one.
     fn invoke(&mut self, function: u32, args: Vec<Value>, at: usize) -> Result<Value, Fault> {
@@ -1209,93 +984,31 @@ impl<'a> Machine<'a> {
         Ok(std::mem::take(&mut self.stack[self.base + offset as usize]))
     }
 
-    /// Equality of content (§9.4), with the `equals` of the structures that define one
-    /// (§12.5).
-    fn equal(&mut self, a: &Value, b: &Value, at: usize) -> Result<bool, Fault> {
-        if !self.program.custom_equality {
-            return Ok(a.equals(b));
-        }
-        Ok(match (a, b) {
-            (Value::Struct(x), Value::Struct(y)) if x.layout.index == y.layout.index => match x.layout.equals
-            {
-                Some(function) => match self.invoke(function, vec![a.clone(), b.clone()], at)? {
-                    Value::Bool(equal) => equal,
-                    other => self.mismatch("Bool", &other),
-                },
-                None => {
-                    let (x, y) = (Rc::clone(x), Rc::clone(y));
-                    for (first, second) in x.fields.iter().zip(&y.fields) {
-                        if !self.equal(first, second, at)? {
-                            return Ok(false);
-                        }
-                    }
-                    true
-                }
-            },
-            (Value::List(x), Value::List(y)) | (Value::Tuple(x), Value::Tuple(y)) => {
-                if x.len() != y.len() {
-                    return Ok(false);
-                }
-                let (x, y) = (Rc::clone(x), Rc::clone(y));
-                for (first, second) in x.iter().zip(y.iter()) {
-                    if !self.equal(first, second, at)? {
-                        return Ok(false);
-                    }
-                }
-                true
-            }
-            (Value::Set(x), Value::Set(y)) => {
-                let (x, y) = (Rc::clone(x), Rc::clone(y));
-                x.len() == y.len() && self.set_subset(&x, &y, at)?
-            }
-            (Value::Map(x), Value::Map(y)) => {
-                let (x, y) = (Rc::clone(x), Rc::clone(y));
-                if x.len() != y.len() {
-                    return Ok(false);
-                }
-                for (key, value) in x.entries() {
-                    let Some(position) = self.map_position(&y, key, at)? else { return Ok(false) };
-                    if !self.equal(value, y.value_at(position), at)? {
-                        return Ok(false);
-                    }
-                }
-                true
-            }
-            _ => a.equals(b),
-        })
+    /// The comparisons of values for the instruction at `at`: the machine calls the
+    /// `equals` of the structures itself (§12.5).
+    fn comparer(&mut self, at: usize) -> Calls<'_, 'a> {
+        Calls { machine: self, at }
     }
 
-    /// Whether an element of the Set equals `value`, as the machine compares values.
-    fn set_contains(&mut self, set: &SetValue, value: &Value, at: usize) -> Result<bool, Fault> {
-        if holds_nan(value) {
-            return Ok(false);
-        }
-        let candidates: Vec<Value> = set.candidates(value).cloned().collect();
-        for candidate in &candidates {
-            if self.equal(candidate, value, at)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+    /// Runs a change in place on the variable of `target`. The value leaves the stack
+    /// meanwhile, as `equals` may run, and comes back whatever happens.
+    fn change(
+        &mut self,
+        target: Target,
+        at: usize,
+        change: impl FnOnce(&mut dyn Comparer, &mut Value) -> Result<(), Stop>,
+    ) -> Result<(), Fault> {
+        let slot = self.root_of(target);
+        let mut root = std::mem::take(&mut self.stack[slot]);
+        let result = change(&mut self.comparer(at), &mut root);
+        self.stack[slot] = root;
+        result.map_err(|stop| self.stop(stop, at))
     }
 
-    fn set_insert(&mut self, set: &mut SetValue, value: Value, at: usize) -> Result<(), Fault> {
-        if holds_nan(&value) {
-            return Err(self.bug(BugKind::NanInSet, at));
-        }
-        if !self.set_contains(set, &value, at)? {
-            set.push_new(value);
-        }
-        Ok(())
-    }
-
-    fn set_subset(&mut self, first: &SetValue, second: &SetValue, at: usize) -> Result<bool, Fault> {
-        for value in first.items() {
-            if !self.set_contains(second, value, at)? {
-                return Ok(false);
-            }
-        }
-        Ok(true)
+    /// The steps of a change in place: the values of `depth` registers from `indices`.
+    fn steps(&self, indices: Reg, depth: u32) -> Vec<Value> {
+        let first = self.base + indices as usize;
+        self.stack[first..first + depth as usize].to_vec()
     }
 
     fn set_rc(&self, reg: Reg) -> Rc<SetValue> {
@@ -1428,141 +1141,11 @@ impl<'a> Machine<'a> {
         }
     }
 
-    /// The elements of a List, or of a Set in their order.
-    fn list(&self, reg: Reg) -> &[Value] {
-        match &self.stack[self.base + reg as usize] {
-            Value::List(elements) => elements,
-            Value::Set(set) => set.items(),
-            other => self.mismatch("List or Set", other),
-        }
-    }
-
     fn cell(&self, reg: Reg) -> &RefCell<Value> {
         match &self.stack[self.base + reg as usize] {
             Value::Cell(cell) => cell,
             other => self.mismatch("cell", other),
         }
-    }
-
-    fn set_value(&self, reg: Reg) -> &SetValue {
-        match &self.stack[self.base + reg as usize] {
-            Value::Set(set) => set,
-            other => self.mismatch("Set", other),
-        }
-    }
-
-    /// `ask(prompt)`: the prompt, followed by a space, then a line without its end. At the
-    /// end of the input, the line is empty (C59).
-    fn ask(&mut self, prompt: Reg) -> io::Result<String> {
-        let prompt = self.text(prompt).to_string();
-        if !prompt.is_empty() {
-            write!(self.out, "{prompt} ")?;
-        }
-        self.out.flush()?;
-        let mut line = String::new();
-        self.input.read_line(&mut line)?;
-        if line.ends_with('\n') {
-            line.pop();
-            if line.ends_with('\r') {
-                line.pop();
-            }
-        }
-        Ok(line)
-    }
-
-    /// `l[i]` or `t[i]`, from 1.
-    fn get_index(&self, object: Reg, index: Reg) -> Result<Value, BugKind> {
-        let index = self.int(index);
-        match &self.stack[self.base + object as usize] {
-            Value::List(elements) => {
-                let position = position(index, elements.len())?;
-                Ok(elements[position].clone())
-            }
-            Value::Text(text) => {
-                let size = text.chars().count();
-                let position = position(index, size)?;
-                let character = text.chars().nth(position).expect("the position is inside the text");
-                Ok(Value::Text(Rc::new(character.to_string())))
-            }
-            other => self.mismatch("List or Text", other),
-        }
-    }
-
-    /// `l[a..b]` or `t[a..b]`, bounds included; an empty interval gives an empty extract.
-    fn get_slice(&self, object: Reg, range: Reg) -> Result<Value, BugKind> {
-        let [start, end] = self.range(range);
-        let object = &self.stack[self.base + object as usize];
-        let size = match object {
-            Value::List(elements) => elements.len(),
-            Value::Text(text) => text.chars().count(),
-            other => self.mismatch("List or Text", other),
-        };
-        let (from, to) = if start > end {
-            (0, 0)
-        } else if start < 1 || end > size as i64 {
-            return Err(BugKind::SliceOutOfRange { start, end, size });
-        } else {
-            (start as usize - 1, end as usize)
-        };
-        Ok(match object {
-            Value::List(elements) => Value::List(Rc::new(elements[from..to].to_vec())),
-            Value::Text(text) => Value::Text(Rc::new(text.chars().skip(from).take(to - from).collect())),
-            _ => unreachable!("checked above"),
-        })
-    }
-
-    /// The element reached from a variable through indices, ready to be changed: every
-    /// list on the way is copied first if it is shared (§17.1).
-    /// A step into a Map finds its key by position in `keys` when the machine compared
-    /// the keys itself (`key_positions`), and otherwise with the equality of content.
-    /// With `create`, the last key is added when it is missing (C79).
-    fn element_mut(
-        &mut self,
-        target: Target,
-        indices: Reg,
-        depth: u32,
-        keys: Option<&[Option<usize>]>,
-        create: bool,
-    ) -> Result<&mut Value, BugKind> {
-        let root = self.root_of(target);
-        let steps: Vec<Value> =
-            (0..depth).map(|offset| self.stack[self.base + (indices + offset) as usize].clone()).collect();
-        let last = steps.len().saturating_sub(1);
-        let mut slot = &mut self.stack[root];
-        for (number, step) in steps.into_iter().enumerate() {
-            slot = match (slot, step) {
-                (Value::List(elements), Value::Int(step)) => {
-                    let elements = Rc::make_mut(elements);
-                    let position = position(step, elements.len())?;
-                    &mut elements[position]
-                }
-                // The position of a field, from 0.
-                (Value::Struct(record), Value::Int(step)) => &mut Rc::make_mut(record).fields[step as usize],
-                (Value::Map(map), key) => {
-                    let map = Rc::make_mut(map);
-                    let found = match keys {
-                        Some(keys) => keys[number],
-                        None => map.position(&key),
-                    };
-                    match found {
-                        Some(position) => map.value_mut(position),
-                        None if create && number == last => {
-                            if holds_nan(&key) {
-                                return Err(BugKind::NanKey);
-                            }
-                            let position = map.push_new(key, Value::None);
-                            map.value_mut(position)
-                        }
-                        None => return Err(BugKind::MissingKey { key: key.literal() }),
-                    }
-                }
-                (other, _) => panic!(
-                    "the virtual machine expected a List, a structure or a Map but found {}",
-                    other.type_name()
-                ),
-            };
-        }
-        Ok(slot)
     }
 
     fn root_of(&self, target: Target) -> usize {
@@ -1573,86 +1156,10 @@ impl<'a> Machine<'a> {
         }
     }
 
-    /// When a structure defines its equality, the positions of the keys of the Maps on
-    /// the path, found by the machine, which may call `equals` (§12.5); `None` for the
-    /// other steps, and for a missing key.
-    fn key_positions(
-        &mut self,
-        target: Target,
-        indices: Reg,
-        depth: u32,
-        at: usize,
-    ) -> Result<Option<Vec<Option<usize>>>, Fault> {
-        if !self.program.custom_equality {
-            return Ok(None);
-        }
-        let mut value = self.stack[self.root_of(target)].clone();
-        let mut positions = Vec::new();
-        for offset in 0..depth {
-            let step = self.stack[self.base + (indices + offset) as usize].clone();
-            let next = match (&value, &step) {
-                (Value::List(elements), Value::Int(index)) => {
-                    positions.push(None);
-                    position(*index, elements.len()).ok().map(|found| elements[found].clone())
-                }
-                (Value::Struct(record), Value::Int(field)) => {
-                    positions.push(None);
-                    record.fields.get(*field as usize).cloned()
-                }
-                (Value::Map(map), key) => {
-                    let map = Rc::clone(map);
-                    let found = self.map_position(&map, key, at)?;
-                    positions.push(found);
-                    found.map(|found| map.value_at(found).clone())
-                }
-                _ => None,
-            };
-            match next {
-                Some(next) => value = next,
-                None => break,
-            }
-        }
-        positions.resize(depth as usize, None);
-        Ok(Some(positions))
-    }
-
-    /// The position of the key in the Map, as the machine compares values.
-    fn map_position(&mut self, map: &MapValue, key: &Value, at: usize) -> Result<Option<usize>, Fault> {
-        if !self.program.custom_equality {
-            return Ok(map.position(key));
-        }
-        for position in map.candidates(key) {
-            let candidate = map.key_at(position).clone();
-            if self.equal(&candidate, key, at)? {
-                return Ok(Some(position));
-            }
-        }
-        Ok(None)
-    }
-
     fn map_rc(&self, reg: Reg) -> Rc<MapValue> {
         match &self.stack[self.base + reg as usize] {
             Value::Map(map) => Rc::clone(map),
             other => self.mismatch("Map", other),
-        }
-    }
-
-    /// The number of values that `for` goes through: elements, or keys of a Map.
-    fn sequence_len(&self, reg: Reg) -> usize {
-        match &self.stack[self.base + reg as usize] {
-            Value::List(elements) => elements.len(),
-            Value::Set(set) => set.len(),
-            Value::Map(map) => map.len(),
-            other => self.mismatch("List, Set or Map", other),
-        }
-    }
-
-    fn sequence_at(&self, reg: Reg, position: usize) -> Value {
-        match &self.stack[self.base + reg as usize] {
-            Value::List(elements) => elements[position].clone(),
-            Value::Set(set) => set.items()[position].clone(),
-            Value::Map(map) => map.key_at(position).clone(),
-            other => self.mismatch("List, Set or Map", other),
         }
     }
 
@@ -1683,6 +1190,13 @@ impl<'a> Machine<'a> {
         Box::new(Trap::Bug { kind, span: self.chunk.spans[at], calls: self.calls() })
     }
 
+    fn stop(&self, stop: Stop, at: usize) -> Fault {
+        match stop {
+            Stop::Bug(kind) => self.bug(kind, at),
+            Stop::Fault(fault) => fault,
+        }
+    }
+
     /// The places of the calls in progress, innermost first: each frame but the
     /// script's was entered by a call in the frame below it.
     fn calls(&self) -> Vec<Span> {
@@ -1704,34 +1218,18 @@ impl<'a> Machine<'a> {
     }
 }
 
-/// The position, from 0, of the 1-based `index` in a sequence of `size` elements.
-fn position(index: i64, size: usize) -> Result<usize, BugKind> {
-    if index < 1 || index > size as i64 {
-        return Err(BugKind::IndexOutOfRange { index, size });
-    }
-    Ok(index as usize - 1)
+/// The machine as a [`Comparer`], for the instruction at `at`.
+struct Calls<'m, 'a> {
+    machine: &'m mut Machine<'a>,
+    at: usize,
 }
 
-/// The number of integers in `start..end`, which may not fit in an Int.
-fn range_size(start: i64, end: i64) -> Result<i64, BugKind> {
-    if start > end {
-        return Ok(0);
+impl Comparer for Calls<'_, '_> {
+    fn custom_equality(&self) -> bool {
+        self.machine.program.custom_equality
     }
-    ops::int_add(ops::int_sub(end, start)?, 1)
-}
 
-/// The sum of the integers in `start..end`.
-fn range_sum(start: i64, end: i64) -> Result<i64, BugKind> {
-    let mut total = 0i64;
-    if start <= end {
-        let mut value = start;
-        loop {
-            total = ops::int_add(total, value)?;
-            if value == end {
-                break;
-            }
-            value += 1;
-        }
+    fn call_equals(&mut self, function: u32, a: Value, b: Value) -> Result<Value, Box<Trap>> {
+        self.machine.invoke(function, vec![a, b], self.at)
     }
-    Ok(total)
 }

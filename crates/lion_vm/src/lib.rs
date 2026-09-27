@@ -13,13 +13,16 @@ mod machine;
 mod map;
 mod natives;
 mod set;
+pub mod shared;
 mod value;
 
 pub use bytecode::{Chunk, Cmp, Instr, Program, Reg, Target, disassemble};
 pub use compile::compile;
 pub use constants::evaluate_compile;
 pub use machine::{Alert, AlertKind, Failure, Session, Trap, run, run_from, run_test};
-pub use value::Value;
+pub use map::MapValue;
+pub use set::SetValue;
+pub use value::{Closure, Record, Value, kinds};
 
 #[cfg(test)]
 mod tests;
