@@ -1,0 +1,78 @@
+exit: 1
+----- stdout
+----- stderr
+error: `over` makes a fraction of two Ints
+  --> tests/errors/rationals.lion:1:9
+   |
+ 1 | let a = 1.5 over 2
+   |         ^^^ this is a Float
+   |
+   = `n over d` is the exact fraction n/d, n and d being Ints (§8.3)
+
+error: `over` makes a fraction of two Ints
+  --> tests/errors/rationals.lion:2:9
+   |
+ 2 | let b = (1 over 2) over 3
+   |         ^^^^^^^^^^ this is a Rational
+   |
+   = `n over d` is the exact fraction n/d, n and d being Ints (§8.3)
+   = help: divide Rationals with `/`: the result stays exact
+
+error: `div` is defined only for Int values
+  --> tests/errors/rationals.lion:3:9
+   |
+ 3 | let c = (1 over 2) div 2
+   |         ^^^^^^^^^^ this is a Rational
+   |
+   = Lion 0.1 defines `div` and `mod` on Int values only (§8.1)
+   = help: use `/` to divide Rationals
+
+error: cannot convert a Rational to Int with `as`
+  --> tests/errors/rationals.lion:4:9
+   |
+ 4 | let d = (1 over 2) as Int
+   |         ^^^^^^^^^^^^^^^^^
+   |
+   = a Rational converts to a Float or to a Text (§8.5)
+   = help: convert it to a Float first, then round it: `floor(r as Float)`
+
+error: cannot convert an Int to Rational with `as`
+  --> tests/errors/rationals.lion:5:9
+   |
+ 5 | let e = 3 as Rational
+   |         ^^^^^^^^^^^^^
+   |
+   = a Rational is made with `over` (§8.3)
+   = help: write the fraction with `over`: `n over 1`
+
+error: the exponent of an exact power is an Int
+  --> tests/errors/rationals.lion:6:13
+   |
+ 6 | let f = 2 ^ (1 over 2)
+   |             ^^^^^^^^^^ this is a Rational
+   |
+   = a Rational to an Int power stays exact; Lion 0.1 defines no other power of a Rational (C72)
+   = help: convert the values with `as Float` to compute an approximate power
+
+error: mismatched types
+  --> tests/errors/rationals.lion:7:9
+   |
+ 7 | let g = 1 over 2 in Float
+   |         ^^^^^^^^ this is a Rational
+   |                     ----- expected because of this type
+   |
+   = expected: Float
+   = found: Rational
+   = help: convert the fraction with `as Float`
+
+error: `+` cannot be applied to Rational and Text
+  --> tests/errors/rationals.lion:8:20
+   |
+ 8 | let h = (1 over 2) + "x"
+   |                    ^
+   |                      --- this is a Text
+   |
+   = `+` is defined for Int, Float and Rational values
+   = help: to join texts, use interpolation: "{a}{b}" (§4.5)
+
+8 errors found

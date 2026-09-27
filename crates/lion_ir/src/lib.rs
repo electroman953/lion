@@ -360,6 +360,7 @@ pub enum Arg {
 pub enum UnaryOp {
     NegInt,
     NegFloat,
+    NegRational,
     Not,
 }
 
@@ -378,6 +379,14 @@ pub enum BinaryOp {
     MulFloat,
     DivFloat,
     PowFloat,
+    /// `n over d`, from two Ints (§8.3).
+    Over,
+    AddRational,
+    SubRational,
+    MulRational,
+    DivRational,
+    /// A Rational to an Int power; a negative one inverts (§8.3, C72).
+    PowRational,
     EqInt,
     NeInt,
     LtInt,
@@ -390,6 +399,12 @@ pub enum BinaryOp {
     LeFloat,
     GtFloat,
     GeFloat,
+    EqRational,
+    NeRational,
+    LtRational,
+    LeRational,
+    GtRational,
+    GeRational,
     EqBool,
     NeBool,
     EqText,
@@ -418,6 +433,10 @@ pub enum Conversion {
     IntToFloat,
     /// `as Int`: truncation toward zero (§8.5, D74).
     FloatToInt,
+    /// An Int in a calculation with a Rational (§8.3).
+    IntToRational,
+    /// `as Float`, or a Rational in a calculation with a Float (§8.5).
+    RationalToFloat,
     /// The text of any value, as `show` writes it; also `as Text` on numbers.
     ToText,
     /// `"12" as Int`: an Int, or an Error that says why (§8.5, D14).
@@ -563,6 +582,12 @@ impl BinaryOp {
             MulFloat => "mul_float",
             DivFloat => "div_float",
             PowFloat => "pow_float",
+            Over => "over",
+            AddRational => "add_rational",
+            SubRational => "sub_rational",
+            MulRational => "mul_rational",
+            DivRational => "div_rational",
+            PowRational => "pow_rational",
             EqInt => "eq_int",
             NeInt => "ne_int",
             LtInt => "lt_int",
@@ -575,6 +600,12 @@ impl BinaryOp {
             LeFloat => "le_float",
             GtFloat => "gt_float",
             GeFloat => "ge_float",
+            EqRational => "eq_rational",
+            NeRational => "ne_rational",
+            LtRational => "lt_rational",
+            LeRational => "le_rational",
+            GtRational => "gt_rational",
+            GeRational => "ge_rational",
             EqBool => "eq_bool",
             NeBool => "ne_bool",
             EqText => "eq_text",
@@ -599,6 +630,7 @@ impl UnaryOp {
         match self {
             UnaryOp::NegInt => "neg_int",
             UnaryOp::NegFloat => "neg_float",
+            UnaryOp::NegRational => "neg_rational",
             UnaryOp::Not => "not",
         }
     }
@@ -609,6 +641,8 @@ impl Conversion {
         match self {
             Conversion::IntToFloat => "int_to_float",
             Conversion::FloatToInt => "float_to_int",
+            Conversion::IntToRational => "int_to_rational",
+            Conversion::RationalToFloat => "rational_to_float",
             Conversion::ToText => "to_text",
             Conversion::TextToInt => "text_to_int",
             Conversion::TextToFloat => "text_to_float",

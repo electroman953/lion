@@ -1,0 +1,43 @@
+// Exact fractions (§8.3): always simplified, exact with Ints, Float with a Float.
+let third = 1 over 3
+show(third)
+show(1 over 3 + 1)                 // `over` binds as `*`: 4/3
+show(4 over -6)                    // the sign goes to the numerator
+show(6 over 3)                     // the denominator is always written (C72)
+show(third * 3)
+show(third / 2)
+show(third - 1 over 2)
+show(-third)
+show(third ^ 2)
+show((2 over 3) ^ -2)              // a negative exponent inverts
+show(third + 0.5)                  // a Float makes the result a Float
+show(third as Float)
+show("a third: {third}, as a Text: {third as Text}")
+
+// Comparisons are exact.
+show(third == 2 over 6)
+show(third < 1)
+show(1 over 3 > 0.3)
+show(1 over 2 == 0.5)
+show(10 over 5 == 2)
+
+// In collections, as types, and in functions.
+fun half(r in Rational) in Rational = r / 2
+show(half(3 over 4))
+let steps = [1 over 2, 1 over 4, 1 over 8, 1 over 8]
+show(steps)
+show(sum(steps))
+show({1 over 2, 2 over 4, 3 over 6})
+fun describe(x in Rational or Float) in Text = if x in Rational then "exact {x}" else "approximate {x}"
+show(describe(third))
+show(describe(0.5))
+
+struct Recipe:
+    name in Text
+    share in Rational = 1 over 4
+    ;
+show(Recipe(name: "tarte"))
+
+var total = 0 over 1
+for n in 1..10: total += 1 over (n * (n + 1)) ;
+show(total)

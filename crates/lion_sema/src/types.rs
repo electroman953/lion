@@ -11,6 +11,7 @@ const SUPPORTED: &[(&str, Type)] = &[
     ("Error", Type::Error),
     ("Int", Type::Int),
     ("Float", Type::Float),
+    ("Rational", Type::Rational),
     ("Bool", Type::Bool),
     ("Text", Type::Text),
     ("None", Type::None),
@@ -18,7 +19,6 @@ const SUPPORTED: &[(&str, Type)] = &[
 
 /// Types of the spec that this version does not support yet, with their section.
 const PLANNED: &[(&str, &str, &str)] = &[
-    ("Rational", "Rational numbers", "§8.3"),
     ("Domain", "collections", "§16"),
     ("Range", "collections", "§16"),
     ("Map", "collections", "§16"),

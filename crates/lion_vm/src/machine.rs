@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use lion_diagnostics::{Diagnostic, Span};
 use lion_runtime::format::format_float;
+use lion_runtime::ops::RationalOp;
 use lion_runtime::{BugKind, MAX_CALL_DEPTH, ops};
 
 use crate::bytecode::{Chunk, Instr, Program, Reg, Target};
@@ -336,6 +337,28 @@ impl<'a> Machine<'a> {
                     let value = -self.float(a);
                     self.set(dst, Value::Float(value));
                 }
+                Instr::MakeRational { dst, a, b } => {
+                    let value = ops::rational(self.int(a), self.int(b)).map_err(|kind| self.bug(kind, at))?;
+                    self.set(dst, Value::Rational(Rc::new(value)));
+                }
+                Instr::AddRational { dst, a, b } => self.rational_op(dst, a, b, at, RationalOp::Add)?,
+                Instr::SubRational { dst, a, b } => self.rational_op(dst, a, b, at, RationalOp::Subtract)?,
+                Instr::MulRational { dst, a, b } => self.rational_op(dst, a, b, at, RationalOp::Multiply)?,
+                Instr::DivRational { dst, a, b } => self.rational_op(dst, a, b, at, RationalOp::Divide)?,
+                Instr::PowRational { dst, a, b } => {
+                    let value = ops::rational_pow(self.rational(a), self.int(b))
+                        .map_err(|kind| self.bug(kind, at))?;
+                    self.set(dst, Value::Rational(Rc::new(value)));
+                }
+                Instr::NegRational { dst, a } => {
+                    let value = ops::rational_op(RationalOp::Subtract, [0, 1], self.rational(a))
+                        .map_err(|kind| self.bug(kind, at))?;
+                    self.set(dst, Value::Rational(Rc::new(value)));
+                }
+                Instr::CmpRational { dst, cmp, a, b } => {
+                    let ordering = ops::rational_compare(self.rational(a), self.rational(b));
+                    self.set(dst, Value::Bool(cmp.holds_for(ordering)));
+                }
 
                 Instr::EqInt { dst, a, b } => self.int_test(dst, a, b, |x, y| x == y),
                 Instr::NeInt { dst, a, b } => self.int_test(dst, a, b, |x, y| x != y),
@@ -381,6 +404,14 @@ impl<'a> Machine<'a> {
                 Instr::FloatToInt { dst, a } => {
                     let value = ops::float_to_int(self.float(a)).map_err(|kind| self.bug(kind, at))?;
                     self.set(dst, Value::Int(value));
+                }
+                Instr::IntToRational { dst, a } => {
+                    let value = self.int(a);
+                    self.set(dst, Value::Rational(Rc::new([value, 1])));
+                }
+                Instr::RationalToFloat { dst, a } => {
+                    let value = ops::rational_to_float(self.rational(a));
+                    self.set(dst, Value::Float(value));
                 }
                 Instr::ToText { dst, a } => {
                     let text = self.stack[self.base + a as usize].to_text();
@@ -763,6 +794,17 @@ impl<'a> Machine<'a> {
                     }
                     self.set(dst, Value::Float(total));
                 }
+                Instr::SumRational { dst, values } => {
+                    let total = self
+                        .list(values)
+                        .iter()
+                        .try_fold([0, 1], |total, element| match element {
+                            Value::Rational(value) => ops::rational_op(RationalOp::Add, total, **value),
+                            other => self.mismatch("Rational", other),
+                        })
+                        .map_err(|kind| self.bug(kind, at))?;
+                    self.set(dst, Value::Rational(Rc::new(total)));
+                }
                 Instr::TypeTest { dst, src, kinds } => {
                     let kind = self.stack[self.base + src as usize].kind();
                     self.set(dst, Value::Bool(kind & kinds != 0));
@@ -972,6 +1014,13 @@ impl<'a> Machine<'a> {
         Ok(())
     }
 
+    fn rational_op(&mut self, dst: Reg, a: Reg, b: Reg, at: usize, op: RationalOp) -> Result<(), Fault> {
+        let value =
+            ops::rational_op(op, self.rational(a), self.rational(b)).map_err(|kind| self.bug(kind, at))?;
+        self.set(dst, Value::Rational(Rc::new(value)));
+        Ok(())
+    }
+
     fn int_test(&mut self, dst: Reg, a: Reg, b: Reg, test: fn(i64, i64) -> bool) {
         let value = test(self.int(a), self.int(b));
         self.set(dst, Value::Bool(value));
@@ -1000,6 +1049,13 @@ impl<'a> Machine<'a> {
         match self.stack[self.base + reg as usize] {
             Value::Float(value) => value,
             ref other => self.mismatch("Float", other),
+        }
+    }
+
+    fn rational(&self, reg: Reg) -> [i64; 2] {
+        match &self.stack[self.base + reg as usize] {
+            Value::Rational(value) => **value,
+            other => self.mismatch("Rational", other),
         }
     }
 

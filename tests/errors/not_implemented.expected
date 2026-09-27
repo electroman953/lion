@@ -9,13 +9,13 @@ error: not implemented yet: collections
    |
    = this part of Lion (spec §16) is not supported by this version of the implementation
 
-error: not implemented yet: Rational numbers (`over`)
-  --> tests/errors/not_implemented.lion:4:11
+error: not implemented yet: `same`
+  --> tests/errors/not_implemented.lion:4:18
    |
- 4 | let r = 1 over 3
-   |           ^^^^
+ 4 | let r = 1 over 3 same 2
+   |                  ^^^^
    |
-   = this part of Lion (spec §8.3) is not supported by this version of the implementation
+   = this part of Lion (spec §9.4, §17.2) is not supported by this version of the implementation
 
 error: cannot find `x` in this scope
   --> tests/errors/not_implemented.lion:6:9

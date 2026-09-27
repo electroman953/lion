@@ -41,6 +41,17 @@ pub enum Instr {
     PowFloat { dst: Reg, a: Reg, b: Reg },
     NegFloat { dst: Reg, a: Reg },
 
+    /// `a over b` from two Ints (§8.3).
+    MakeRational { dst: Reg, a: Reg, b: Reg },
+    AddRational { dst: Reg, a: Reg, b: Reg },
+    SubRational { dst: Reg, a: Reg, b: Reg },
+    MulRational { dst: Reg, a: Reg, b: Reg },
+    DivRational { dst: Reg, a: Reg, b: Reg },
+    /// A Rational to the power of an Int.
+    PowRational { dst: Reg, a: Reg, b: Reg },
+    NegRational { dst: Reg, a: Reg },
+    CmpRational { dst: Reg, cmp: Cmp, a: Reg, b: Reg },
+
     EqInt { dst: Reg, a: Reg, b: Reg },
     NeInt { dst: Reg, a: Reg, b: Reg },
     LtInt { dst: Reg, a: Reg, b: Reg },
@@ -61,6 +72,8 @@ pub enum Instr {
 
     IntToFloat { dst: Reg, a: Reg },
     FloatToInt { dst: Reg, a: Reg },
+    IntToRational { dst: Reg, a: Reg },
+    RationalToFloat { dst: Reg, a: Reg },
     ToText { dst: Reg, a: Reg },
     /// Joins the Texts in registers `start .. start + count`.
     Concat { dst: Reg, start: Reg, count: u32 },
@@ -139,6 +152,7 @@ pub enum Instr {
     AddElement { target: Target, indices: Reg, depth: u32, src: Reg },
     SumInt { dst: Reg, values: Reg },
     SumFloat { dst: Reg, values: Reg },
+    SumRational { dst: Reg, values: Reg },
 
     /// Whether the kind of the value in `src` is one of the bits of `kinds`.
     TypeTest { dst: Reg, src: Reg, kinds: u16 },
@@ -230,6 +244,10 @@ impl Cmp {
             Cmp::Gt => a > b,
             Cmp::Ge => a >= b,
         }
+    }
+
+    pub fn holds_for(self, ordering: std::cmp::Ordering) -> bool {
+        self.holds(ordering as i64, 0)
     }
 }
 

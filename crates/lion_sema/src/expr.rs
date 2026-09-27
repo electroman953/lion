@@ -16,8 +16,9 @@ use crate::{Checker, ContextKind, GlobalType, article, typed};
 #[derive(Clone, Copy)]
 struct Comparison {
     op: ir::BinaryOp,
-    /// Int operands are converted to Float first.
-    on_floats: bool,
+    /// Numbers of different types are converted to this one first: Float, or Rational
+    /// (§8.3, §8.5).
+    numeric: Option<Type>,
     /// Values of an ordered enumeration are compared by their positions (D33).
     on_positions: bool,
     /// Values of a type with a `less` method are compared with it (§9.5).
@@ -237,6 +238,7 @@ impl Checker<'_> {
         let (ir_op, ty) = match (op, operand.ty) {
             (ast::UnaryOp::Neg, Type::Int) => (ir::UnaryOp::NegInt, Type::Int),
             (ast::UnaryOp::Neg, Type::Float) => (ir::UnaryOp::NegFloat, Type::Float),
+            (ast::UnaryOp::Neg, Type::Rational) => (ir::UnaryOp::NegRational, Type::Rational),
             (ast::UnaryOp::Not, Type::Bool) => (ir::UnaryOp::Not, Type::Bool),
             (ast::UnaryOp::Neg, found) if self.visible_method(found, "negate").is_some() => {
                 return self.operator_call(operand, "negate", Vec::new(), span);
@@ -245,7 +247,7 @@ impl Checker<'_> {
                 self.diagnostics.push(
                     Diagnostic::error(format!("`-` cannot be applied to {}", article(found)))
                         .with_primary(operand.span, format!("this is {}", article(found)))
-                        .with_note("`-` negates an Int or a Float"),
+                        .with_note("`-` negates an Int, a Float or a Rational"),
                 );
                 return None;
             }
@@ -269,13 +271,8 @@ impl Checker<'_> {
         span: Span,
     ) -> Option<ir::Expr> {
         use ast::BinaryOp::*;
-        let unsupported = match op {
-            Over => Some(("Rational numbers (`over`)", "§8.3")),
-            Same => Some(("`same`", "§9.4, §17.2")),
-            _ => None,
-        };
-        if let Some((what, section)) = unsupported {
-            self.not_implemented(op_span, what, section);
+        if op == Same {
+            self.not_implemented(op_span, "`same`", "§9.4, §17.2");
             return None;
         }
         if matches!(op, And | Or) {
@@ -613,8 +610,9 @@ impl Checker<'_> {
         Some(typed(kind, Type::Bool, span))
     }
 
-    /// `+ - * / div mod ^` (§8). Int with Int stays Int, except `/` which always gives
-    /// a Float; as soon as a Float is involved, the Int side is converted (§8.5).
+    /// `+ - * / div mod ^ over` (§8). Int with Int stays Int, except `/` which always
+    /// gives a Float; a Rational with Ints stays exact (§8.3); as soon as a Float is
+    /// involved, the other side is converted (§8.5).
     pub(crate) fn arithmetic(
         &mut self,
         op: ast::BinaryOp,
@@ -626,6 +624,9 @@ impl Checker<'_> {
         use ast::BinaryOp as Op;
         let lhs = self.within_try(lhs);
         let rhs = self.within_try(rhs);
+        if op == Op::Over {
+            return self.over(lhs, rhs, span);
+        }
         // A type makes an operator available with the method of its name (§9.5, D2).
         let method = match op {
             Op::Add => Some("plus"),
@@ -646,6 +647,19 @@ impl Checker<'_> {
             return None;
         }
         let ints = lhs.ty == Type::Int && rhs.ty == Type::Int;
+        // A Rational with Ints gives an exact result; a Float makes it a Float (§8.3).
+        let exact = (lhs.ty == Type::Rational || rhs.ty == Type::Rational)
+            && lhs.ty != Type::Float
+            && rhs.ty != Type::Float;
+        if exact && op == Op::Pow && rhs.ty != Type::Int {
+            self.diagnostics.push(
+                Diagnostic::error("the exponent of an exact power is an Int")
+                    .with_primary(rhs.span, format!("this is {}", article(rhs.ty)))
+                    .with_note("a Rational to an Int power stays exact; Lion 0.1 defines no other power of a Rational (C72)")
+                    .with_help("convert the values with `as Float` to compute an approximate power"),
+            );
+            return None;
+        }
         let (ir_op, ty) = match op {
             Op::Add if ints => (ir::BinaryOp::AddInt, Type::Int),
             Op::Sub if ints => (ir::BinaryOp::SubInt, Type::Int),
@@ -654,15 +668,25 @@ impl Checker<'_> {
             Op::IntDiv if ints => (ir::BinaryOp::DivInt, Type::Int),
             Op::Mod if ints => (ir::BinaryOp::ModInt, Type::Int),
             Op::IntDiv | Op::Mod => {
-                let float = if lhs.ty == Type::Float { &lhs } else { &rhs };
+                let other = if lhs.ty != Type::Int { &lhs } else { &rhs };
+                let help = if other.ty == Type::Rational {
+                    "use `/` to divide Rationals"
+                } else {
+                    "use `/` to divide Floats, or convert the value with `as Int`"
+                };
                 self.diagnostics.push(
                     Diagnostic::error(format!("`{}` is defined only for Int values", op.as_str()))
-                        .with_primary(float.span, "this is a Float")
+                        .with_primary(other.span, format!("this is {}", article(other.ty)))
                         .with_note("Lion 0.1 defines `div` and `mod` on Int values only (§8.1)")
-                        .with_help("use `/` to divide Floats, or convert the value with `as Int`"),
+                        .with_help(help),
                 );
                 return None;
             }
+            Op::Add if exact => (ir::BinaryOp::AddRational, Type::Rational),
+            Op::Sub if exact => (ir::BinaryOp::SubRational, Type::Rational),
+            Op::Mul if exact => (ir::BinaryOp::MulRational, Type::Rational),
+            Op::Div if exact => (ir::BinaryOp::DivRational, Type::Rational),
+            Op::Pow if exact => (ir::BinaryOp::PowRational, Type::Rational),
             Op::Add => (ir::BinaryOp::AddFloat, Type::Float),
             Op::Sub => (ir::BinaryOp::SubFloat, Type::Float),
             Op::Mul => (ir::BinaryOp::MulFloat, Type::Float),
@@ -670,8 +694,35 @@ impl Checker<'_> {
             Op::Pow => (ir::BinaryOp::PowFloat, Type::Float),
             _ => unreachable!("`{}` is not an arithmetic operator", op.as_str()),
         };
-        let (lhs, rhs) = if ty == Type::Float { (to_float(lhs), to_float(rhs)) } else { (lhs, rhs) };
+        let (lhs, rhs) = match ir_op {
+            // The exponent stays an Int.
+            ir::BinaryOp::PowRational => (lhs, rhs),
+            _ if ty == Type::Int => (lhs, rhs),
+            _ => (to_numeric(lhs, ty), to_numeric(rhs, ty)),
+        };
         Some(typed(ir::ExprKind::Binary { op: ir_op, lhs: Box::new(lhs), rhs: Box::new(rhs) }, ty, span))
+    }
+
+    /// `n over d`: the exact fraction, from two Ints (§8.3).
+    fn over(&mut self, lhs: ir::Expr, rhs: ir::Expr, span: Span) -> Option<ir::Expr> {
+        let mut valid = true;
+        for operand in [&lhs, &rhs] {
+            if operand.ty != Type::Int {
+                let mut error = Diagnostic::error("`over` makes a fraction of two Ints")
+                    .with_primary(operand.span, format!("this is {}", article(operand.ty)))
+                    .with_note("`n over d` is the exact fraction n/d, n and d being Ints (§8.3)");
+                if operand.ty == Type::Rational {
+                    error = error.with_help("divide Rationals with `/`: the result stays exact");
+                }
+                self.diagnostics.push(error);
+                valid = false;
+            }
+        }
+        valid.then(|| {
+            let kind =
+                ir::ExprKind::Binary { op: ir::BinaryOp::Over, lhs: Box::new(lhs), rhs: Box::new(rhs) };
+            typed(kind, Type::Rational, span)
+        })
     }
 
     /// The call of the method that gives an operator its meaning (§9.5).
@@ -754,7 +805,7 @@ impl Checker<'_> {
                 error = error.with_secondary(operand.span, format!("this is {}", article(operand.ty)));
             }
         }
-        error = error.with_note(format!("`{symbol}` is defined for Int and Float values"));
+        error = error.with_note(format!("`{symbol}` is defined for Int, Float and Rational values"));
         if op == ast::BinaryOp::Add && (lhs.ty == Type::Text || rhs.ty == Type::Text) {
             error = error.with_help("to join texts, use interpolation: \"{a}{b}\" (§4.5)");
         }
@@ -834,9 +885,11 @@ impl Checker<'_> {
         };
         let int_ops = [B::EqInt, B::NeInt, B::LtInt, B::LeInt, B::GtInt, B::GeInt];
         let float_ops = [B::EqFloat, B::NeFloat, B::LtFloat, B::LeFloat, B::GtFloat, B::GeFloat];
+        let rational_ops =
+            [B::EqRational, B::NeRational, B::LtRational, B::LeRational, B::GtRational, B::GeRational];
         let (lty, rty) = (lhs.ty, rhs.ty);
         let equality_op = |eq: B, ne: B| if op == Eq { eq } else { ne };
-        let plain = |op| Comparison { op, on_floats: false, on_positions: false, less: None };
+        let plain = |op| Comparison { op, numeric: None, on_positions: false, less: None };
         if matches!(lty, Type::Fun(_)) || matches!(rty, Type::Fun(_)) {
             self.diagnostics.push(
                 Diagnostic::error("functions cannot be compared")
@@ -847,8 +900,14 @@ impl Checker<'_> {
         }
         let checked = match (lty, rty) {
             (Type::Int, Type::Int) => plain(pick(int_ops)),
+            // A Rational with an Int compares exactly; a Float makes it Float (§8.3).
             _ if lty.is_numeric() && rty.is_numeric() => {
-                Comparison { op: pick(float_ops), on_floats: true, on_positions: false, less: None }
+                let (ops, common) = if lty == Type::Float || rty == Type::Float {
+                    (float_ops, Type::Float)
+                } else {
+                    (rational_ops, Type::Rational)
+                };
+                Comparison { op: pick(ops), numeric: Some(common), on_positions: false, less: None }
             }
             // A type that defines `less` has the four orders (§9.5).
             _ if !equality && lty == rty && self.visible_method(lty, "less").is_some() => {
@@ -861,7 +920,7 @@ impl Checker<'_> {
                 };
                 Comparison {
                     op: B::EqBool,
-                    on_floats: false,
+                    numeric: None,
                     on_positions: false,
                     less: Some(Less { instance, swap, negate }),
                 }
@@ -871,7 +930,7 @@ impl Checker<'_> {
             (Type::None, Type::None) if equality => plain(equality_op(B::EqNone, B::NeNone)),
             // An ordered enumeration compares the positions of its values (D33).
             (Type::Enum(enumeration), _) if !equality && lty == rty && enumeration.is_ordered() => {
-                Comparison { op: pick(int_ops), on_floats: false, on_positions: true, less: None }
+                Comparison { op: pick(int_ops), numeric: None, on_positions: true, less: None }
             }
             (Type::Enum(enumeration), _) if !equality && lty == rty => {
                 self.diagnostics.push(
@@ -904,7 +963,7 @@ impl Checker<'_> {
                 let mut error =
                     Diagnostic::error(format!("`{}` is not defined for {lty} values", op.as_str()))
                         .with_primary(op_span, "")
-                        .with_note("`<`, `>`, `<=` and `>=` compare Int and Float values")
+                        .with_note("`<`, `>`, `<=` and `>=` compare numbers")
                         .with_note(format!("Lion 0.1 does not define an order on {lty}"));
                 if let Type::Set(_) = lty {
                     error = error
@@ -1003,7 +1062,26 @@ impl Checker<'_> {
             (from, to) if from.is_subset_of(to) => return Some(ir::Expr { span, ..value }),
             (Type::Int, Type::Float) => ir::Conversion::IntToFloat,
             (Type::Float, Type::Int) => ir::Conversion::FloatToInt,
-            (Type::Int | Type::Float, Type::Text) => ir::Conversion::ToText,
+            (Type::Rational, Type::Float) => ir::Conversion::RationalToFloat,
+            (Type::Int | Type::Float | Type::Rational, Type::Text) => ir::Conversion::ToText,
+            // Neither is in the table of §8.5 (C72).
+            (Type::Rational, Type::Int) | (Type::Int, Type::Rational) => {
+                let (note, help) = if value.ty == Type::Int {
+                    ("a Rational is made with `over` (§8.3)", "write the fraction with `over`: `n over 1`")
+                } else {
+                    (
+                        "a Rational converts to a Float or to a Text (§8.5)",
+                        "convert it to a Float first, then round it: `floor(r as Float)`",
+                    )
+                };
+                self.diagnostics.push(
+                    Diagnostic::error(format!("cannot convert {} to {target} with `as`", article(value.ty)))
+                        .with_primary(span, "")
+                        .with_note(note)
+                        .with_help(help),
+                );
+                return None;
+            }
             // From a Text, the conversion may fail: the result says why (§8.5, D14).
             (Type::Text, Type::Int) => {
                 let ty = Type::union([Type::Int, Type::Error]);
@@ -1016,7 +1094,7 @@ impl Checker<'_> {
             (from, to) => {
                 let mut error = Diagnostic::error(format!("cannot convert {} to {to} with `as`", article(from)))
                     .with_primary(span, "")
-                    .with_note("Lion 0.1 defines `as` between Int and Float, from Text to a number, and from a number to Text (§8.5)");
+                    .with_note("Lion 0.1 defines `as` between Int and Float, from Rational to Float, from Text to a number, and from a number to Text (§8.5)");
                 if let Type::Struct(_) = to {
                     error = error.with_help(format!("a {to} is built from the values of its fields: `{to}(...)` or `(...) as {to}` (§12.2)"));
                 }
@@ -1333,6 +1411,10 @@ impl Checker<'_> {
         {
             error = error.with_help(help);
         }
+        // Outside a calculation, a Rational becomes a Float only when asked (§8.5).
+        if expr.ty == Type::Rational && expected.members().contains(&Type::Float) {
+            error = error.with_help("convert the fraction with `as Float`");
+        }
         self.diagnostics.push(error);
         None
     }
@@ -1359,7 +1441,18 @@ fn convert(conversion: ir::Conversion, value: ir::Expr, ty: Type) -> ir::Expr {
 }
 
 fn to_float(expr: ir::Expr) -> ir::Expr {
-    if expr.ty == Type::Int { convert(ir::Conversion::IntToFloat, expr, Type::Float) } else { expr }
+    to_numeric(expr, Type::Float)
+}
+
+/// A number converted to the type of a calculation: Float, or Rational (§8.3, §8.5).
+fn to_numeric(expr: ir::Expr, target: Type) -> ir::Expr {
+    let conversion = match (expr.ty, target) {
+        (Type::Int, Type::Float) => ir::Conversion::IntToFloat,
+        (Type::Rational, Type::Float) => ir::Conversion::RationalToFloat,
+        (Type::Int, Type::Rational) => ir::Conversion::IntToRational,
+        _ => return expr,
+    };
+    convert(conversion, expr, target)
 }
 
 impl Checker<'_> {
@@ -1401,7 +1494,10 @@ fn compare_pair(comparison: Comparison, lhs: ir::Expr, rhs: ir::Expr, span: Span
             span,
         );
     }
-    let (lhs, rhs) = if comparison.on_floats { (to_float(lhs), to_float(rhs)) } else { (lhs, rhs) };
+    let (lhs, rhs) = match comparison.numeric {
+        Some(common) => (to_numeric(lhs, common), to_numeric(rhs, common)),
+        None => (lhs, rhs),
+    };
     let position = |value: ir::Expr| convert(ir::Conversion::EnumPosition, value, Type::Int);
     let (lhs, rhs) = if comparison.on_positions { (position(lhs), position(rhs)) } else { (lhs, rhs) };
     let kind = ir::ExprKind::Binary { op: comparison.op, lhs: Box::new(lhs), rhs: Box::new(rhs) };

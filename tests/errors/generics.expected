@@ -12,7 +12,7 @@ error: `*` cannot be applied to Text and Text
  3 | show(square("a"))
    |      ------ `square` is checked for (Text) because of this call
    |
-   = `*` is defined for Int and Float values
+   = `*` is defined for Int, Float and Rational values
 
 error: cannot find `missing` in this scope
   --> tests/errors/generics.lion:4:21

@@ -19,7 +19,7 @@ error: `-` cannot be applied to a Text
  3 | let c = -"text"
    |          ^^^^^^ this is a Text
    |
-   = `-` negates an Int or a Float
+   = `-` negates an Int, a Float or a Rational
 
 error: cannot convert a Bool to Int with `as`
   --> tests/errors/operators.lion:4:9
@@ -27,7 +27,7 @@ error: cannot convert a Bool to Int with `as`
  4 | let d = true as Int
    |         ^^^^^^^^^^^
    |
-   = Lion 0.1 defines `as` between Int and Float, from Text to a number, and from a number to Text (§8.5)
+   = Lion 0.1 defines `as` between Int and Float, from Rational to Float, from Text to a number, and from a number to Text (§8.5)
 
 error: cannot compare an Int with a Bool
   --> tests/errors/operators.lion:5:11

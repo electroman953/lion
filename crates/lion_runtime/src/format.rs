@@ -23,6 +23,11 @@ pub fn format_float(value: f64) -> String {
     text
 }
 
+/// A Rational as `n/d`, the denominator always written (§8.3, C72).
+pub fn format_rational(value: [i64; 2]) -> String {
+    format!("{}/{}", value[0], value[1])
+}
+
 /// A Text as a Lion literal, between quotes, as it appears inside a shown collection:
 /// `["Léa", "Tom"]` (C24).
 pub fn quote_text(text: &str) -> String {

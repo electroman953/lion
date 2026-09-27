@@ -197,7 +197,7 @@ impl Checker<'_> {
         if values.iter().all(|value| value.ty == first) {
             return Some(first);
         }
-        if values.iter().all(|value| value.ty.is_numeric()) {
+        if values.iter().all(|value| matches!(value.ty, Type::Int | Type::Float)) {
             return Some(Type::Float);
         }
         let union = Type::union(values.iter().map(|value| value.ty));
@@ -461,7 +461,7 @@ impl Checker<'_> {
         Some(typed(kind, Type::Bool, span))
     }
 
-    /// `sum(values)` of a List of Int or Float, or of a Range (§23).
+    /// `sum(values)` of a List of numbers, or of a Range (§23).
     pub(crate) fn sum(&mut self, args: &[ast::Arg], span: Span) -> Option<ir::Expr> {
         let [arg] = args else {
             self.diagnostics.push(
@@ -472,7 +472,7 @@ impl Checker<'_> {
         };
         let values = self.expr(&arg.value)?;
         let ty = match values.ty.element() {
-            Some(element @ (Type::Int | Type::Float)) => element,
+            Some(element @ (Type::Int | Type::Float | Type::Rational)) => element,
             _ => {
                 self.diagnostics.push(
                     Diagnostic::error(format!("`sum` adds a list of numbers, not {}", article(values.ty)))

@@ -8,7 +8,7 @@ error: `+` cannot be applied to maybe Int and Int
    |      ----- this is a value of type `maybe Int`
    |            ^
    |
-   = `+` is defined for Int and Float values
+   = `+` is defined for Int, Float and Rational values
    = help: the value may be `none`: test it first, for instance `if x == none: return ;` (§7.4)
 
 error: `*` cannot be applied to Int or Error and Int
@@ -18,7 +18,7 @@ error: `*` cannot be applied to Int or Error and Int
    |      - this is a value of type `Int or Error`
    |        ^
    |
-   = `*` is defined for Int and Float values
+   = `*` is defined for Int, Float and Rational values
    = help: an Error must be handled first: `if x in Error: ... ;`, or `try x` (§18.3)
 
 error: `try` cannot return an Error from a function that returns an Int

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lion_runtime::format::{format_float, quote_text};
+use lion_runtime::format::{format_float, format_rational, quote_text};
 
 use crate::bytecode::{EnumLayout, Layout};
 use crate::set::SetValue;
@@ -14,6 +14,8 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
+    /// An exact fraction, simplified (§8.3); boxed, so that a value stays small.
+    Rational(Rc<[i64; 2]>),
     Text(Rc<String>),
     /// An Error made by `error(...)` or by a failed conversion: its message (§18).
     Error(Rc<String>),
@@ -64,6 +66,7 @@ impl Value {
             Value::Bool(value) => value.to_string(),
             Value::Int(value) => value.to_string(),
             Value::Float(value) => format_float(*value),
+            Value::Rational(value) => format_rational(**value),
             Value::Text(text) => text.to_string(),
             Value::Range(bounds) => format!("{}..{}", bounds[0], bounds[1]),
             Value::Error(message) => format!("error({})", quote_text(message)),
@@ -116,6 +119,7 @@ impl Value {
         matches!(
             self,
             Value::Text(_)
+                | Value::Rational(_)
                 | Value::List(_)
                 | Value::Error(_)
                 | Value::Range(_)
@@ -134,6 +138,7 @@ impl Value {
         match self {
             Value::Int(_) => kinds::INT,
             Value::Float(_) => kinds::FLOAT,
+            Value::Rational(_) => kinds::RATIONAL,
             Value::Bool(_) => kinds::BOOL,
             Value::Text(_) => kinds::TEXT,
             Value::None => kinds::NONE,
@@ -158,6 +163,8 @@ impl Value {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Int(a), Value::Int(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => a == b,
+            // Always simplified: equal fractions have equal parts.
+            (Value::Rational(a), Value::Rational(b)) => a == b,
             (Value::Text(a), Value::Text(b)) => a == b,
             (Value::Range(a), Value::Range(b)) => a == b,
             (Value::Error(a), Value::Error(b)) => a == b,
@@ -183,6 +190,7 @@ impl Value {
             Value::Bool(_) => "Bool",
             Value::Int(_) => "Int",
             Value::Float(_) => "Float",
+            Value::Rational(_) => "Rational",
             Value::Text(_) => "Text",
             Value::Range(_) => "Range",
             Value::Error(_) => "Error",
@@ -216,4 +224,5 @@ pub mod kinds {
     pub const TUPLE: u16 = 1 << 11;
     pub const FUN: u16 = 1 << 12;
     pub const TASK: u16 = 1 << 13;
+    pub const RATIONAL: u16 = 1 << 14;
 }

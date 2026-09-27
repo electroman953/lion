@@ -125,15 +125,16 @@ impl<'a> Checker<'a> {
     /// Which types satisfy each trait, and the default methods they receive (§14.1, §14.2).
     /// A method must write its return type to count (C67).
     pub(crate) fn conform_traits(&mut self) {
-        let mut candidates = vec![Type::Int, Type::Float, Type::Bool, Type::Text, Type::None, Type::Error];
+        let mut candidates =
+            vec![Type::Int, Type::Float, Type::Rational, Type::Bool, Type::Text, Type::None, Type::Error];
         candidates.extend(self.structs.iter().map(|info| Type::Struct(info.id)));
         candidates.extend(self.enums.iter().map(|&enumeration| Type::Enum(enumeration)));
-        // `Comparable`: Int, Float, the ordered enumerations and the types with `less` (C67).
+        // `Comparable`: the numbers, the ordered enumerations and the types with `less` (C67).
         let comparable: Vec<Type> = candidates
             .iter()
             .copied()
             .filter(|&ty| match ty {
-                Type::Int | Type::Float => true,
+                Type::Int | Type::Float | Type::Rational => true,
                 Type::Enum(enumeration) => enumeration.is_ordered(),
                 _ => self.methods.get(&(ty, "less".to_string())).is_some_and(|methods| {
                     methods.iter().any(|&method| self.functions[method].declared_ret == Some(Type::Bool))

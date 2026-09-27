@@ -8,6 +8,8 @@ use std::sync::{Mutex, OnceLock};
 pub enum Type {
     Int,
     Float,
+    /// An exact fraction, always simplified (§8.3).
+    Rational,
     Bool,
     Text,
     /// The type whose only value is `none`.
@@ -44,7 +46,7 @@ pub enum Type {
 
 impl Type {
     pub fn is_numeric(self) -> bool {
-        matches!(self, Type::Int | Type::Float)
+        matches!(self, Type::Int | Type::Float | Type::Rational)
     }
 
     pub fn list(element: Type) -> Type {
@@ -139,6 +141,7 @@ impl fmt::Display for Type {
         match self {
             Type::Int => f.write_str("Int"),
             Type::Float => f.write_str("Float"),
+            Type::Rational => f.write_str("Rational"),
             Type::Bool => f.write_str("Bool"),
             Type::Text => f.write_str("Text"),
             Type::None => f.write_str("None"),

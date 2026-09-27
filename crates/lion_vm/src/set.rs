@@ -120,6 +120,7 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
         // 0.0 and -0.0 are equal.
         Value::Float(value) => (3u8, if *value == 0.0 { 0 } else { value.to_bits() }).hash(state),
         Value::Text(text) => (4u8, text.as_str()).hash(state),
+        Value::Rational(value) => (11u8, value[0], value[1]).hash(state),
         Value::Error(message) => (5u8, message.as_str()).hash(state),
         Value::List(elements) | Value::Tuple(elements) => {
             (6u8, elements.len()).hash(state);

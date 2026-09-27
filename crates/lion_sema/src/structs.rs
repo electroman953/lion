@@ -751,6 +751,12 @@ impl<'a> Checker<'a> {
         let (kind, ty) = match value {
             Const::Int(value) => (ir::ExprKind::Int(*value), Type::Int),
             Const::Float(value) => (ir::ExprKind::Float(*value), Type::Float),
+            // Written as it is made: `n over d` (§8.3).
+            Const::Rational([numerator, denominator]) => {
+                let part = |value: i64| Box::new(typed(ir::ExprKind::Int(value), Type::Int, span));
+                let (lhs, rhs) = (part(*numerator), part(*denominator));
+                (ir::ExprKind::Binary { op: ir::BinaryOp::Over, lhs, rhs }, Type::Rational)
+            }
             Const::Bool(value) => (ir::ExprKind::Bool(*value), Type::Bool),
             Const::Text(text) => (ir::ExprKind::Text(text.clone()), Type::Text),
             Const::None => (ir::ExprKind::None, Type::None),

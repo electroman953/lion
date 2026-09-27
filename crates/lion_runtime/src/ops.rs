@@ -259,3 +259,111 @@ mod tests {
         assert!(float_round(f64::NAN).is_err());
     }
 }
+
+/// A Rational: numerator and denominator, simplified, the denominator positive (§8.3).
+pub type Rational = [i64; 2];
+
+/// `n over d` (§8.3): simplified; `d = 0` is a bug, and so is a part out of the Int range.
+pub fn rational(numerator: i64, denominator: i64) -> Result<Rational, BugKind> {
+    reduce(i128::from(numerator), i128::from(denominator))
+}
+
+fn reduce(mut numerator: i128, mut denominator: i128) -> Result<Rational, BugKind> {
+    if denominator == 0 {
+        return Err(BugKind::RationalDivisionByZero);
+    }
+    if denominator < 0 {
+        numerator = -numerator;
+        denominator = -denominator;
+    }
+    let divisor = gcd(numerator.unsigned_abs(), denominator.unsigned_abs()).max(1) as i128;
+    let (numerator, denominator) = (numerator / divisor, denominator / divisor);
+    match (i64::try_from(numerator), i64::try_from(denominator)) {
+        (Ok(numerator), Ok(denominator)) => Ok([numerator, denominator]),
+        _ => Err(BugKind::RationalOverflow),
+    }
+}
+
+fn gcd(mut a: u128, mut b: u128) -> u128 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// The operations on Rationals, exact (§8.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RationalOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+}
+
+pub fn rational_op(op: RationalOp, a: Rational, b: Rational) -> Result<Rational, BugKind> {
+    let ([n1, d1], [n2, d2]) = (a.map(i128::from), b.map(i128::from));
+    match op {
+        RationalOp::Add => reduce(n1 * d2 + n2 * d1, d1 * d2),
+        RationalOp::Subtract => reduce(n1 * d2 - n2 * d1, d1 * d2),
+        RationalOp::Multiply => reduce(n1 * n2, d1 * d2),
+        RationalOp::Divide => reduce(n1 * d2, d1 * n2),
+    }
+}
+
+/// `r ^ n` with an Int exponent; a negative one inverts (§8.3, §8.4).
+pub fn rational_pow(base: Rational, exponent: i64) -> Result<Rational, BugKind> {
+    let [numerator, denominator] = base;
+    let (numerator, denominator) =
+        if exponent < 0 { (denominator, numerator) } else { (numerator, denominator) };
+    let power = exponent.unsigned_abs();
+    // 0, 1 and -1 have a power for any exponent: only its parity counts.
+    let small = numerator.abs() <= 1 && denominator.abs() <= 1;
+    let power = match u32::try_from(power) {
+        Ok(power) => power,
+        Err(_) if small => 2 + (power % 2) as u32,
+        Err(_) => return Err(BugKind::RationalOverflow),
+    };
+    let raise = |value: i64| i128::from(value).checked_pow(power).ok_or(BugKind::RationalOverflow);
+    reduce(raise(numerator)?, raise(denominator)?)
+}
+
+pub fn rational_compare(a: Rational, b: Rational) -> std::cmp::Ordering {
+    (i128::from(a[0]) * i128::from(b[1])).cmp(&(i128::from(b[0]) * i128::from(a[1])))
+}
+
+pub fn rational_to_float(value: Rational) -> f64 {
+    value[0] as f64 / value[1] as f64
+}
+
+#[cfg(test)]
+mod rational_tests {
+    use super::*;
+
+    #[test]
+    fn fractions_are_simplified_with_a_positive_denominator() {
+        assert_eq!(rational(2, 4), Ok([1, 2]));
+        assert_eq!(rational(4, -6), Ok([-2, 3]));
+        assert_eq!(rational(0, -5), Ok([0, 1]));
+        assert_eq!(rational(1, 0), Err(BugKind::RationalDivisionByZero));
+        // -i64::MIN does not fit in an Int.
+        assert_eq!(rational(i64::MIN, -1), Err(BugKind::RationalOverflow));
+        assert_eq!(rational(i64::MIN, 2), Ok([i64::MIN / 2, 1]));
+    }
+
+    #[test]
+    fn operations_are_exact() {
+        let (third, half) = ([1, 3], [1, 2]);
+        assert_eq!(rational_op(RationalOp::Add, third, half), Ok([5, 6]));
+        assert_eq!(rational_op(RationalOp::Subtract, third, half), Ok([-1, 6]));
+        assert_eq!(rational_op(RationalOp::Multiply, third, [3, 1]), Ok([1, 1]));
+        assert_eq!(rational_op(RationalOp::Divide, third, half), Ok([2, 3]));
+        assert_eq!(rational_op(RationalOp::Divide, third, [0, 1]), Err(BugKind::RationalDivisionByZero));
+        assert_eq!(rational_pow([2, 3], -2), Ok([9, 4]));
+        assert_eq!(rational_pow([0, 1], -1), Err(BugKind::RationalDivisionByZero));
+        assert_eq!(rational_pow([2, 1], 63), Err(BugKind::RationalOverflow));
+        assert_eq!(rational_pow([-1, 1], i64::MAX), Ok([-1, 1]));
+        assert_eq!(rational_pow([0, 1], i64::MIN), Err(BugKind::RationalDivisionByZero));
+        assert_eq!(rational_compare(third, half), std::cmp::Ordering::Less);
+        assert_eq!(rational_compare([-1, 2], [-2, 4]), std::cmp::Ordering::Equal);
+    }
+}

@@ -118,7 +118,7 @@ error: cannot convert an Int to Student with `as`
  25 | let u = 3 as Student
     |         ^^^^^^^^^^^^
     |
-    = Lion 0.1 defines `as` between Int and Float, from Text to a number, and from a number to Text (§8.5)
+    = Lion 0.1 defines `as` between Int and Float, from Rational to Float, from Text to a number, and from a number to Text (§8.5)
     = help: a Student is built from the values of its fields: `Student(...)` or `(...) as Student` (§12.2)
 
 error: `Int` is not a structure
@@ -136,7 +136,7 @@ error: `<` is not defined for Student values
  27 | show(s < s)
     |        ^
     |
-    = `<`, `>`, `<=` and `>=` compare Int and Float values
+    = `<`, `>`, `<=` and `>=` compare numbers
     = Lion 0.1 does not define an order on Student
 
 error: cannot compare a Student with an Int

@@ -539,6 +539,7 @@ impl Compiler<'_> {
                 let instr = match op {
                     UnaryOp::NegInt => Instr::NegInt { dst, a },
                     UnaryOp::NegFloat => Instr::NegFloat { dst, a },
+                    UnaryOp::NegRational => Instr::NegRational { dst, a },
                     UnaryOp::Not => Instr::Not { dst, a },
                 };
                 self.emit(instr, span);
@@ -577,6 +578,8 @@ impl Compiler<'_> {
                 let instr = match conversion {
                     Conversion::IntToFloat => Instr::IntToFloat { dst, a },
                     Conversion::FloatToInt => Instr::FloatToInt { dst, a },
+                    Conversion::IntToRational => Instr::IntToRational { dst, a },
+                    Conversion::RationalToFloat => Instr::RationalToFloat { dst, a },
                     Conversion::ToText => Instr::ToText { dst, a },
                     Conversion::TextToInt => Instr::TextToInt { dst, a },
                     Conversion::TextToFloat => Instr::TextToFloat { dst, a },
@@ -759,10 +762,10 @@ impl Compiler<'_> {
             }
             ExprKind::CallBuiltin { builtin: Builtin::Sum, args } => {
                 let values = self.operand(&args[0]);
-                let instr = if expr.ty == ir::Type::Float {
-                    Instr::SumFloat { dst, values }
-                } else {
-                    Instr::SumInt { dst, values }
+                let instr = match expr.ty {
+                    ir::Type::Float => Instr::SumFloat { dst, values },
+                    ir::Type::Rational => Instr::SumRational { dst, values },
+                    _ => Instr::SumInt { dst, values },
                 };
                 self.emit(instr, span);
             }
@@ -960,6 +963,7 @@ fn kinds_of(ty: ir::Type) -> u16 {
         .map(|member| match member {
             ir::Type::Int => kinds::INT,
             ir::Type::Float => kinds::FLOAT,
+            ir::Type::Rational => kinds::RATIONAL,
             ir::Type::Bool => kinds::BOOL,
             ir::Type::Text => kinds::TEXT,
             ir::Type::None => kinds::NONE,
@@ -1026,6 +1030,18 @@ fn binary_instr(op: BinaryOp, dst: Reg, a: Reg, b: Reg) -> Instr {
         BinaryOp::MulFloat => Instr::MulFloat { dst, a, b },
         BinaryOp::DivFloat => Instr::DivFloat { dst, a, b },
         BinaryOp::PowFloat => Instr::PowFloat { dst, a, b },
+        BinaryOp::Over => Instr::MakeRational { dst, a, b },
+        BinaryOp::AddRational => Instr::AddRational { dst, a, b },
+        BinaryOp::SubRational => Instr::SubRational { dst, a, b },
+        BinaryOp::MulRational => Instr::MulRational { dst, a, b },
+        BinaryOp::DivRational => Instr::DivRational { dst, a, b },
+        BinaryOp::PowRational => Instr::PowRational { dst, a, b },
+        BinaryOp::EqRational => Instr::CmpRational { dst, cmp: Cmp::Eq, a, b },
+        BinaryOp::NeRational => Instr::CmpRational { dst, cmp: Cmp::Ne, a, b },
+        BinaryOp::LtRational => Instr::CmpRational { dst, cmp: Cmp::Lt, a, b },
+        BinaryOp::LeRational => Instr::CmpRational { dst, cmp: Cmp::Le, a, b },
+        BinaryOp::GtRational => Instr::CmpRational { dst, cmp: Cmp::Gt, a, b },
+        BinaryOp::GeRational => Instr::CmpRational { dst, cmp: Cmp::Ge, a, b },
         BinaryOp::EqInt => Instr::EqInt { dst, a, b },
         BinaryOp::NeInt => Instr::NeInt { dst, a, b },
         BinaryOp::LtInt => Instr::LtInt { dst, a, b },

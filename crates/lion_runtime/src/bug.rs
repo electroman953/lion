@@ -62,6 +62,10 @@ pub enum BugKind {
     NegativeSquareRoot { value: i64 },
     /// `exit(code)` with a code that the system cannot give back (§20.1).
     InvalidExitCode { code: i64 },
+    /// `x over 0`, or a Rational divided by zero (§8.3).
+    RationalDivisionByZero,
+    /// A numerator or a denominator beyond the Int range (§8.3).
+    RationalOverflow,
     /// A function of the standard library called with a value it cannot take (§23).
     InvalidArgument { message: String, details: String },
     /// A value of a structure no longer satisfies its invariants after a change (§12.3,
@@ -87,6 +91,8 @@ impl BugKind {
             BugKind::NanInSet => "NaN cannot go in a Set".to_string(),
             BugKind::NegativeSquareRoot { .. } => "square root of a negative number".to_string(),
             BugKind::InvalidExitCode { .. } => "invalid exit code".to_string(),
+            BugKind::RationalDivisionByZero => "a Rational with a zero denominator".to_string(),
+            BugKind::RationalOverflow => "Rational overflow".to_string(),
             BugKind::InvalidArgument { message, .. } => message.clone(),
             BugKind::BrokenInvariant { structure, .. } => {
                 format!("this change breaks an invariant of {structure}")
@@ -130,6 +136,10 @@ impl BugKind {
             }
             BugKind::NegativeSquareRoot { value } => format!("isqrt({value}) has no Int value"),
             BugKind::InvalidExitCode { code } => format!("{code} is not in 0..255"),
+            BugKind::RationalDivisionByZero => "a fraction over 0 has no value".to_string(),
+            BugKind::RationalOverflow => {
+                "the numerator or the denominator exceeds the capacity of an Int (64 bits)".to_string()
+            }
             BugKind::InvalidArgument { ref details, .. } => details.clone(),
         }
     }
@@ -162,6 +172,8 @@ impl BugKind {
                 "an exit code is between 0 (success) and 255".to_string()
             }
             BugKind::InvalidArgument { .. } => "check the value before the call".to_string(),
+            BugKind::RationalDivisionByZero => "check that the denominator is not zero first".to_string(),
+            BugKind::RationalOverflow => "use a Float when the exact fraction does not matter".to_string(),
             BugKind::BrokenInvariant { .. } => {
                 "a value must satisfy its conditions after each change, and when the outermost `var self` method on it returns: check the values before changing them (§12.3)".to_string()
             }

@@ -68,7 +68,7 @@ error: `<` is not defined for Set of Int values
  11 | show(a < a)
     |        ^
     |
-    = `<`, `>`, `<=` and `>=` compare Int and Float values
+    = `<`, `>`, `<=` and `>=` compare numbers
     = Lion 0.1 does not define an order on Set of Int
     = help: to test the inclusion of a Set in another, write `a subset b` (§16.6)
 

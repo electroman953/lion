@@ -1,0 +1,12 @@
+exit: 2
+----- stdout
+----- stderr
+bug: a Rational with a zero denominator
+  --> tests/runtime/bug_rational_zero.lion:2:6
+   |
+ 2 | show(3 over people)
+   |      ^^^^^^^^^^^^^
+   |
+   = a fraction over 0 has no value
+   = help: check that the denominator is not zero first
+

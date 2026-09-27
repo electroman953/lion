@@ -53,7 +53,7 @@ error: `-` cannot be applied to Box and Box
     |        ^
     |          - this is a Box
     |
-    = `-` is defined for Int and Float values
+    = `-` is defined for Int, Float and Rational values
     = help: a structure gives `-` a meaning with a method: `fun Box.subtract(other in Box) in ...` (§9.5)
 
 6 errors found

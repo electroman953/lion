@@ -9,14 +9,16 @@
 use std::collections::HashMap;
 
 use lion_ir::{self as ir, BinaryOp, Conversion, EnumRef, StructRef, UnaryOp};
-use lion_runtime::format::{format_float, quote_text};
-use lion_runtime::ops;
+use lion_runtime::format::{format_float, format_rational, quote_text};
+use lion_runtime::ops::{self, RationalOp};
 
 /// A value known at compile time.
 #[derive(Clone, Debug)]
 pub(crate) enum Const {
     Int(i64),
     Float(f64),
+    /// Simplified, as at run time (§8.3).
+    Rational([i64; 2]),
     Bool(bool),
     Text(String),
     None,
@@ -34,6 +36,7 @@ impl Const {
         match (self, other) {
             (Const::Int(a), Const::Int(b)) => a == b,
             (Const::Float(a), Const::Float(b)) => a == b,
+            (Const::Rational(a), Const::Rational(b)) => a == b,
             (Const::Bool(a), Const::Bool(b)) => a == b,
             (Const::Text(a), Const::Text(b)) => a == b,
             (Const::None, Const::None) => true,
@@ -57,6 +60,7 @@ impl Const {
         match self {
             Const::Int(value) => value.to_string(),
             Const::Float(value) => format_float(*value),
+            Const::Rational(value) => format_rational(*value),
             Const::Bool(value) => value.to_string(),
             Const::Text(text) => quote_text(text),
             Const::None => "none".to_string(),
@@ -111,6 +115,9 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
         ir::ExprKind::Unary { op, operand } => match (op, eval(operand, env)?) {
             (UnaryOp::NegInt, Const::Int(value)) => Const::Int(ops::int_neg(value).ok()?),
             (UnaryOp::NegFloat, Const::Float(value)) => Const::Float(-value),
+            (UnaryOp::NegRational, Const::Rational(value)) => {
+                Const::Rational(ops::rational_op(RationalOp::Subtract, [0, 1], value).ok()?)
+            }
             (UnaryOp::Not, Const::Bool(value)) => Const::Bool(!value),
             _ => return None,
         },
@@ -130,6 +137,11 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
             (Conversion::FloatToInt, Const::Float(value)) => Const::Int(ops::float_to_int(value).ok()?),
             (Conversion::ToText, Const::Int(value)) => Const::Text(value.to_string()),
             (Conversion::ToText, Const::Float(value)) => Const::Text(format_float(value)),
+            (Conversion::ToText, Const::Rational(value)) => Const::Text(format_rational(value)),
+            (Conversion::IntToRational, Const::Int(value)) => Const::Rational([value, 1]),
+            (Conversion::RationalToFloat, Const::Rational(value)) => {
+                Const::Float(ops::rational_to_float(value))
+            }
             (Conversion::ToText, Const::Text(text)) => Const::Text(text),
             (Conversion::ToText, Const::Bool(value)) => Const::Text(value.to_string()),
             (Conversion::ToText | Conversion::Literal, Const::Enum(enumeration, value)) => {
@@ -193,7 +205,9 @@ pub(crate) fn eval(expr: &ir::Expr, env: &mut Env) -> Option<Const> {
 
 fn binary(op: BinaryOp, lhs: Const, rhs: Const) -> Option<Const> {
     use BinaryOp::*;
-    use Const::{Bool, Float, Int, Text};
+    use Const::{Bool, Float, Int, Rational, Text};
+    let exact = |op, a, b| ops::rational_op(op, a, b).ok().map(Rational);
+    let order = |a, b| ops::rational_compare(a, b);
     Some(match (op, lhs, rhs) {
         (AddInt, Int(a), Int(b)) => Int(ops::int_add(a, b).ok()?),
         (SubInt, Int(a), Int(b)) => Int(ops::int_sub(a, b).ok()?),
@@ -206,6 +220,18 @@ fn binary(op: BinaryOp, lhs: Const, rhs: Const) -> Option<Const> {
         (MulFloat, Float(a), Float(b)) => Float(a * b),
         (DivFloat, Float(a), Float(b)) => Float(a / b),
         (PowFloat, Float(a), Float(b)) => Float(ops::float_pow(a, b)),
+        (Over, Int(a), Int(b)) => Rational(ops::rational(a, b).ok()?),
+        (AddRational, Rational(a), Rational(b)) => exact(RationalOp::Add, a, b)?,
+        (SubRational, Rational(a), Rational(b)) => exact(RationalOp::Subtract, a, b)?,
+        (MulRational, Rational(a), Rational(b)) => exact(RationalOp::Multiply, a, b)?,
+        (DivRational, Rational(a), Rational(b)) => exact(RationalOp::Divide, a, b)?,
+        (PowRational, Rational(a), Int(b)) => Rational(ops::rational_pow(a, b).ok()?),
+        (EqRational, Rational(a), Rational(b)) => Bool(order(a, b).is_eq()),
+        (NeRational, Rational(a), Rational(b)) => Bool(order(a, b).is_ne()),
+        (LtRational, Rational(a), Rational(b)) => Bool(order(a, b).is_lt()),
+        (LeRational, Rational(a), Rational(b)) => Bool(order(a, b).is_le()),
+        (GtRational, Rational(a), Rational(b)) => Bool(order(a, b).is_gt()),
+        (GeRational, Rational(a), Rational(b)) => Bool(order(a, b).is_ge()),
         (EqInt, Int(a), Int(b)) => Bool(a == b),
         (NeInt, Int(a), Int(b)) => Bool(a != b),
         (LtInt, Int(a), Int(b)) => Bool(a < b),

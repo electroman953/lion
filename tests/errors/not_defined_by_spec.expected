@@ -9,7 +9,7 @@ error: `+` cannot be applied to Text and Text
    |             ^
    |               --- this is a Text
    |
-   = `+` is defined for Int and Float values
+   = `+` is defined for Int, Float and Rational values
    = help: to join texts, use interpolation: "{a}{b}" (§4.5)
 
 error: cannot compare an Int with a Text
@@ -28,7 +28,7 @@ error: `<` is not defined for Text values
  4 | let c = "a" < "b"
    |             ^
    |
-   = `<`, `>`, `<=` and `>=` compare Int and Float values
+   = `<`, `>`, `<=` and `>=` compare numbers
    = Lion 0.1 does not define an order on Text
 
 error: `div` is defined only for Int values

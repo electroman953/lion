@@ -1,0 +1,12 @@
+exit: 2
+----- stdout
+----- stderr
+bug: Rational overflow
+  --> tests/runtime/bug_rational_overflow.lion:2:21
+   |
+ 2 | for i in 1..60: x = x * (1 over 3) ;
+   |                     ^^^^^^^^^^^^^^
+   |
+   = the numerator or the denominator exceeds the capacity of an Int (64 bits)
+   = help: use a Float when the exact fraction does not matter
+
