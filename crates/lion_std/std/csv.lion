@@ -2,6 +2,7 @@
 // of a line in a column, or an Error (D37).
 
 use files
+use text
 
 struct Row:
     private columns in List of Text
@@ -29,4 +30,35 @@ fun Row.get(column in Text) in Text or Error:
         ;
     ;
     return error("there is no column `{column}`")
+;
+
+// The CSV text of a table: the names of the columns, then one line per row. A value
+// that holds a comma, a quote or a line end is written between quotes (RFC 4180). A row
+// that does not have one value per column gives an Error.
+fun format(columns in List of Text, rows in List of List of Text) in Text or Error:
+    var out = line(columns)
+    for i in 1..rows.size:
+        if rows[i].size != columns.size:
+            let plural = if rows[i].size == 1 then "" else "s"
+            return error("the row {i} has {rows[i].size} value{plural} for {columns.size} columns")
+        ;
+        out = "{out}{line(rows[i])}"
+    ;
+    return out
+;
+
+// Writes the table in the file, as `format` writes it.
+fun write(path in Text, columns in List of Text, rows in List of List of Text) in None or Error:
+    let content = try format(columns, rows)
+    return files.write(path, content)
+;
+
+private fun line(values in List of Text) in Text:
+    return "{text.join([quoted(v), v in values], ",")}\n"
+;
+
+private fun quoted(value in Text) in Text:
+    let special = text.contains(value, ",") or text.contains(value, "\"") or text.contains(value, "\n")
+    if not special: return value ;
+    return "\"{text.replace(value, "\"", "\"\"")}\""
 ;

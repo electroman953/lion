@@ -1,0 +1,15 @@
+exit: 0
+----- stdout
+name,grade,comment
+Léa,14,"très bien, bravo"
+Tom,8,"dit ""bof"""
+Ana,17,"ligne 1
+ligne 2"
+
+none
+Léa | très bien, bravo
+Tom | dit "bof"
+Ana | ligne 1
+ligne 2
+error("the row 1 has 1 value for 2 columns")
+----- stderr

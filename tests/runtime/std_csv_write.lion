@@ -1,0 +1,17 @@
+// Writing CSV files (§23, C100): values with commas, quotes or line ends are quoted.
+use csv
+
+let columns = ["name", "grade", "comment"]
+let rows = [["Léa", "14", "très bien, bravo"], ["Tom", "8", "dit \"bof\""], ["Ana", "17", "ligne 1\nligne 2"]]
+show(csv.format(columns, rows))
+let path = "target/lion-std-csv-write.csv"
+show(csv.write(path, columns, rows))
+match csv.read(path):
+    in Error e: show(e.message()) ;
+    in List of csv.Row back:
+        for r in back:
+            show("{r.get("name")} | {r.get("comment")}")
+        ;
+    ;
+;
+show(csv.format(["a", "b"], [["1"]]))

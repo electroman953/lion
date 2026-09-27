@@ -3,7 +3,7 @@
 Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélisme sur plusieurs cœurs (étape 6), la bibliothèque graphique `ui` (étape 7), les modules `sets`, `json`, `time` et `dates`, et les génériques complets (§15.1). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C99) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C100) ;
 - [`docs/design/ui.md`](docs/design/ui.md) : la conception de la bibliothèque `ui`, validée par l'auteur et implémentée (C98) ;
 - [`README.md`](README.md) : la présentation et l'usage.
 
@@ -14,7 +14,7 @@ Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélism
 | `cargo build` | OK |
 | `cargo clippy --all-targets` | 0 avertissement |
 | `cargo fmt --check` | OK |
-| `cargo test` (tout le workspace) | OK : 154 tests unitaires, 199 programmes golden, et les 96 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
+| `cargo test` (tout le workspace) | OK : 154 tests unitaires, 200 programmes golden, et les 97 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
 | Programmes du §27 de la spec | Les trois tournent sans modification, dans les deux modes : 27.1 (CSV, structures), 27.2 (hasard, parallèle, ensembles) et 27.3 (application graphique, `tests/programs/notes_app`, sans écran avec un fichier d'événements) ; Sur 12 cœurs, 27.2 prend 0,67 s interprété (`--release`) et 0,19 s compilé ; avec `LION_THREADS=1`, 3,2 s et 0,65 s. |
 
 L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié en privé sur GitHub : <https://github.com/electroman953/lion> (remote `origin`).
@@ -246,7 +246,7 @@ Chaque test golden est un fichier `tests/<suite>/*.lion` accompagné de son `.ex
 | `tests/parser` | 23 | `lion debug ast` |
 | `tests/typechecker` | 15 | `lion debug ir` |
 | `tests/errors` | 57 | `lion check` (erreurs de compilation) |
-| `tests/runtime` | 80 | `lion run` (sémantique, bugs, alertes) |
+| `tests/runtime` | 81 | `lion run` (sémantique, bugs, alertes) |
 | `tests/integration` | 13 | `lion run` (programmes complets) |
 | `tests/programs` | 3 | `lion run` depuis leur dossier (programmes 27.1, 27.2 et 27.3 de la spec ; un programme peut avoir son dossier, `notes_app/notes_app.lion`) |
 | `tests/testing` | 3 | `lion test` |
@@ -312,10 +312,10 @@ Les étapes 2 à 7 de la feuille de route sont atteintes. Reste :
 - **l'étape 8**, le gestionnaire de paquets, avec le fichier de projet et les éditions (§25). Sa conception est à proposer à l'auteur avant de coder, comme pour `ui` ;
 - **vérifier `ui` à l'écran** avec l'auteur (`lion run tests/programs/notes_app/notes_app.lion` depuis ce dossier), puis l'étendre : Windows et macOS, touches mortes, défilement, styles.
 
-Questions encore ouvertes pour l'auteur : ce qu'on peut faire d'un type comme valeur (`let t = Int`, §7.1), la lecture des éléments d'un n-uplet (C53), l'écriture de `csv` et `json`.
+Questions encore ouvertes pour l'auteur : ce qu'on peut faire d'un type comme valeur (`let t = Int`, §7.1), la lecture des éléments d'un n-uplet (C53), l'écriture de `json`.
 
 Ce qui peut se faire sans nouvelle règle de langage :
-1. **Bibliothèque standard (§23, étape 3)** : `net` vient après l'étape 3 ; l'écriture de `csv` et `json` reste à faire. `dates` pourra recevoir les heures et les fuseaux horaires (C89).
+1. **Bibliothèque standard (§23, étape 3)** : `net` vient après l'étape 3 ; l'écriture de `json` reste à faire (C100). `dates` pourra recevoir les heures et les fuseaux horaires (C89).
 2. **Génériques (§15.1)** : complets, avec les méthodes de List, Set et Map (C90–C93, C97).
 3. **Parallélisme** :
    - une réserve de fils, plutôt qu'une création de fils par boucle parallèle ;
@@ -331,7 +331,7 @@ Ce qui peut se faire sans nouvelle règle de langage :
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C100**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C101**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README et des notes, puis un commit Conventional Commits. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
