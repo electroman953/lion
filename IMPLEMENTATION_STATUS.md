@@ -3,7 +3,7 @@
 Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélisme sur plusieurs cœurs (étape 6), la bibliothèque graphique `ui` (étape 7), les modules `sets`, `json`, `time` et `dates`, et les génériques complets (§15.1). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète trois autres documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C98) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C99) ;
 - [`docs/design/ui.md`](docs/design/ui.md) : la conception de la bibliothèque `ui`, validée par l'auteur et implémentée (C98) ;
 - [`README.md`](README.md) : la présentation et l'usage.
 
@@ -14,7 +14,7 @@ Mis à jour le 2026-09-27, avec le compilateur natif (étape 5), le parallélism
 | `cargo build` | OK |
 | `cargo clippy --all-targets` | 0 avertissement |
 | `cargo fmt --check` | OK |
-| `cargo test` (tout le workspace) | OK : 153 tests unitaires, 199 programmes golden, et les 96 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
+| `cargo test` (tout le workspace) | OK : 154 tests unitaires, 199 programmes golden, et les 96 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties |
 | Programmes du §27 de la spec | Les trois tournent sans modification, dans les deux modes : 27.1 (CSV, structures), 27.2 (hasard, parallèle, ensembles) et 27.3 (application graphique, `tests/programs/notes_app`, sans écran avec un fichier d'événements) ; Sur 12 cœurs, 27.2 prend 0,67 s interprété (`--release`) et 0,19 s compilé ; avec `LION_THREADS=1`, 3,2 s et 0,65 s. |
 
 L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié en privé sur GitHub : <https://github.com/electroman953/lion> (remote `origin`).
@@ -258,7 +258,7 @@ Le mode compilé a ses propres tests (`cargo test --test native`, `crates/lion_c
 
 Ces tests demandent cargo, qu'ils trouvent dans la variable `CARGO` posée par `cargo test`. Un programme ajouté à `tests/runtime` est donc testé dans les deux modes.
 
-Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (20), `lion_vm` (13), `lion_codegen` (12), `lion_native` (5), `lion_diagnostics` (4) et `lion_ir` (3) et `lion_ui` (5).
+Des tests unitaires existent aussi dans les crates suivantes : `lion_syntax` (49), `lion_sema` (42), `lion_runtime` (20), `lion_vm` (13), `lion_codegen` (12), `lion_native` (5), `lion_diagnostics` (4) et `lion_ir` (3), `lion_ui` (5) et `lion_cli` (1).
 
 Les tests golden tournent avec autant de fils que de cœurs ; `LION_THREADS=1` les fait tourner sur un seul, avec la même sortie.
 
@@ -302,7 +302,7 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
 - Mode compilé :
   - `lion build` demande une chaîne Rust sur la machine qui compile ;
   - la première compilation prépare le runtime dans le cache (`LION_CACHE`, `$XDG_CACHE_HOME/lion` ou `~/.cache/lion`), ce qui prend quelques secondes ;
-  - le cache garde un paquet par exécutable produit, et rien ne le nettoie ;
+  - le cache garde un paquet par exécutable produit, supprimé après 30 jours sans compilation (C99) ;
   - deux `lion build` simultanés vers le même exécutable se gênent ;
   - `lion test` et le mode interactif restent interprétés.
 
@@ -320,7 +320,7 @@ Ce qui peut se faire sans nouvelle règle de langage :
 3. **Parallélisme** :
    - une réserve de fils, plutôt qu'une création de fils par boucle parallèle ;
    - un verrou plus fin pour `shared synced` (C84).
-4. **Outils** : un nettoyage du cache de `lion build`, et le débogueur pas à pas du §24.2 (D25).
+4. **Outils** : le débogueur pas à pas du §24.2 (D25).
 5. **VS Code et LSP**, à préparer dans l'architecture :
    - sortir le pipeline de `lion_cli/src/driver.rs` dans une bibliothèque qui rend les diagnostics au lieu de les afficher, avec un fournisseur de fichiers pour les tampons non sauvegardés ;
    - convertir les `Span` (octets) en positions LSP (ligne, colonne UTF-16) dans `lion_diagnostics` ;
@@ -331,7 +331,7 @@ Ce qui peut se faire sans nouvelle règle de langage :
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C99**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C100**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README et des notes, puis un commit Conventional Commits. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

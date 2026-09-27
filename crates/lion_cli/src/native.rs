@@ -79,7 +79,53 @@ pub fn build(code: &str, output: &Path) -> Result<(), BuildError> {
     }
     let executable = target.join("release").join(format!("{name}{}", env::consts::EXE_SUFFIX));
     fs::copy(&executable, output).map_err(|error| io(output, error))?;
+    // What was used now is marked; what was not used for a long time is removed (C99).
+    let _ = fs::write(package.join(USED), "");
+    let _ = fs::write(cache.join(USED), "");
+    clean(&cache_folder(), &cache, &target);
     Ok(())
+}
+
+/// The file whose date says when a runtime or a program of the cache was last used.
+const USED: &str = ".used";
+
+/// How long a runtime or a program of the cache is kept without being used.
+const KEPT: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
+
+/// Removes from the cache the runtimes of other versions of `lion` and the programs that
+/// no build used for `KEPT` (C99). A failure only leaves files behind.
+fn clean(cache: &Path, current: &Path, target: &Path) {
+    for runtime in stale(cache, "runtime-") {
+        if runtime != current {
+            let _ = fs::remove_dir_all(runtime);
+        }
+    }
+    for program in stale(&current.join("programs"), "p") {
+        if let Some(name) = program.file_name() {
+            let executable = format!("{}{}", name.to_string_lossy(), env::consts::EXE_SUFFIX);
+            let _ = fs::remove_file(target.join("release").join(executable));
+        }
+        let _ = fs::remove_dir_all(program);
+    }
+}
+
+/// The folders of `folder` whose name starts with `prefix` and that were not used for
+/// `KEPT`, by the date of their mark, or of the folder when it has none.
+fn stale(folder: &Path, prefix: &str) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(folder) else { return Vec::new() };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_dir() && path.file_name().is_some_and(|name| name.to_string_lossy().starts_with(prefix))
+        })
+        .filter(|path| {
+            let date = fs::metadata(path.join(USED))
+                .or_else(|_| fs::metadata(path))
+                .and_then(|meta| meta.modified());
+            date.ok().and_then(|date| date.elapsed().ok()).is_some_and(|age| age > KEPT)
+        })
+        .collect()
 }
 
 /// The cargo of the Rust toolchain: `LION_CARGO`, then the one of the `PATH`, then the
@@ -120,4 +166,25 @@ fn fnv(bytes: &[u8]) -> u64 {
     bytes
         .iter()
         .fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folders_unused_for_a_long_time_are_stale() {
+        let folder = env::temp_dir().join(format!("lion-clean-test-{}", std::process::id()));
+        let (old, recent, other) = (folder.join("p-old"), folder.join("p-recent"), folder.join("q-old"));
+        for path in [&old, &recent, &other] {
+            fs::create_dir_all(path).unwrap();
+            fs::write(path.join(USED), "").unwrap();
+        }
+        let long_ago = std::time::SystemTime::now() - KEPT - std::time::Duration::from_secs(60);
+        for path in [&old, &other] {
+            fs::File::options().write(true).open(path.join(USED)).unwrap().set_modified(long_ago).unwrap();
+        }
+        assert_eq!(stale(&folder, "p"), [old]);
+        let _ = fs::remove_dir_all(folder);
+    }
 }
