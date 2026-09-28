@@ -4,6 +4,7 @@
 //! their layout by `lion fmt` and their outline.
 
 mod convert;
+mod navigate;
 mod rpc;
 mod symbols;
 
@@ -14,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::mpsc;
 
-use lion_diagnostics::{Diagnostic, Label, SourceMap};
+use lion_diagnostics::{Diagnostic, Label, SourceId, SourceMap};
 use lion_runtime::json::Json;
 
 use crate::driver::{self, Analysis, Options};
@@ -72,6 +73,9 @@ struct Server<W: Write> {
     projects: HashMap<PathBuf, Result<Resolution, String>>,
     /// The diagnostics last sent, by address.
     published: HashMap<String, Vec<Json>>,
+    /// What the names of each program designate, kept from its last check that reached
+    /// the checker (C103).
+    names: Vec<navigate::Names>,
 }
 
 impl<W: Write> Server<W> {
@@ -84,6 +88,7 @@ impl<W: Write> Server<W> {
             changed: false,
             projects: HashMap::new(),
             published: HashMap::new(),
+            names: Vec::new(),
         }
     }
 
@@ -143,6 +148,29 @@ impl<W: Write> Server<W> {
             }
             "textDocument/formatting" => Ok(self.format(document_uri(params)?).unwrap_or(Json::Null)),
             "textDocument/documentSymbol" => Ok(self.symbols(document_uri(params)?).unwrap_or(Json::Null)),
+            // The four answers below read the index: the files are checked first, since
+            // the request may have arrived in the same batch as the text it is about.
+            "textDocument/hover" => {
+                self.check_if_needed();
+                self.about(params, &|names, uri, at| names.hover(uri, at))
+            }
+            "textDocument/definition" => {
+                self.check_if_needed();
+                self.about(params, &|names, uri, at| names.definition(uri, at))
+            }
+            "textDocument/references" => {
+                // `includeDeclaration` is false when the editor asks for the uses alone.
+                let declaration = params
+                    .get("context")
+                    .and_then(|context| context.get("includeDeclaration"))
+                    .is_none_or(|value| *value != Json::Bool(false));
+                self.check_if_needed();
+                self.everywhere(params, &|names, uri, at| names.references(uri, at, declaration))
+            }
+            "textDocument/documentHighlight" => {
+                self.check_if_needed();
+                self.everywhere(params, &|names, uri, at| names.highlight(uri, at))
+            }
             _ => Err((code::METHOD_NOT_FOUND, format!("`{method}` is not supported"))),
         }
     }
@@ -226,6 +254,50 @@ impl<W: Write> Server<W> {
         Some(Json::List(vec![Json::object([("range", whole), ("newText", Json::text(formatted))])]))
     }
 
+    /// Answers a request about the name at a position, with the names of the program
+    /// that holds the file; `null` when no name is known there.
+    fn about(
+        &self,
+        params: &Json,
+        answer: &dyn Fn(&navigate::Names, &str, &Json) -> Option<Json>,
+    ) -> Result<Json, (i64, String)> {
+        let (uri, at) = self.request_place(params)?;
+        let found =
+            self.names.iter().filter(|names| names.holds(uri)).find_map(|names| answer(names, uri, at));
+        Ok(found.unwrap_or(Json::Null))
+    }
+
+    /// Answers a request that gives a list of places, with the names of every program
+    /// that holds the file. A module is checked on its own and with each program that
+    /// uses it (C61): each of them knows different uses of the same declaration.
+    fn everywhere(
+        &self,
+        params: &Json,
+        answer: &dyn Fn(&navigate::Names, &str, &Json) -> Option<Json>,
+    ) -> Result<Json, (i64, String)> {
+        let (uri, at) = self.request_place(params)?;
+        let mut places: Vec<Json> = Vec::new();
+        for names in self.names.iter().filter(|names| names.holds(uri)) {
+            let Some(Json::List(found)) = answer(names, uri, at) else { continue };
+            for place in found {
+                if !places.contains(&place) {
+                    places.push(place);
+                }
+            }
+        }
+        in_order(&mut places);
+        Ok(Json::List(places))
+    }
+
+    /// The file and the position of a request about a name.
+    fn request_place<'a>(&self, params: &'a Json) -> Result<(&'a str, &'a Json), (i64, String)> {
+        let uri = document_uri(params)?;
+        let at = params
+            .get("position")
+            .ok_or((code::INVALID_PARAMS, "the request has no `position`".to_string()))?;
+        Ok((uri, at))
+    }
+
     fn symbols(&self, uri: &str) -> Option<Json> {
         let document = self.document(uri)?;
         let mut sources = SourceMap::new();
@@ -297,6 +369,8 @@ impl<W: Write> Server<W> {
                 scripts.push((document.key.clone(), document.name.clone()));
             }
         }
+        // The names of a program whose script is no longer open are forgotten.
+        self.names.retain(|names| scripts.iter().any(|(key, _)| *key == names.key));
         let mut reached: HashSet<String> = HashSet::new();
         let mut diagnostics: HashMap<String, Vec<Json>> = HashMap::new();
         for (key, name) in scripts {
@@ -354,7 +428,29 @@ impl<W: Write> Server<W> {
                 return uri.map(|uri| vec![(uri, key.to_string(), list)]).unwrap_or_default();
             }
         };
-        self.file_diagnostics(&sources, &analysis)
+        let diagnostics = self.file_diagnostics(&sources, &analysis);
+        self.remember(key, sources, analysis);
+        diagnostics
+    }
+
+    /// Keeps what the names of a program designate, for the requests of the editor. A
+    /// check that a syntax error stopped indexes nothing: the names of the last text
+    /// that parsed are kept, so that navigating works while a file is being typed.
+    fn remember(&mut self, key: &str, sources: SourceMap, analysis: Analysis) {
+        if analysis.index.occurrences().is_empty() {
+            return;
+        }
+        let uris: HashMap<SourceId, String> = analysis
+            .files
+            .iter()
+            .filter(|file| !file.standard)
+            .filter_map(|file| Some((file.source, self.uri_of(&file.key)?)))
+            .collect();
+        let names = navigate::Names::new(key.to_string(), sources, analysis.index, uris);
+        match self.names.iter().position(|known| known.key == key) {
+            Some(position) => self.names[position] = names,
+            None => self.names.push(names),
+        }
     }
 
     /// The diagnostics of an analysis, file by file. A module with errors is reported at
@@ -440,6 +536,10 @@ fn capabilities() -> Json {
                 ("textDocumentSync", sync),
                 ("documentFormattingProvider", Json::Bool(true)),
                 ("documentSymbolProvider", Json::Bool(true)),
+                ("hoverProvider", Json::Bool(true)),
+                ("definitionProvider", Json::Bool(true)),
+                ("referencesProvider", Json::Bool(true)),
+                ("documentHighlightProvider", Json::Bool(true)),
             ]),
         ),
         (
@@ -485,6 +585,18 @@ fn document_uri(params: &Json) -> Result<&str, (i64, String)> {
         .and_then(|item| item.get("uri"))
         .and_then(Json::as_text)
         .ok_or((code::INVALID_PARAMS, "the request has no `textDocument.uri`".to_string()))
+}
+
+/// Puts the places of an answer in the order of the files, so that the editor always
+/// shows them the same way.
+fn in_order(places: &mut [Json]) {
+    places.sort_by_key(|place| {
+        let uri = place.get("uri").and_then(Json::as_text).unwrap_or("").to_string();
+        let start = place.get("range").and_then(|range| range.get("start"));
+        let line = start.and_then(|at| at.get("line")).and_then(Json::as_int).unwrap_or(0);
+        let character = start.and_then(|at| at.get("character")).and_then(Json::as_int).unwrap_or(0);
+        (uri, line, character)
+    });
 }
 
 /// The folder of a file given by its address.

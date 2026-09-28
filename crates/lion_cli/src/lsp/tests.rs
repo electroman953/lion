@@ -47,7 +47,10 @@ fn change(server: &mut Server<Vec<u8>>, uri: &str, version: i64, change: Json) {
 }
 
 fn request(server: &mut Server<Vec<u8>>, method: &str, uri: &str) -> Json {
-    let params = Json::object([("textDocument", Json::object([("uri", Json::text(uri))]))]);
+    ask(server, method, Json::object([("textDocument", Json::object([("uri", Json::text(uri))]))]))
+}
+
+fn ask(server: &mut Server<Vec<u8>>, method: &str, params: Json) -> Json {
     let message = Json::object([
         ("jsonrpc", Json::text("2.0")),
         ("id", Json::int(7)),
@@ -56,8 +59,64 @@ fn request(server: &mut Server<Vec<u8>>, method: &str, uri: &str) -> Json {
     ]);
     handle(server, &message.to_string());
     let mut answers = sent(server);
+    // A request that checks the files first publishes their diagnostics before it
+    // answers; the answer is the message that carries the id of the request.
+    answers.retain(|answer| answer.get("id").is_some());
     assert_eq!(answers.len(), 1);
     answers.remove(0)
+}
+
+/// The parameters of a request about the name at a place of a file.
+fn at(uri: &str, line: i64, character: i64) -> Json {
+    Json::object([
+        ("textDocument", Json::object([("uri", Json::text(uri))])),
+        ("position", Json::object([("line", Json::int(line)), ("character", Json::int(character))])),
+    ])
+}
+
+/// Checks the open files, and drops the diagnostics: the requests come next.
+fn check(server: &mut Server<Vec<u8>>) {
+    server.check_if_needed();
+    sent(server);
+}
+
+/// What a hover shows, without its fences.
+fn hovered(answer: &Json) -> String {
+    let value = answer
+        .get("result")
+        .and_then(|result| result.get("contents"))
+        .and_then(|contents| contents.get("value"))
+        .and_then(Json::as_text)
+        .unwrap_or_else(|| panic!("a hover, not {answer}"));
+    value.trim_start_matches("```lion\n").trim_end_matches("```").trim().to_string()
+}
+
+/// A location as `(address, line, character)` of where it starts.
+fn place(location: &Json) -> (String, i64, i64) {
+    let uri = location.get("uri").and_then(Json::as_text).unwrap().to_string();
+    let start = location.get("range").and_then(|range| range.get("start")).unwrap();
+    let line = start.get("line").and_then(Json::as_int).unwrap();
+    let character = start.get("character").and_then(Json::as_int).unwrap();
+    (uri, line, character)
+}
+
+/// Where each answer of a list of locations or of highlights starts.
+fn places(answer: &Json, uri: &str) -> Vec<(String, i64, i64)> {
+    answer
+        .get("result")
+        .and_then(Json::as_list)
+        .unwrap_or_else(|| panic!("a list, not {answer}"))
+        .iter()
+        .map(|item| match item.get("uri") {
+            Some(_) => place(item),
+            // A highlight has a range alone: it is always in the file being read.
+            None => {
+                let with =
+                    Json::object([("uri", Json::text(uri)), ("range", item.get("range").unwrap().clone())]);
+                place(&with)
+            }
+        })
+        .collect()
 }
 
 /// A diagnostic as `(line, character, severity, message)`.
@@ -109,7 +168,10 @@ fn the_server_starts_and_stops_as_the_protocol_says() {
     let capabilities = answer.get("result").and_then(|result| result.get("capabilities")).unwrap();
     assert_eq!(capabilities.get("positionEncoding").and_then(Json::as_text), Some("utf-16"));
     assert_eq!(capabilities.get("documentFormattingProvider"), Some(&Json::Bool(true)));
-    handle(&mut server, r#"{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{}}"#);
+    assert_eq!(capabilities.get("hoverProvider"), Some(&Json::Bool(true)));
+    assert_eq!(capabilities.get("definitionProvider"), Some(&Json::Bool(true)));
+    assert_eq!(capabilities.get("referencesProvider"), Some(&Json::Bool(true)));
+    handle(&mut server, r#"{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{}}"#);
     let answer = &sent(&mut server)[0];
     assert_eq!(answer.get("error").and_then(|e| e.get("code")).and_then(Json::as_int), Some(-32601));
     server.handle(Incoming::Invalid("invalid JSON".to_string()));
@@ -277,4 +339,122 @@ test \"addition\":
     // The range of a block goes to its `;`.
     let end = student.get("range").and_then(|range| range.get("end")).unwrap();
     assert_eq!(end.get("line").and_then(Json::as_int), Some(6));
+}
+
+/// The text whose names the navigation tests ask about.
+const NAMES: &str = "\
+let total = 1 + 2
+show(total)
+fun double(n in Int) in Int = n * 2
+show(double(total))
+";
+
+#[test]
+fn hover_gives_the_declaration_of_a_name() {
+    let mut server = server();
+    open(&mut server, MAIN, NAMES);
+    check(&mut server);
+    // A variable, at its use and at its declaration.
+    assert_eq!(hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 1, 5))), "let total in Int");
+    assert_eq!(hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 0, 4))), "let total in Int");
+    // A function and its parameter.
+    assert_eq!(
+        hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 3, 5))),
+        "fun double(n in Int) in Int"
+    );
+    assert_eq!(hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 2, 30))), "n in Int");
+    // The range that the editor underlines is the name alone.
+    let answer = ask(&mut server, "textDocument/hover", at(MAIN, 1, 5));
+    let range = answer.get("result").and_then(|result| result.get("range")).unwrap();
+    assert_eq!(range.to_string(), r#"{"start":{"line":1,"character":5},"end":{"line":1,"character":10}}"#);
+    // `let` is not a name; a request without a position is refused.
+    assert_eq!(ask(&mut server, "textDocument/hover", at(MAIN, 0, 0)).get("result"), Some(&Json::Null));
+    let params = Json::object([("textDocument", Json::object([("uri", Json::text(MAIN))]))]);
+    let answer = ask(&mut server, "textDocument/hover", params);
+    assert_eq!(answer.get("error").and_then(|e| e.get("code")).and_then(Json::as_int), Some(-32602));
+}
+
+#[test]
+fn going_to_a_declaration_and_finding_its_uses() {
+    let mut server = server();
+    open(&mut server, MAIN, NAMES);
+    check(&mut server);
+    let answer = ask(&mut server, "textDocument/definition", at(MAIN, 3, 12));
+    assert_eq!(place(answer.get("result").unwrap()), (MAIN.to_string(), 0, 4));
+    let answer = ask(&mut server, "textDocument/definition", at(MAIN, 3, 5));
+    assert_eq!(place(answer.get("result").unwrap()), (MAIN.to_string(), 2, 4));
+    // Every use of `total`, its declaration first.
+    let answer = ask(&mut server, "textDocument/references", at(MAIN, 1, 5));
+    assert_eq!(
+        places(&answer, MAIN),
+        [(MAIN.to_string(), 0, 4), (MAIN.to_string(), 1, 5), (MAIN.to_string(), 3, 12)]
+    );
+    // Without the declaration, when the editor asks for the uses alone.
+    let mut params = at(MAIN, 1, 5);
+    let Json::Object(members) = &mut params else { unreachable!() };
+    members.push(("context".to_string(), Json::object([("includeDeclaration", Json::Bool(false))])));
+    let answer = ask(&mut server, "textDocument/references", params);
+    assert_eq!(places(&answer, MAIN), [(MAIN.to_string(), 1, 5), (MAIN.to_string(), 3, 12)]);
+    // The same name, highlighted in the file being read.
+    let answer = ask(&mut server, "textDocument/documentHighlight", at(MAIN, 2, 11));
+    assert_eq!(places(&answer, MAIN), [(MAIN.to_string(), 2, 11), (MAIN.to_string(), 2, 30)]);
+}
+
+#[test]
+fn a_declaration_of_another_file_is_reached() {
+    let mut server = server();
+    open(&mut server, GEO, "fun area(r in Float) in Float = r * r\n");
+    open(&mut server, MAIN, "use geo\nshow(geo.area(2.0))\n");
+    check(&mut server);
+    let answer = ask(&mut server, "textDocument/definition", at(MAIN, 1, 9));
+    assert_eq!(place(answer.get("result").unwrap()), (GEO.to_string(), 0, 4));
+    assert_eq!(
+        hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 1, 9))),
+        "fun area(r in Float) in Float"
+    );
+    // The uses of the function, in both files.
+    let answer = ask(&mut server, "textDocument/references", at(GEO, 0, 4));
+    assert_eq!(places(&answer, GEO), [(GEO.to_string(), 0, 4), (MAIN.to_string(), 1, 9)]);
+    // A declaration of the standard library is shown, but the editor opens no file.
+    open(&mut server, MAIN, "use text\nshow(text.upper(\"a\"))\n");
+    check(&mut server);
+    let hover = hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 1, 10)));
+    assert!(hover.starts_with("fun upper(") && hover.contains("standard library"), "{hover}");
+    assert_eq!(ask(&mut server, "textDocument/definition", at(MAIN, 1, 10)).get("result"), Some(&Json::Null));
+}
+
+#[test]
+fn the_names_of_the_last_text_that_parsed_answer_while_typing() {
+    let mut server = server();
+    open(&mut server, MAIN, NAMES);
+    check(&mut server);
+    // A half-typed line: the checker does not run on a file with a syntax error.
+    let half = format!("{NAMES}show(double(\n");
+    change(&mut server, MAIN, 2, Json::object([("text", Json::text(half))]));
+    check(&mut server);
+    assert_eq!(hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 1, 5))), "let total in Int");
+    assert_eq!(
+        hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 3, 5))),
+        "fun double(n in Int) in Int"
+    );
+    // Once the file parses again, the names follow the new text.
+    let changed = NAMES.replace("1 + 2", "\"a\"");
+    change(&mut server, MAIN, 3, Json::object([("text", Json::text(changed))]));
+    check(&mut server);
+    assert_eq!(hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 1, 5))), "let total in Text");
+    // A file the server never checked knows nothing.
+    assert_eq!(ask(&mut server, "textDocument/hover", at(GEO, 0, 0)).get("result"), Some(&Json::Null));
+}
+
+#[test]
+fn a_request_that_comes_with_the_text_is_answered_all_the_same() {
+    let mut server = server();
+    // Nothing checked the file: the editor sent the text and the request together, and
+    // the server reads them in one batch.
+    open(&mut server, MAIN, NAMES);
+    assert_eq!(hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 1, 5))), "let total in Int");
+    // The same, right after a change.
+    let changed = NAMES.replace("1 + 2", "\"a\"");
+    change(&mut server, MAIN, 2, Json::object([("text", Json::text(changed))]));
+    assert_eq!(hovered(&ask(&mut server, "textDocument/hover", at(MAIN, 1, 5))), "let total in Text");
 }

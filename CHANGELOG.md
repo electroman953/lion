@@ -2,6 +2,17 @@
 
 Les décisions détaillées sont dans [docs/implementation-notes.md](docs/implementation-notes.md) (Rn, In, Cn). Ce qui reste à faire est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) (§5, §8 et §9). Chaque ligne correspond à un commit du dépôt.
 
+## 2026-09-28, cinquième session : les noms dans l'éditeur
+
+**Ajouté**
+- L'index des noms du vérificateur (C103) : ce que chaque nom désigne, où il est déclaré et où il
+  est écrit. Il est construit pendant la vérification, donc il existe aussi pour un programme avec
+  des erreurs, là où l'IR n'existe que pour un programme valide.
+- `lion lsp` répond au survol (la déclaration, avec les types), à l'aller à la définition, aux
+  références et au surlignage du même nom. Pendant la frappe, une erreur de syntaxe arrête le
+  vérificateur : le serveur répond alors avec les noms du dernier texte qui s'analysait.
+- L'extension VS Code vérifie ces trois réponses dans un vrai VS Code (`npm run e2e`).
+
 ## 2026-09-27, quatrième session : VS Code et le serveur de langage
 
 **Ajouté**

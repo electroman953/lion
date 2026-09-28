@@ -30,6 +30,8 @@ pub(crate) struct Capture {
     /// The variable names a shared object, and so does the captured one (§17.2).
     pub(crate) sharing: Option<crate::sharing::Sharing>,
     pub(crate) span: Span,
+    /// Where the program declares the variable, for the index of the editors (C103).
+    pub(crate) decl: Span,
 }
 
 impl Checker<'_> {
@@ -238,7 +240,8 @@ impl Checker<'_> {
             // A copy of a `var shared` is a frozen copy, which is not shared (§17.2).
             let info = &self.ctx.locals[outer.index()];
             let sharing = info.shared.filter(|_| by_reference || !info.mutable);
-            captures.push(Capture { name, ty, by_reference, sharing, span });
+            let decl = info.outer.unwrap_or(info.decl_span);
+            captures.push(Capture { name, ty, by_reference, sharing, span, decl });
         }
         valid.then_some(captures)
     }

@@ -460,6 +460,7 @@ impl<'a> Checker<'a> {
             captured: false,
             boxed: false,
             shared: None,
+            outer: None,
         });
         self.ctx.flow.set(id, Assigned::Yes);
         id
@@ -768,6 +769,8 @@ impl<'a> Checker<'a> {
         let index = self.struct_index(structure);
         let fields = &self.structs[index].fields;
         if let Some(position) = fields.iter().position(|field| field.name == name.name) {
+            self.index_field(index, position, name.span);
+            let fields = &self.structs[index].fields;
             if fields[position].private && self.structs[index].module != self.module {
                 self.diagnostics.push(
                     Diagnostic::error(format!(

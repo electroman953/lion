@@ -11,7 +11,7 @@ Les huit étapes de la feuille de route (§28) sont atteintes :
 - la bibliothèque graphique `ui` ouvre de vraies fenêtres (X11, et Wayland par XWayland), dessinées par Lion lui-même, sans dépendance ;
 - `lion add` installe une bibliothèque en une commande, depuis un dépôt git ou un dossier.
 
-Au-delà de la feuille de route, VS Code connaît Lion : coloration, indentation, diagnostics pendant la frappe, formatage et plan des fichiers, par le serveur de langage `lion lsp` (C102).
+Au-delà de la feuille de route, VS Code connaît Lion : coloration, indentation, diagnostics pendant la frappe, formatage, plan des fichiers, survol, aller à la définition et références, par le serveur de langage `lion lsp` (C102, C103).
 
 Le bilan détaillé, avec les limites connues et les prochaines étapes, est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). L'historique des modifications est dans [CHANGELOG.md](CHANGELOG.md). L'implémentation construit le langage par tranches verticales qui fonctionnent réellement de bout en bout. Ce qui n'est pas encore implémenté est refusé avec le message `not implemented yet`, suivi de la section de la spec concernée.
 
@@ -85,7 +85,9 @@ ui.run(view)
 
 ## Éditeurs : VS Code et `lion lsp`
 
-`lion lsp` est le serveur de langage des éditeurs (Language Server Protocol), sur l'entrée et la sortie standard. Il donne les diagnostics de `lion check` pendant la frappe, le formatage de `lion fmt` et le plan des fichiers, sans jamais lancer le code du programme (C102).
+`lion lsp` est le serveur de langage des éditeurs (Language Server Protocol), sur l'entrée et la sortie standard. Il donne les diagnostics de `lion check` pendant la frappe, le formatage de `lion fmt`, le plan des fichiers, et, depuis l'index des noms du vérificateur, le survol, l'aller à la définition, les références et le surlignage du même nom (C102, C103). Il ne lance jamais le code du programme.
+
+L'index est construit pendant la vérification, donc il existe aussi pour un programme avec des erreurs. Quand une erreur de syntaxe arrête le vérificateur, le serveur répond avec les noms du dernier texte qui s'analysait : la navigation ne s'éteint pas à chaque parenthèse ouverte.
 
 L'extension VS Code est dans [`editors/vscode`](editors/vscode/README.md) :
 

@@ -1,5 +1,5 @@
 // Run inside VS Code by `run.js`: the file of the workspace, its diagnostics, its
-// formatting, its outline and its indentation.
+// formatting, its outline, its names and its indentation.
 
 const assert = require('node:assert');
 const path = require('node:path');
@@ -54,6 +54,36 @@ async function run() {
   await editor.edit((builder) => builder.replace(new vscode.Range(0, 12, 0, 15), '4'));
   await eventually(() => vscode.languages.getDiagnostics(uri).length === 0, 'no diagnostics');
   console.log('diagnostics after a change: ok');
+
+  // The names, from the index of `lion lsp`: `x` is declared line 0, and read at
+  // `if x > 0` and at `show(x)`.
+  const hovers = await vscode.commands.executeCommand(
+    'vscode.executeHoverProvider',
+    uri,
+    new vscode.Position(2, 9),
+  );
+  assert.match(hovers[0].contents[0].value, /let x in Int/);
+  console.log('hover: ok');
+
+  const declarations = await vscode.commands.executeCommand(
+    'vscode.executeDefinitionProvider',
+    uri,
+    new vscode.Position(2, 9),
+  );
+  assert.strictEqual(declarations[0].uri.fsPath, uri.fsPath);
+  assert.strictEqual(declarations[0].range.start.line, 0);
+  assert.strictEqual(declarations[0].range.start.character, 4);
+  console.log('go to definition: ok');
+
+  const uses = await vscode.commands.executeCommand(
+    'vscode.executeReferenceProvider',
+    uri,
+    new vscode.Position(0, 4),
+  );
+  const places = uses.map((use) => [use.range.start.line, use.range.start.character]);
+  places.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  assert.deepStrictEqual(places, [[0, 4], [1, 3], [2, 9]]);
+  console.log('references: ok');
 
   // A line that ends with `:` opens a block; `else` closes it.
   const end = document.lineAt(document.lineCount - 1).range.end;

@@ -36,9 +36,11 @@ impl Checker<'_> {
         if let Some(local) = self.lookup(name) {
             self.check_shared_in_parallel(Variable::Local(local), name, span);
             self.check_compile_read(Variable::Local(local), name, span);
+            self.index_local(local, span);
             return Resolved::Local(local);
         }
         if let Some(&index) = self.ctx.scopes.iter().rev().find_map(|scope| scope.functions.get(name)) {
+            self.index_function(index, span);
             return Resolved::Function(index);
         }
         if let ContextKind::Structure(_) = self.ctx.kind
@@ -56,12 +58,14 @@ impl Checker<'_> {
                 Some(local) => {
                     self.check_shared_in_parallel(Variable::Global(local), name, span);
                     self.check_compile_read(Variable::Global(local), name, span);
+                    self.index_global(local, span);
                     Resolved::Global(local)
                 }
                 None => Resolved::Nothing,
             };
         }
         if let Some(&index) = self.tables.function_names.get(name) {
+            self.index_function(index, span);
             return Resolved::Function(index);
         }
         if let Some(&standard) = IMPLEMENTED_FUNCTIONS.iter().chain(PLANNED_FUNCTIONS).find(|n| **n == name) {

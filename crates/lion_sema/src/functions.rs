@@ -185,6 +185,14 @@ impl Pending {
 }
 
 impl Instance {
+    /// The type it gives back, once the checker knows it.
+    pub(crate) fn returned(&self) -> Option<Type> {
+        match self.ret {
+            Ret::Declared(ty) | Ret::Inferred(ty) => Some(ty),
+            Ret::Unknown | Ret::Inferring | Ret::Failed => None,
+        }
+    }
+
     pub(crate) fn into_ir(self, functions: &[FunctionInfo]) -> ir::Function {
         let checked = self.checked.expect("every instance of a valid program is checked");
         let ret = match self.ret {
@@ -1060,6 +1068,7 @@ impl<'a> Checker<'a> {
                     captured: false,
                     boxed: false,
                     shared: None,
+                    outer: None,
                 });
                 self.ctx.flow.set(id, Assigned::Yes);
                 id
@@ -1082,8 +1091,10 @@ impl<'a> Checker<'a> {
                 captured: true,
                 boxed: capture.by_reference,
                 shared: capture.sharing,
+                outer: Some(capture.decl),
             });
             self.ctx.flow.set(id, Assigned::Yes);
+            self.index_local(id, capture.span);
             let scope = self.ctx.scopes.first_mut().expect("the outermost block");
             scope.names.insert(capture.name.clone(), id);
         }
@@ -1113,6 +1124,7 @@ impl<'a> Checker<'a> {
                     None => valid = false,
                 }
             }
+            self.index_parameter(*id, param.span);
             let scope = self.ctx.scopes.first_mut().expect("the outermost block");
             scope.names.insert(param.name.clone(), *id);
         }
@@ -1337,6 +1349,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<ir::Expr> {
         let name = self.functions[index].decl.name.name.clone();
+        self.index_function(index, callee);
         let Some(mut params) = self.functions[index].signature.clone() else {
             for arg in args {
                 self.expr(&arg.value);

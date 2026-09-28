@@ -168,6 +168,7 @@ impl<'a> Checker<'a> {
             self.private_error(module, name, private);
             return None;
         }
+        self.index_function(function, name.span);
         let value = self.function_value(function, span, expected)?;
         // The module gets the values of its globals before any call of the function (D81).
         let init = ir::Stmt::InitModule { module: module as u32 };
@@ -187,6 +188,7 @@ impl<'a> Checker<'a> {
         }
         let local = local?;
         let GlobalType::Known(Some(ty)) = ty else { return None };
+        self.index_global(local, name.span);
         self.ctx.reads.push(local);
         let read = typed(ir::ExprKind::Global(local), ty, span);
         let init = ir::Stmt::InitModule { module: module as u32 };
@@ -197,6 +199,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn module_type(&mut self, module: usize, name: &ast::Ident) -> Option<Type> {
         let tables = self.table_of(module);
         if let Some(&index) = tables.struct_names.get(&name.name) {
+            self.index_struct(index, name.span);
             return Some(Type::Struct(self.structs[index].id));
         }
         if tables.named_types.contains_key(&name.name) {

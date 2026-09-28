@@ -486,6 +486,9 @@ pub struct Analysis {
     /// The files of the program: the script, then the modules in the order they were
     /// reached.
     pub files: Vec<ProgramFile>,
+    /// What each name of the program designates, for the editors; empty when the files
+    /// have syntax errors, which stop the checker (C103).
+    pub index: lion_sema::Index,
 }
 
 /// A file of a program.
@@ -585,6 +588,7 @@ pub fn analyze(
         index += 1;
     }
     // Checking a tree with syntax errors would only add confusing messages.
+    let mut index = lion_sema::Index::default();
     let program = if diagnostics.iter().any(Diagnostic::is_fatal) {
         None
     } else {
@@ -600,6 +604,7 @@ pub fn analyze(
             .collect();
         let checked = lion_sema::check_program(&files);
         diagnostics.extend(checked.diagnostics);
+        index = checked.index;
         // The values of `compile` are part of the program (§21.1).
         checked.program.and_then(|mut program| {
             if !options.evaluate {
@@ -624,7 +629,7 @@ pub fn analyze(
             used_by: file.used_by,
         })
         .collect();
-    Analysis { program, diagnostics, files }
+    Analysis { program, diagnostics, files, index }
 }
 
 /// A file of a program, while the driver reads them.

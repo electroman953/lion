@@ -1,7 +1,7 @@
 {
   "name": "lion",
   "displayName": "Lion",
-  "description": "The Lion language: highlighting, diagnostics, formatting and outline, from `lion lsp`",
+  "description": "The Lion language: highlighting, diagnostics, formatting, outline and navigation, from `lion lsp`",
   "version": "0.1.0",
   "publisher": "lion-lang",
   "license": "UNLICENSED",

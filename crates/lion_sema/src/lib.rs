@@ -22,6 +22,7 @@ mod flow;
 mod functions;
 mod generic_structs;
 mod generic_traits;
+mod index;
 mod matching;
 mod methods;
 mod modules;
@@ -43,6 +44,7 @@ use lion_diagnostics::{Diagnostic, Span};
 use lion_ir::{self as ir, Type};
 use lion_syntax::ast;
 
+pub use crate::index::{DefKind, Definition, Index, Occurrence};
 pub use crate::modules::Source;
 
 use crate::flow::{Assigned, Flow};
@@ -54,6 +56,9 @@ pub struct Checked {
     /// Present only when there are no errors.
     pub program: Option<ir::Program>,
     pub diagnostics: Vec<Diagnostic>,
+    /// What each name of the program designates, for the editors; built even when the
+    /// program has errors (C103).
+    pub index: Index,
 }
 
 /// Checks a program of one file.
@@ -100,6 +105,7 @@ fn check_once(files: &[Source], seeds: &[Type]) -> (Checked, Vec<Type>) {
     checker.check_parallel_regions();
     checker.check_compile_regions();
     checker.check_synced();
+    checker.index_declarations();
     let late = std::mem::take(&mut checker.late_instances);
     (checker.finish(), late)
 }
@@ -126,6 +132,9 @@ struct LocalInfo {
     boxed: bool,
     /// A name of an object made with `shared` (§17.2).
     shared: Option<crate::sharing::Sharing>,
+    /// For a captured variable, where the program declares it: the index gives the
+    /// captured name and the declared one the same entry (§11.5, C103).
+    outer: Option<Span>,
 }
 
 impl LocalInfo {
@@ -143,6 +152,7 @@ impl LocalInfo {
             captured: false,
             boxed: false,
             shared: None,
+            outer: None,
         }
     }
 }
@@ -319,6 +329,8 @@ struct Checker<'a> {
     compile_checks: Vec<crate::compile_time::CompileCheck>,
     /// The C functions that the program declares (§21.2).
     foreign: Vec<ir::ForeignFunction>,
+    /// What each name designates, for the editors (C103).
+    index: Index,
 }
 
 impl<'a> Checker<'a> {
@@ -372,6 +384,7 @@ impl<'a> Checker<'a> {
             shared_reported: std::collections::HashSet::new(),
             compile_checks: Vec::new(),
             foreign: Vec::new(),
+            index: Index::default(),
         };
         checker.register_program();
         checker
@@ -402,6 +415,7 @@ impl<'a> Checker<'a> {
         scope.names.insert(name.name.clone(), id);
         scope.declared.push(id);
         self.ctx.flow.set(id, if initialized { Assigned::Yes } else { Assigned::No });
+        self.index_local(id, name.span);
         id
     }
 
@@ -459,6 +473,7 @@ impl<'a> Checker<'a> {
             captured: false,
             boxed: false,
             shared: None,
+            outer: None,
         });
         self.ctx.flow.set(id, Assigned::Yes);
         id
@@ -488,8 +503,10 @@ impl<'a> Checker<'a> {
         };
         diagnostics.sort_by_key(position);
         diagnostics.dedup_by(|a, b| a.message == b.message && position(a) == position(b));
+        self.index.finish();
+        let index = std::mem::take(&mut self.index);
         if diagnostics.iter().any(Diagnostic::is_fatal) {
-            return Checked { program: None, diagnostics };
+            return Checked { program: None, diagnostics, index };
         }
         let tests = self.test_list();
         let script = std::mem::replace(&mut self.ctx, Context::new(ContextKind::Script));
@@ -541,6 +558,7 @@ impl<'a> Checker<'a> {
                 main,
             }),
             diagnostics,
+            index,
         }
     }
 }

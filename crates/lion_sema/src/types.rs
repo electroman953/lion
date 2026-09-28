@@ -153,6 +153,7 @@ impl Checker<'_> {
             return self.generic_trait_type(template, args, ty.span);
         }
         if let Some(&index) = self.tables.struct_names.get(&name.name) {
+            self.index_struct(index, name.span);
             if !args.is_empty() {
                 self.diagnostics.push(
                     Diagnostic::error(format!("`{}` does not take type parameters", name.name))
@@ -161,6 +162,9 @@ impl Checker<'_> {
                 return None;
             }
             return Some(Type::Struct(self.structs[index].id));
+        }
+        if let Some(decl) = self.tables.type_spans.get(&name.name).copied() {
+            self.index_type(&name.name, decl, name.span);
         }
         if let Some(resolved) = self.defined_type(&name.name, name.span) {
             if !args.is_empty() {

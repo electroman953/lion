@@ -1,9 +1,9 @@
 # État de l'implémentation de Lion
 
-Mis à jour le 2026-09-27 : les huit étapes de la feuille de route sont atteintes, avec le compilateur natif (5), le parallélisme sur plusieurs cœurs (6), la bibliothèque graphique `ui` (7) et le gestionnaire de paquets (8). Depuis, VS Code connaît Lion par le serveur de langage `lion lsp` (C102). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète ces documents :
+Mis à jour le 2026-09-28 : les huit étapes de la feuille de route sont atteintes, avec le compilateur natif (5), le parallélisme sur plusieurs cœurs (6), la bibliothèque graphique `ui` (7) et le gestionnaire de paquets (8). Depuis, VS Code connaît Lion par le serveur de langage `lion lsp` (C102), qui donne aussi le survol, l'aller à la définition et les références, grâce à l'index des noms du vérificateur (C103). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète ces documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C102) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C103) ;
 - [`docs/design/ui.md`](docs/design/ui.md) et [`docs/design/packages.md`](docs/design/packages.md) : les conceptions de `ui` et des paquets, validées par l'auteur et implémentées (C98, C101) ;
 - [`README.md`](README.md) : la présentation et l'usage ;
 - [`CHANGELOG.md`](CHANGELOG.md) : l'historique des modifications, session par session.
@@ -15,8 +15,8 @@ Mis à jour le 2026-09-27 : les huit étapes de la feuille de route sont atteint
 | `cargo build` | OK |
 | `cargo clippy --all-targets` | 0 avertissement |
 | `cargo fmt --check` | OK |
-| `cargo test` (tout le workspace) | OK : 170 tests unitaires, 200 programmes golden, les 97 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties, et `lion lsp` lancé comme par un éditeur |
-| Extension VS Code (`editors/vscode`) | `npm test` : 3 tests de la coloration par le moteur TextMate de VS Code ; `npm run e2e` : l'extension dans VS Code 1.129, avec diagnostics, plan, formatage, correction pendant la frappe et indentation |
+| `cargo test` (tout le workspace) | OK : 181 tests unitaires, 200 programmes golden, les 97 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties, et `lion lsp` lancé comme par un éditeur |
+| Extension VS Code (`editors/vscode`) | `npm test` : 3 tests de la coloration par le moteur TextMate de VS Code. `npm run e2e` (diagnostics, plan, formatage, survol, définition, références, correction pendant la frappe, indentation) : **non relancé le 2026-09-28**, la machine de cette session ne peut pas télécharger VS Code ; les mêmes réponses sont vérifiées par les tests du serveur en mémoire |
 | Programmes du §27 de la spec | Les trois tournent sans modification, dans les deux modes : 27.1 (CSV, structures), 27.2 (hasard, parallèle, ensembles) et 27.3 (application graphique, `tests/programs/notes_app`, sans écran avec un fichier d'événements) ; Sur 12 cœurs, 27.2 prend 0,67 s interprété (`--release`) et 0,19 s compilé ; avec `LION_THREADS=1`, 3,2 s et 0,65 s. |
 
 L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié en privé sur GitHub : <https://github.com/electroman953/lion> (remote `origin`).
@@ -108,7 +108,8 @@ Principes :
   - `ffi.rs` : fonctions C ;
   - `testing.rs` : `test` et `expect` ;
   - `standard.rs` : `show`, `ask`, `exit`, etc. ;
-  - `names.rs` : résolution des noms.
+  - `names.rs` : résolution des noms ;
+  - `index.rs` : l'index des noms pour les éditeurs, rempli pendant la vérification et rendu même pour un programme avec des erreurs (C103).
 
 **`lion_ir`**
 - `lib.rs` : `Program`, `Function`, `Stmt`, `ExprKind`, `Builtin`, `Native`, `ForeignFunction`.
@@ -164,7 +165,7 @@ Principes :
 **`lion_cli`** :
 - `main.rs` : les commandes ;
 - `driver.rs` : le pipeline. `analyze` lit les modules par une fonction qu'on lui donne (le disque, ou les textes de l'éditeur), peut ne pas calculer les `compile`, et dit quel `use` a atteint chaque fichier ;
-- `lsp/` : `lion lsp` (C102). `mod.rs` : la boucle, les fichiers ouverts, quel programme vérifier pour chaque fichier, les diagnostics envoyés ; `rpc.rs` : les messages JSON-RPC et leurs en-têtes ; `convert.rs` : adresses `file:`, positions UTF-16, diagnostics ; `symbols.rs` : le plan d'un fichier, depuis son arbre syntaxique ; `tests.rs` : le serveur en mémoire ;
+- `lsp/` : `lion lsp` (C102, C103). `mod.rs` : la boucle, les fichiers ouverts, quel programme vérifier pour chaque fichier, les diagnostics envoyés, l'index gardé d'une vérification à l'autre ; `rpc.rs` : les messages JSON-RPC et leurs en-têtes ; `convert.rs` : adresses `file:`, positions UTF-16, diagnostics ; `symbols.rs` : le plan d'un fichier, depuis son arbre syntaxique ; `navigate.rs` : survol, définition, références et surlignage, depuis l'index (C103) ; `tests.rs` : le serveur en mémoire ;
 - `project.rs` : les projets et les paquets (C101) : `lion.toml`, `lion.lock`, versions, git, résolution, et les commandes `new`, `add`, `remove`, `update` ;
 - `native.rs` : `lion build`. Il écrit le runtime dans un cache, prépare un paquet cargo par exécutable, lance `cargo build --release --offline` et copie le binaire ;
 - `build.rs` : embarque dans `lion` les sources et les manifestes des crates du runtime (`FILES`, `HASH`) ;
@@ -330,11 +331,17 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
   - pas de registre central, ni de publication ;
   - une seule version d'un paquet par programme ;
   - un paquet de git ne peut pas dépendre d'un dossier local.
-- Serveur de langage (C102) :
-  - diagnostics, formatage et plan seulement : ni survol, ni définition, ni références, ni complétion ;
+- Serveur de langage (C102, C103) :
+  - diagnostics, formatage, plan, survol, définition, références et surlignage : ni renommage, ni complétion ;
   - les `compile` ne sont pas calculés : leurs bugs n'apparaissent qu'avec `lion check` ;
   - un fichier qui n'est ni ouvert ni atteint par un programme ouvert n'est pas vérifié ;
   - l'interner de types global ne se vide jamais : la mémoire croît lentement pendant une longue session.
+- Index des noms (C103) :
+  - le corps d'une fonction générique est vérifié une fois par instance (C1) : le survol montre les types de la première instance vérifiée, pas ceux de l'appel sous le curseur ;
+  - un nom que le vérificateur ne résout pas (mal orthographié, ou dans une expression qui a une erreur) n'est pas indexé : l'éditeur ne répond rien dessus ;
+  - une erreur de syntaxe arrête le vérificateur : l'éditeur répond alors avec les noms du dernier texte qui s'analysait, qui peuvent être en retard sur ce qui est à l'écran ;
+  - les déclarations de la bibliothèque standard sont montrées au survol, mais l'éditeur n'ouvre pas ses fichiers : « aller à la définition » n'y mène nulle part ;
+  - les noms de modules (`use text`, le `text` de `text.upper`) ne sont pas indexés, seulement ce qui les suit.
 - Mode compilé :
   - `lion build` demande une chaîne Rust sur la machine qui compile ;
   - la première compilation prépare le runtime dans le cache (`LION_CACHE`, `$XDG_CACHE_HOME/lion` ou `~/.cache/lion`), ce qui prend quelques secondes ;
@@ -346,7 +353,7 @@ Codes de sortie : 0 succès, 1 programme refusé, 2 bug à l'exécution, 64 lign
 
 Les huit étapes de la feuille de route sont atteintes. La suite dépend de ce que l'auteur veut privilégier :
 - **étendre `ui`** : Windows et macOS, touches mortes, défilement, styles, images ;
-- **l'outillage des éditeurs** : la suite de VS Code et de `lion lsp` (point 5 ci-dessous) ;
+- **l'outillage des éditeurs** : la suite de VS Code et de `lion lsp` — le renommage, puis la complétion (point 5 ci-dessous) ;
 - **les paquets** : un registre central et la publication, quand il y aura des paquets à partager ;
 - **la spec** : l'étape 1 de la feuille de route demande qu'elle n'ait plus de point ouvert bloquant. Les choix délégués (Dn, Cn) et les décisions de l'auteur de cette session pourraient y entrer.
 
@@ -360,15 +367,16 @@ Ce qui peut se faire sans nouvelle règle de langage :
 3. **Parallélisme** :
    - un verrou plus fin pour `shared synced` (C84).
 4. **Outils** : le débogueur pas à pas du §24.2 (D25).
-5. **VS Code et LSP** : `lion lsp` et l'extension donnent déjà diagnostics, formatage et plan (C102). La suite :
-   - faire produire par `lion_sema` un index (définitions, références, type de chaque nom) même pour un programme avec des erreurs, puisque l'IR n'existe que pour un programme valide ; tenir compte des versions des fonctions génériques (C1) et de la seconde vérification de C90 ; puis le survol, l'aller à la définition, les références et le renommage ;
-   - la complétion : noms visibles, membres d'un module après `.`, champs et méthodes d'une valeur ;
+5. **VS Code et LSP** : `lion lsp` et l'extension donnent diagnostics, formatage, plan (C102), survol, définition, références et surlignage, depuis l'index des noms du vérificateur (C103). La suite, dans cet ordre :
+   - **le renommage** : l'index donne déjà tous les usages d'une déclaration, donc `rename` est à portée. Ce qui reste à décider : ce qu'on fait d'un nouveau nom qui en cache un autre ou qui est déjà pris (§6.5) — le refuser avec un message, ou laisser le vérificateur le dire —, et `prepareRename`, pour que l'éditeur propose le bon nom de départ ;
+   - **la complétion** : noms visibles, membres d'un module après `.`, champs et méthodes d'une valeur. Elle demande plus que l'index : la liste des noms visibles à un endroit, que le vérificateur ne garde pas aujourd'hui ;
+   - indexer aussi les noms de modules (`use text`, le `text` de `text.upper`) ;
    - « Run test » au-dessus de chaque bloc `test` (CodeLens) ;
    - plus tard, un adaptateur de débogage (DAP), quand le débogueur du §24.2 existera.
 
 ## 10. Conventions de travail
 
-- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C103**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
+- La spec est la source de vérité. Une ambiguïté se tranche selon les règles de `docs/implementation-notes.md`, puis s'y consigne (Cn suivant : **C104**). Une construction non définie est refusée avec un diagnostic, jamais inventée en silence. L'auteur a délégué toutes les décisions (2026-09-26). Le 2026-09-27, il a précisé qu'on ne modifie pas la sémantique de Lion sans lui demander : les choix d'API et d'implémentation restent délégués et consignés, mais une règle nouvelle ou changée du langage se propose d'abord.
 - Travail par tranches verticales. Chaque tranche passe par : implémentation, tests golden et unitaires, `cargo build`, `clippy`, `fmt`, `test`, mise à jour du README, des notes et de `CHANGELOG.md`, puis un commit Conventional Commits, poussé sur le dépôt privé. Chaque message de commit se termine par :
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

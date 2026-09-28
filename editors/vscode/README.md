@@ -1,6 +1,6 @@
 # Lion pour VS Code
 
-L'extension du langage Lion : coloration, indentation des blocs, et, par `lion lsp`, le serveur de langage de la commande `lion`, les diagnostics, le formatage et le plan des fichiers.
+L'extension du langage Lion : coloration, indentation des blocs, et, par `lion lsp`, le serveur de langage de la commande `lion`, les diagnostics, le formatage, le plan des fichiers et la navigation dans les noms.
 
 ## Ce qu'elle fait
 
@@ -9,9 +9,13 @@ L'extension du langage Lion : coloration, indentation des blocs, et, par `lion l
 - **Diagnostics** pendant la frappe, les mêmes que `lion check`, avec leurs notes et leurs suggestions. Un module est vérifié avec le programme qui l'utilise : le `main.lion` du projet, ou le fichier ouvert qui l'atteint. Une erreur dans un module est aussi signalée au `use` qui l'atteint.
 - **Formatage** (`Format Document`, ou `editor.formatOnSave`) : celui de `lion fmt`. Un fichier avec une erreur de syntaxe n'est pas formaté.
 - **Plan** du fichier (vue « Outline », `Ctrl+Shift+O`) : fonctions, méthodes, structures et leurs champs, énumérations, unions, traits, constantes, variables et tests.
+- **Survol** (`Ctrl+K Ctrl+I`, ou la souris) : la déclaration du nom sous le curseur, avec ses types : `let total in Int`, `fun add(a in Int, b in Int) in Int`, `Student.grade in Float`.
+- **Aller à la définition** (`F12`) et **références** (`Shift+F12`), dans le fichier et dans les autres fichiers du programme. Le même nom est surligné là où il est écrit.
 - **Commandes** « Lion: Run the File » et « Lion: Run the Tests of the File » (bouton ▶ en haut de l'éditeur) : `lion run` ou `lion test` dans un terminal, depuis le dossier du fichier.
 
 Le serveur ne lance aucun code du programme : il ne calcule pas les `compile` (§21.1), dont les bugs n'apparaissent qu'avec `lion check` (C102).
+
+Pendant la frappe, une erreur de syntaxe arrête le vérificateur. Le survol, la définition et les références répondent alors avec les noms du dernier texte qui s'analysait (C103).
 
 ## Installer
 
