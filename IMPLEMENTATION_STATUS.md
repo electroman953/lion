@@ -16,7 +16,7 @@ Mis à jour le 2026-09-28 : les huit étapes de la feuille de route sont atteint
 | `cargo clippy --all-targets` | 0 avertissement |
 | `cargo fmt --check` | OK |
 | `cargo test` (tout le workspace) | OK : 181 tests unitaires, 200 programmes golden, les 97 programmes de `tests/runtime`, `tests/integration` et `tests/programs` compilés en natif avec les mêmes sorties, et `lion lsp` lancé comme par un éditeur |
-| Extension VS Code (`editors/vscode`) | `npm test` : 3 tests de la coloration par le moteur TextMate de VS Code. `npm run e2e` (diagnostics, plan, formatage, survol, définition, références, correction pendant la frappe, indentation) : **non relancé le 2026-09-28**, la machine de cette session ne peut pas télécharger VS Code ; les mêmes réponses sont vérifiées par les tests du serveur en mémoire |
+| Extension VS Code (`editors/vscode`) | `npm test` : 3 tests de la coloration par le moteur TextMate de VS Code. `npm run e2e` : l'extension dans VS Code 1.129, avec diagnostics, plan, formatage, survol, définition, références, correction pendant la frappe et indentation (relancé le 2026-09-28 sur la machine de l'auteur) |
 | Programmes du §27 de la spec | Les trois tournent sans modification, dans les deux modes : 27.1 (CSV, structures), 27.2 (hasard, parallèle, ensembles) et 27.3 (application graphique, `tests/programs/notes_app`, sans écran avec un fichier d'événements) ; Sur 12 cœurs, 27.2 prend 0,67 s interprété (`--release`) et 0,19 s compilé ; avec `LION_THREADS=1`, 3,2 s et 0,65 s. |
 
 L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié en privé sur GitHub : <https://github.com/electroman953/lion> (remote `origin`).
