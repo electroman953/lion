@@ -338,6 +338,21 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             Err(message) => error(message),
         },
         Native::JsonOf => new_text(to_json(&args[0])?.to_string()),
+        // `at `name`: …` with the step before: `at `items[2].name`: …` (C107).
+        Native::JsonNest => {
+            let (step, message) = (text(0), text(1));
+            let joined = |inner: &str| {
+                if step.starts_with('[') || inner.starts_with('[') {
+                    format!("{step}{inner}")
+                } else {
+                    format!("{step}.{inner}")
+                }
+            };
+            new_text(match message.strip_prefix("at `").and_then(|rest| rest.split_once("`: ")) {
+                Some((inner, rest)) => format!("at `{}`: {rest}", joined(inner)),
+                None => format!("at `{step}`: {message}"),
+            })
+        }
         Native::JsonPretty => new_text(json::cached(text(0), Json::pretty)),
         Native::JsonKind => new_text(json::cached(text(0), |v| v.kind().to_string())),
         Native::JsonMember => json_part(json::cached(text(0), |v| v.member(text(1)).map(Json::to_string))),

@@ -1,0 +1,6 @@
+// What a json.Value cannot be read as (C107).
+use json
+let v = json.null()
+show(v as Set of Int)
+show(v as Map of (Int, Text))
+show(v as fun(Int) in Int)

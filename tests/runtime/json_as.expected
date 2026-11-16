@@ -1,0 +1,17 @@
+exit: 0
+----- stdout
+User(name: "Léa", age: 12, score: 9.0, admin: false, role: guest, tags: [Tag(name: "a")], nick: none, city: "Paris")
+error("at `age`: the value is a text, not an Int")
+error("at `tags[2]`: there is no member `name`")
+error("at `role`: `chef` is not a value of Role")
+Node(label: "r", children: [Node(label: "a", children: [])])
+[1, 2, 3]
+error("at `[2]`: \"2.5\" is not an Int: it is not a whole number")
+{"a": 1, "b": 2}
+none
+x
+Value(source: "true")
+a
+error("invalid Positive: age = -3 does not satisfy age >= 0")
+Positive(age: 3)
+----- stderr

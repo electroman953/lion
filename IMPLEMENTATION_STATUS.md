@@ -3,7 +3,7 @@
 Mis à jour le 2026-09-28 : les huit étapes de la feuille de route sont atteintes, avec le compilateur natif (5), le parallélisme sur plusieurs cœurs (6), la bibliothèque graphique `ui` (7) et le gestionnaire de paquets (8). Le 2026-11-16, les modules `net` et `system` rendent Lion utile pour les scripts d'automatisation et les micro-serveurs (C104), et `html`, `regex`, `url`, `base64`, `hash`, le JSON de toute forme et les sessions pour le scraping (C105), puis les routes, les fichiers, `serve_parallel`, `term` et les outils de scripts (C106). Depuis l'étape 8, VS Code connaît Lion par le serveur de langage `lion lsp` (C102), qui donne aussi le survol, l'aller à la définition et les références, grâce à l'index des noms du vérificateur (C103). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète ces documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C106) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C107) ;
 - [`docs/design/ui.md`](docs/design/ui.md) et [`docs/design/packages.md`](docs/design/packages.md) : les conceptions de `ui` et des paquets, validées par l'auteur et implémentées (C98, C101) ;
 - [`README.md`](README.md) : la présentation et l'usage ;
 - [`CHANGELOG.md`](CHANGELOG.md) : l'historique des modifications, session par session.
@@ -241,7 +241,7 @@ Chacun de ces cas donne une erreur « not implemented yet » ou un refus explici
 | --- | --- |
 | Types comme valeurs (`let t = Int`) | §7.1 |
 | Lire un élément de n-uplet : la spec ne dit pas comment (C53) | §16 |
-| Conversion d'un JSON en structure Lion (demande des types comme valeurs) ; données binaires en mémoire (pas de type pour des octets) | C106 |
+| Données binaires en mémoire (pas de type pour des octets) | C106 |
 | `ui` sur Windows et macOS, touches mortes, défilement, styles, images, écrans à haute densité | C98 |
 | Heures d'une journée, fuseaux horaires, ajout de mois dans `dates` | C89 |
 | Écriture littérale d'une Map, que la spec laisse ouverte (§29) | C79 |

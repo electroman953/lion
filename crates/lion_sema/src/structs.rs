@@ -938,3 +938,33 @@ fn names_in(expr: &ast::Expr, names: &mut Vec<String>) {
         }
     }
 }
+
+impl Checker<'_> {
+    /// Whether the field at `position` is `private` (D10).
+    pub(crate) fn field_is_private(&self, index: usize, position: usize) -> bool {
+        self.structs[index].fields[position].private
+    }
+
+    /// The default value of the field at `position`, if it has one.
+    pub(crate) fn field_default(&self, index: usize, position: usize, span: Span) -> Option<ir::Expr> {
+        let field = &self.structs[index].fields[position];
+        let default = field.default.as_ref().filter(|_| field.has_default)?;
+        Some(self.const_expr(default, field.ty?, span))
+    }
+
+    /// The value of the structure from the values of all its fields: `S`, or `S or Error`
+    /// when its conditions are checked at run time (§12.3).
+    pub(crate) fn build_struct(&mut self, index: usize, values: Vec<ir::Expr>, span: Span) -> ir::Expr {
+        let id = self.structs[index].id;
+        let ty = Type::Struct(id);
+        match self.structs[index].constructor {
+            None => typed(ir::ExprKind::Struct { structure: id, fields: values }, ty, span),
+            Some(constructor) => {
+                self.calls_synthetic(constructor, span);
+                let args = values.into_iter().map(ir::Arg::Value).collect();
+                let call = ir::ExprKind::Call { function: ir::FunctionId(constructor as u32), args };
+                typed(call, Type::union([ty, Type::Error]), span)
+            }
+        }
+    }
+}

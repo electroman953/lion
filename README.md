@@ -140,6 +140,14 @@ for p in page.select("li.produit"):
 let api = try (try net.get("https://api.github.com/repos/rust-lang/rust")).json()
 show(try (try api.path("owner.login")).text())
 show(json.object().with("nom", json.from("Léa")).with("notes", json.from([12, 15])).pretty())
+
+struct Repo:
+    full_name in Text
+    stargazers_count in Int
+    topics in List of Text = []
+;
+let repo = try api as Repo                         // Repo or Error, qui dit où et pourquoi
+show("{repo.full_name} : {repo.stargazers_count} étoiles")
 ```
 
 Dans un motif écrit en Lion, `\` s'écrit `\\` et les accolades `\{ \}`, puisque `{…}` insère une valeur. Le test `tests/integration/scrape.lion` montre un scraping complet : connexion avec cookie, page lue, prix extraits, liens rendus absolus, API JSON et fichier CSV.

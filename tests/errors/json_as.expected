@@ -1,0 +1,28 @@
+exit: 1
+----- stdout
+----- stderr
+error: cannot read a json.Value as a Set of Int
+  --> tests/errors/json_as.lion:4:6
+   |
+ 4 | show(v as Set of Int)
+   |      ^^^^^^^^^^^^^^^ JSON has no form for a Set of Int
+   |
+   = a json.Value reads as Text, Int, Float, Bool, `none`, a List, a Map of (Text, …), a structure, an enumeration, or a union of them (C107)
+
+error: cannot read a json.Value as a Map of (Int, Text)
+  --> tests/errors/json_as.lion:5:6
+   |
+ 5 | show(v as Map of (Int, Text))
+   |      ^^^^^^^^^^^^^^^^^^^^^^^ the keys of a JSON object are Texts, not an Int
+   |
+   = a json.Value reads as Text, Int, Float, Bool, `none`, a List, a Map of (Text, …), a structure, an enumeration, or a union of them (C107)
+
+error: cannot read a json.Value as a fun(Int) in Int
+  --> tests/errors/json_as.lion:6:6
+   |
+ 6 | show(v as fun(Int) in Int)
+   |      ^^^^^^^^^^^^^^^^^^^^ JSON has no form for a fun(Int) in Int
+   |
+   = a json.Value reads as Text, Int, Float, Bool, `none`, a List, a Map of (Text, …), a structure, an enumeration, or a union of them (C107)
+
+3 errors found

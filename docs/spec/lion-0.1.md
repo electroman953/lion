@@ -329,6 +329,7 @@ Les entiers sont fixes et rapides, mais un débordement arrête toujours le prog
 | Rational → Float | `r as Float`, ou automatique dans un calcul mixte | Float |
 | Texte → nombre | `"12" as Int` | `Int or Error` : l'erreur dit pourquoi \[D14\] |
 | Nombre → texte | `12 as Text` | `"12"` |
+| `json.Value` → type de Lion | `v as User`, `v as List of Int` | `User or Error` : l'erreur dit où et pourquoi la valeur ne convient pas \[C107\] |
 
 `floor`, `ceil` et `round` sont dans la bibliothèque standard pour les autres arrondis.
 

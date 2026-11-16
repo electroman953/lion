@@ -1091,6 +1091,13 @@ impl Checker<'_> {
         };
         let (value, target) = (value?, target?);
         let value = self.within_try(value);
+        // `v as User`: a json.Value read as a value of Lion (C107).
+        if let Type::Struct(from) = value.ty
+            && Some(from) == self.json_value_type()
+            && target != value.ty
+        {
+            return self.json_as(value, target, span);
+        }
         let conversion = match (value.ty, target) {
             (from, to) if from == to => return Some(ir::Expr { span, ..value }),
             (from, to) if from.is_subset_of(to) => return Some(ir::Expr { span, ..value }),

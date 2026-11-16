@@ -23,6 +23,7 @@ mod functions;
 mod generic_structs;
 mod generic_traits;
 mod index;
+mod json_as;
 mod matching;
 mod methods;
 mod modules;
@@ -276,6 +277,8 @@ struct Checker<'a> {
     /// The methods of `List`, `Set` and `Map`, by kind and name (C97).
     collection_methods: HashMap<(&'static str, String), Vec<usize>>,
     structs: Vec<StructInfo<'a>>,
+    /// The functions `json.Value as T`, by `T` (C107).
+    json_converters: HashMap<Type, usize>,
     /// The structures with type parameters, whose instances are in `structs` (§15.1).
     generic_structs: Vec<crate::generic_structs::GenericStruct<'a>>,
     generic_traits: Vec<crate::generic_traits::GenericTrait<'a>>,
@@ -359,6 +362,7 @@ impl<'a> Checker<'a> {
             methods: HashMap::new(),
             collection_methods: HashMap::new(),
             structs: Vec::new(),
+            json_converters: HashMap::new(),
             generic_structs: Vec::new(),
             generic_traits: Vec::new(),
             pending_constraints: Vec::new(),

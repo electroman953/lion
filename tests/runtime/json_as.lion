@@ -1,0 +1,46 @@
+// `v as T` for a json.Value (C107): a value of Lion, or an Error that says where.
+use json
+
+Role = {admin, guest}
+struct Tag:
+    name in Text
+;
+struct User:
+    name in Text
+    age in Int, age >= 0
+    score in Float
+    admin in Bool
+    role in Role
+    tags in List of Tag
+    nick in maybe Text
+    city in Text = "Paris"
+;
+struct Node:
+    label in Text
+    children in List of Node
+;
+
+let ok = try json.decode("\{\"name\": \"Léa\", \"age\": 12, \"score\": 9, \"admin\": false, \"role\": \"guest\", \"tags\": [\{\"name\": \"a\"\}], \"extra\": 1\}")
+show(ok as User)
+let bad_age = try json.decode("\{\"name\": \"Léa\", \"age\": \"douze\", \"score\": 9, \"admin\": false, \"role\": \"guest\", \"tags\": []\}")
+show(bad_age as User)
+let deep = try json.decode("\{\"name\": \"Léa\", \"age\": 1, \"score\": 9, \"admin\": false, \"role\": \"guest\", \"tags\": [\{\"name\": \"a\"\}, \{\"nom\": 2\}]\}")
+show(deep as User)
+let neg = try json.decode("\{\"name\": \"Léa\", \"age\": -1, \"score\": 9, \"admin\": false, \"role\": \"chef\", \"tags\": []\}")
+show(neg as User)
+let tree = try json.decode("\{\"label\": \"r\", \"children\": [\{\"label\": \"a\", \"children\": []\}]\}")
+show(tree as Node)
+show((try json.decode("[1, 2, 3]")) as List of Int)
+show((try json.decode("[1, 2.5]")) as List of Int)
+let m = (try json.decode("\{\"a\": 1, \"b\": 2\}")) as Map of (Text, Int)
+show(m)
+show((try json.decode("null")) as maybe Int)
+show((try json.decode("\"x\"")) as Int or Text)
+show((try json.decode("true")) as json.Value)
+let u = try ok as User
+show(u.tags[1].name)
+struct Positive:
+    age in Int, age >= 0
+;
+show((try json.decode("\{\"age\": -3\}")) as Positive)
+show((try json.decode("\{\"age\": 3\}")) as Positive)
