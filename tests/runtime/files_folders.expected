@@ -1,0 +1,12 @@
+exit: 0
+----- stdout
+true
+["one", "two"]
+["b", "log.txt"]
+["copy.txt", "deep", "moved.txt"]
+false
+error("cannot remove `target/tmp/files_folders/b`: the folder is not empty")
+false
+error("cannot list `target/tmp/files_folders/absent`: the folder does not exist")
+error("cannot copy `target/tmp/files_folders/absent.txt` to `target/tmp/files_folders/x.txt`: the file does not exist")
+----- stderr

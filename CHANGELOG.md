@@ -2,6 +2,21 @@
 
 Les décisions détaillées sont dans [docs/implementation-notes.md](docs/implementation-notes.md) (Rn, In, Cn). Ce qui reste à faire est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) (§5, §8 et §9). Chaque ligne correspond à un commit du dépôt.
 
+## 2026-11-16, sixième session : scripts et micro-serveurs
+
+**Ajouté**
+- Le module `net` (C104) : requêtes web (`net.get`, `net.post`, `net.request`, `net.download`),
+  HTTPS compris, par la commande `curl` ; micro-serveurs HTTP (`net.serve(port, handle)`, ou
+  `net.listen`, `server.next()` et `r.respond(...)` pas à pas), avec `r.query`, `r.form`,
+  `r.header` et les réponses `net.plain`, `net.html`, `net.json`, `net.redirect`.
+- Le module `system` (C104) : `system.args()`, `system.env(nom)`, `system.run(programme, arguments)`
+  et `system.shell(ligne)`. `lion run f.lion a b` donne `a` et `b` au programme.
+- `files` : `append`, `list`, `is_folder`, `make_folder`, `remove`, `copy`, `move`.
+
+**Corrigé**
+- La valeur par défaut d'un paramètre se vérifie avec le type écrit du paramètre :
+  `headers in List of Header = []` est accepté.
+
 ## 2026-09-28, cinquième session : les noms dans l'éditeur
 
 **Ajouté**

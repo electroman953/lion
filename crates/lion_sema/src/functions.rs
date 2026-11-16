@@ -1111,7 +1111,13 @@ impl<'a> Checker<'a> {
             let needed = !generic || position >= arg_types.len();
             let written = position.checked_sub(offset).map(|position| &decl.params[position]);
             if let (true, Some(default)) = (needed, written.and_then(|param| param.default.as_ref())) {
-                match self.expr(default) {
+                // A default value takes the declared type of its parameter, so that
+                // `headers in List of Header = []` is known.
+                let checked = match self.ctx.locals[id.index()].ty {
+                    Some(declared) => self.expr_expecting(default, declared),
+                    None => self.expr(default),
+                };
+                match checked {
                     Some(value) => {
                         let expected = self.ctx.locals[id.index()].ty.unwrap_or(value.ty);
                         self.ctx.locals[id.index()].ty = Some(expected);

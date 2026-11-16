@@ -1,0 +1,12 @@
+exit: 0
+----- stdout
+[]
+none
+true
+0 true [two words *
+]
+4 false [NOIL
+] [done
+]
+error("cannot run `lion-no-such-program`: the program does not exist")
+----- stderr

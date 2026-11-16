@@ -12,7 +12,8 @@ use driver::exit;
 
 const USAGE: &str = "\
 usage:
-  lion run <file.lion>             check a program, then run it (interpreted mode)
+  lion run <file.lion> [args…]     check a program, then run it (interpreted mode); the
+                                   words after the file are given to `system.args()`
   lion check <file.lion>           check a program without running it
   lion build <file.lion> [-o <executable>]
                                    compile a program to native code (compiled mode)
@@ -66,7 +67,11 @@ fn dispatch(args: &[String]) -> ExitCode {
             println!("lion {} (language specification 0.1)", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        ["run", file] => driver::run(file),
+        ["run", file, rest @ ..] => {
+            // The words after the file are the program's (`system.args`).
+            lion_vm::natives::set_program_args(rest.iter().map(|word| word.to_string()).collect());
+            driver::run(file)
+        }
         ["check", file] => driver::check(file),
         ["run"] => with_main(driver::run),
         ["check"] => with_main(driver::check),

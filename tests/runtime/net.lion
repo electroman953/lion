@@ -1,0 +1,52 @@
+// The module `net` (C104): a server on a free port, and requests made by tasks.
+use net
+
+let server = try net.listen(0)
+let base = "http://127.0.0.1:{server.port()}"
+
+// Answers one request as a small site would.
+fun answer(r in net.Request) in net.Response:
+    if r.path == "/hello": return net.plain("Bonjour {r.query("name")}") ;
+    if r.path == "/form" and r.method == "POST":
+        return net.json("\{\"name\": \"{r.form("name")}\", \"type\": \"{r.header("CONTENT-TYPE")}\"\}", 201)
+    ;
+    if r.path == "/old": return net.redirect("/hello?name=moved") ;
+    return net.plain("no page at {r.path}", 404)
+;
+
+// Serves `count` requests, and shows what each asked.
+fun serve_some(count in Int) in None or Error:
+    for i in 1..count:
+        let r = try server.next()
+        show("{r.method} {r.path} {r.body}")
+        try r.respond(answer(r))
+    ;
+    return none
+;
+
+let hello = task net.get("{base}/hello?name=L%C3%A9a%20M")
+try serve_some(1)
+let a = try wait hello
+show("{a.status} {a.ok()} {a.body} | {a.header("content-type")}")
+
+let form = task net.post("{base}/form", "name={net.encode("Léa & Max")}")
+try serve_some(1)
+let b = try wait form
+show("{b.status} {b.ok()} {b.body}")
+
+let missing = task net.request("DELETE", "{base}/a%2Fb", [net.Header("X-Token", "secret")], "")
+try serve_some(1)
+let c = try wait missing
+show("{c.status} {c.ok()} {c.body}")
+
+// A redirection is followed: two requests reach the server.
+let moved = task net.get("{base}/old")
+try serve_some(2)
+let d = try wait moved
+show("{d.status} {d.body}")
+
+show(net.encode("a b/é?&=~"))
+show(net.get("ftp://example.com"))
+show(net.request("get", base, [], ""))
+show(net.get(base, [net.Header("Bad Name", "x")]))
+show(net.listen(70000))

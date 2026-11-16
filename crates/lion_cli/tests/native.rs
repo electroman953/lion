@@ -46,7 +46,9 @@ fn compiled_programs_behave_as_interpreted() {
         }
     }
     main.push_str(&format!(
-        "\nfn main() -> std::process::ExitCode {{\n    match std::env::args().nth(1).as_deref() {{\n{dispatch}        \
+        "\nfn main() -> std::process::ExitCode {{\n    // The number of the program is not one of its arguments.\n    \
+         lion_native::natives::set_program_args(std::env::args().skip(2).collect());\n    \
+         match std::env::args().nth(1).as_deref() {{\n{dispatch}        \
          _ => std::process::ExitCode::from(64),\n    }}\n}}\n"
     ));
     write_if_changed(&suite.join("src").join("main.rs"), &main);

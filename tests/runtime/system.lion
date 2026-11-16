@@ -1,0 +1,14 @@
+// The module `system` (C104): arguments, environment, and other programs.
+use system
+
+show(system.args())
+show(system.env("LION_SURELY_NOT_SET"))
+show(system.env("PATH") != none)
+
+let echo = try system.run("echo", ["two words", "*"])
+show("{echo.code} {echo.ok()} [{echo.output}]")
+
+let piped = try system.shell("tr a-z A-Z | rev; echo done >&2; exit 4", "lion\n")
+show("{piped.code} {piped.ok()} [{piped.output}] [{piped.errors}]")
+
+show(system.run("lion-no-such-program", []))

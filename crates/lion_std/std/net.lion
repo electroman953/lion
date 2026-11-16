@@ -1,0 +1,178 @@
+// The network (§23, C104): web requests, and small HTTP servers.
+//
+// Requests go through the program `curl`, which brings HTTPS. A server answers one
+// request at a time; each `Response` closes its connection.
+
+use text
+
+// A header of a request or of a response: `Content-Type: text/html`.
+struct Header:
+    name in Text
+    value in Text
+;
+
+// An answer: its status (200, 404…), its headers and its body.
+struct Response:
+    status in Int
+    body in Text
+    headers in List of Header
+;
+
+// A request received by a server. `path` is decoded (`/a%20b` gives `/a b`), without
+// what follows `?`.
+struct Request:
+    method in Text
+    path in Text
+    body in Text
+    headers in List of Header
+    private query_text in Text
+    private connection in Int
+;
+
+// ---------------------------------------------------------------- requests
+
+// Asks for the page at `url`. Any status gives a `Response`, 404 too; an address that
+// cannot be reached gives an Error.
+fun get(url in Text, headers in List of Header = [], timeout = 30.0) in Response or Error:
+    return request("GET", url, headers, "", timeout)
+;
+
+// Sends `body` to `url`, as a form unless a `Content-Type` header says otherwise.
+fun post(url in Text, body in Text, headers in List of Header = [], timeout = 30.0) in Response or Error:
+    return request("POST", url, headers, body, timeout)
+;
+
+// Any request: `method` is GET, POST, PUT, PATCH, DELETE…
+fun request(method in Text, url in Text, headers in List of Header, body in Text, timeout = 30.0) in Response or Error:
+    let answer = try fetch(method, url, flat(headers), body, timeout)
+    return Response(number(answer[1]), answer[2], unflat(answer[3..answer.size]))
+;
+
+// Saves what `url` gives in the file `path`, images too. A status from 400 up is an
+// Error.
+fun download(url in Text, path in Text, timeout = 300.0) in None or Error:
+    return save(url, path, timeout)
+;
+
+// The value of the header `name` of the answer, whatever its case, or `none`.
+fun Response.header(name in Text) in maybe Text = find_header(self.headers, name)
+
+// Whether the status says success: from 200 to 299.
+fun Response.ok() in Bool = 200 <= self.status <= 299
+
+// `t` written so that it fits in an address: `net.encode("a b/é")` gives
+// `a%20b%2F%C3%A9`.
+foreign "lion" fun encode(t in Text) in Text
+
+// ---------------------------------------------------------------- servers
+
+// Answers every request with `handle`, forever, on `port` of this computer only. With
+// `host = "0.0.0.0"`, other computers reach it too. A handler that gives an Error
+// answers 500 with its message. Gives an Error only when the port cannot be used.
+fun serve(port in Int, handle in fun(Request) in Response or Error, host = "127.0.0.1") in None or Error:
+    let server = try listen(port, host)
+    while true:
+        let r = try server.next()
+        let answer = match handle(r):
+            in Response a then a
+            in Error e then plain(e.message(), 500)
+        ;
+        // A client that leaves before its answer does not stop the server.
+        let sent = r.respond(answer)
+    ;
+    return none
+;
+
+// A server that waits for requests, to answer them one by one with `next` and
+// `respond`; `serve` does both.
+struct Server:
+    private id in Int
+;
+
+// Starts listening on `port`; port 0 lets the system choose a free one.
+fun listen(port in Int, host = "127.0.0.1") in Server or Error:
+    let id = try listen_on(host, port)
+    return Server(id)
+;
+
+// The port on which the server listens.
+fun Server.port() in Int = server_port(self.id)
+
+// Waits for the next request.
+fun Server.next() in Request or Error:
+    let r = try accept(self.id)
+    return Request(r[2], r[3], r[5], unflat(r[6..r.size]), r[4], number(r[1]))
+;
+
+// Answers the request; a request has one answer.
+fun Request.respond(answer in Response) in None or Error:
+    return reply(self.connection, answer.status, flat(answer.headers), answer.body)
+;
+
+// The value of the header `name`, whatever its case, or `none`.
+fun Request.header(name in Text) in maybe Text = find_header(self.headers, name)
+
+// The value of the parameter `name` of the address (`/search?q=lion`), decoded, or
+// `none`.
+fun Request.query(name in Text) in maybe Text = find_pair(pairs(self.query_text), name)
+
+// The value of the field `name` of a form sent by POST, decoded, or `none`.
+fun Request.form(name in Text) in maybe Text = find_pair(pairs(self.body), name)
+
+// An answer in plain text.
+fun plain(body in Text, status = 200) in Response = Response(status, body, [Header("Content-Type", "text/plain; charset=utf-8")])
+
+// An answer in HTML.
+fun html(body in Text, status = 200) in Response = Response(status, body, [Header("Content-Type", "text/html; charset=utf-8")])
+
+// An answer that is JSON text.
+fun json(body in Text, status = 200) in Response = Response(status, body, [Header("Content-Type", "application/json")])
+
+// An answer that sends the client to `location`.
+fun redirect(location in Text, status = 303) in Response = Response(status, "", [Header("Location", location)])
+
+// ---------------------------------------------------------------- inside
+
+private foreign "lion" fun fetch(method in Text, url in Text, headers in List of Text, body in Text, timeout in Float) in List of Text or Error
+private foreign "lion" fun save(url in Text, path in Text, timeout in Float) in None or Error
+private foreign "lion" fun listen_on(host in Text, port in Int) in Int or Error
+private foreign "lion" fun server_port(server in Int) in Int
+// The connection, the method, the path, the query, the body, then the names and values
+// of the headers.
+private foreign "lion" fun accept(server in Int) in List of Text or Error
+private foreign "lion" fun reply(connection in Int, status in Int, headers in List of Text, body in Text) in None or Error
+// The names and the values of a query or a form, decoded.
+private foreign "lion" fun pairs(t in Text) in List of Text
+
+private fun flat(headers in List of Header) in List of Text:
+    var out = [] in List of Text
+    for h in headers:
+        out.add(h.name)
+        out.add(h.value)
+    ;
+    return out
+;
+
+private fun unflat(words in List of Text) in List of Header = [Header(words[2 * i - 1], words[2 * i]), i in 1..words.size div 2]
+
+private fun find_header(headers in List of Header, name in Text) in maybe Text:
+    let wanted = text.lower(name)
+    for h in headers:
+        if text.lower(h.name) == wanted: return h.value ;
+    ;
+    return none
+;
+
+private fun find_pair(words in List of Text, name in Text) in maybe Text:
+    for i in 1..words.size div 2:
+        if words[2 * i - 1] == name: return words[2 * i] ;
+    ;
+    return none
+;
+
+private fun number(t in Text) in Int:
+    return match t as Int:
+        in Int n then n
+        otherwise then 0
+    ;
+;

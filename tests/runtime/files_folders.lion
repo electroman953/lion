@@ -1,0 +1,28 @@
+// Folders and files (§23, C104), in a folder of the build.
+use files
+
+let root = "target/tmp/files_folders"
+if files.is_folder(root):
+    for name in try files.list(root):
+        if files.is_folder("{root}/{name}"):
+            for inner in try files.list("{root}/{name}"): try files.remove("{root}/{name}/{inner}") ;
+        ;
+        try files.remove("{root}/{name}")
+    ;
+;
+try files.make_folder("{root}/b/deep")
+show(files.is_folder("{root}/b/deep"))
+try files.write("{root}/log.txt", "one\n")
+try files.append("{root}/log.txt", "two\n")
+try files.append("{root}/new.txt", "made by append\n")
+show(try files.lines("{root}/log.txt"))
+try files.copy("{root}/log.txt", "{root}/b/copy.txt")
+try files.move("{root}/new.txt", "{root}/b/moved.txt")
+show(try files.list(root))
+show(try files.list("{root}/b"))
+show(files.is_folder("{root}/log.txt"))
+show(files.remove("{root}/b"))
+try files.remove("{root}/b/deep")
+show(files.exists("{root}/b/deep"))
+show(files.list("{root}/absent"))
+show(files.copy("{root}/absent.txt", "{root}/x.txt"))

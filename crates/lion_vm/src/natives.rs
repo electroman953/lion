@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lion_ir::Native;
 use lion_runtime::BugKind;
-use lion_runtime::stdlib;
+use lion_runtime::{net, stdlib};
 
 use crate::value::Value;
 
@@ -43,6 +43,119 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             Err(problem) => error(format!("cannot write `{}`: {}", text(0), describe(&problem))),
         },
         Native::FilesExists => Value::Bool(std::path::Path::new(text(0)).exists()),
+        Native::FilesAppend => {
+            let appended = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(text(0))
+                .and_then(|mut file| std::io::Write::write_all(&mut file, text(1).as_bytes()));
+            match appended {
+                Ok(()) => Value::None,
+                Err(problem) => error(format!("cannot write `{}`: {}", text(0), describe(&problem))),
+            }
+        }
+        Native::FilesList => {
+            let names: std::io::Result<Vec<String>> = std::fs::read_dir(text(0)).and_then(|entries| {
+                entries
+                    .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+                    .collect()
+            });
+            match names {
+                Ok(mut names) => {
+                    names.sort();
+                    texts(names)
+                }
+                Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => {
+                    error(format!("cannot list `{}`: the folder does not exist", text(0)))
+                }
+                Err(problem) => error(format!("cannot list `{}`: {}", text(0), describe(&problem))),
+            }
+        }
+        Native::FilesIsFolder => Value::Bool(std::path::Path::new(text(0)).is_dir()),
+        Native::FilesMakeFolder => match std::fs::create_dir_all(text(0)) {
+            Ok(()) => Value::None,
+            Err(problem) => error(format!("cannot create the folder `{}`: {}", text(0), describe(&problem))),
+        },
+        Native::FilesRemove => {
+            let path = std::path::Path::new(text(0));
+            let removed = if path.is_dir() { std::fs::remove_dir(path) } else { std::fs::remove_file(path) };
+            match removed {
+                Ok(()) => Value::None,
+                Err(problem) if problem.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+                    error(format!("cannot remove `{}`: the folder is not empty", text(0)))
+                }
+                Err(problem) => error(format!("cannot remove `{}`: {}", text(0), describe(&problem))),
+            }
+        }
+        Native::FilesCopy => match std::fs::copy(text(0), text(1)) {
+            Ok(_) => Value::None,
+            Err(problem) => {
+                error(format!("cannot copy `{}` to `{}`: {}", text(0), text(1), describe(&problem)))
+            }
+        },
+        Native::FilesMove => match std::fs::rename(text(0), text(1)) {
+            Ok(()) => Value::None,
+            Err(problem) => {
+                error(format!("cannot move `{}` to `{}`: {}", text(0), text(1), describe(&problem)))
+            }
+        },
+        Native::SystemArgs => texts(program_args().to_vec()),
+        Native::SystemEnv => std::env::var(text(0)).map_or(Value::None, new_text),
+        Native::SystemExecute => {
+            let arguments = text_list(&args[1]);
+            match execute(text(0), &arguments, text(2)) {
+                Ok(words) => texts(words),
+                Err(message) => error(message),
+            }
+        }
+        Native::SystemWindows => Value::Bool(cfg!(windows)),
+        Native::NetFetch => {
+            let headers = pairs_of(&text_list(&args[2]));
+            match net::fetch(text(0), text(1), &headers, text(3), float(4)) {
+                Ok(response) => {
+                    let mut words = vec![response.status.to_string(), response.body];
+                    flatten(response.headers, &mut words);
+                    texts(words)
+                }
+                Err(message) => error(message),
+            }
+        }
+        Native::NetSave => match net::download(text(0), text(1), float(2)) {
+            Ok(()) => Value::None,
+            Err(message) => error(message),
+        },
+        Native::NetListen => match net::listen(text(0), int(1)) {
+            Ok(server) => Value::Int(server),
+            Err(message) => error(message),
+        },
+        Native::NetPort => Value::Int(net::port(int(0))),
+        Native::NetAccept => match net::accept(int(0)) {
+            Ok(request) => {
+                let mut words = vec![
+                    request.connection.to_string(),
+                    request.method,
+                    request.path,
+                    request.query,
+                    request.body,
+                ];
+                flatten(request.headers, &mut words);
+                texts(words)
+            }
+            Err(message) => error(message),
+        },
+        Native::NetReply => {
+            let headers = pairs_of(&text_list(&args[2]));
+            match net::respond(int(0), int(1), &headers, text(3)) {
+                Ok(()) => Value::None,
+                Err(message) => error(message),
+            }
+        }
+        Native::NetPairs => {
+            let mut words = Vec::new();
+            flatten(net::form_pairs(text(0)), &mut words);
+            texts(words)
+        }
+        Native::NetEncode => new_text(net::encode(text(0))),
         Native::TextSplit => {
             if text(1).is_empty() {
                 return Err(BugKind::InvalidArgument {
@@ -204,6 +317,68 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             Value::Int((seconds + local_offset(seconds)).div_euclid(86_400))
         }
     })
+}
+
+/// The words written after the program. `lion run` gives those after the file; a
+/// compiled program, those after its name.
+pub fn set_program_args(args: Vec<String>) {
+    let _ = PROGRAM_ARGS.set(args);
+}
+
+static PROGRAM_ARGS: OnceLock<Vec<String>> = OnceLock::new();
+
+fn program_args() -> &'static [String] {
+    PROGRAM_ARGS.get_or_init(|| std::env::args().skip(1).collect())
+}
+
+/// Runs `program` and gives its exit code, its output and its errors.
+fn execute(program: &str, arguments: &[String], input: &str) -> Result<Vec<String>, String> {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(program)
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|problem| match problem.kind() {
+            std::io::ErrorKind::NotFound => format!("cannot run `{program}`: the program does not exist"),
+            _ => format!("cannot run `{program}`: {}", describe(&problem)),
+        })?;
+    let mut stdin = child.stdin.take().expect("piped");
+    let input = input.to_string();
+    // Written from another thread: a program that writes much before reading would
+    // otherwise wait for us while we wait for it.
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(input.as_bytes());
+    });
+    let output = child.wait_with_output().map_err(|problem| format!("cannot run `{program}`: {problem}"))?;
+    let _ = writer.join();
+    // A program stopped by a signal has no code: -1.
+    let code = output.status.code().unwrap_or(-1);
+    Ok(vec![
+        code.to_string(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    ])
+}
+
+/// The Texts of a `List of Text`.
+fn text_list(value: &Value) -> Vec<String> {
+    let Value::List(items) = value else { panic!("a native function expected a List of Text") };
+    items.iter().map(Value::to_text).collect()
+}
+
+/// `[name, value, name, value…]` as pairs.
+fn pairs_of(words: &[String]) -> Vec<(String, String)> {
+    words.as_chunks::<2>().0.iter().map(|[name, value]| (name.clone(), value.clone())).collect()
+}
+
+fn flatten(pairs: Vec<(String, String)>, words: &mut Vec<String>) {
+    for (name, value) in pairs {
+        words.push(name);
+        words.push(value);
+    }
 }
 
 /// A color of the program, `0xRRGGBB`.

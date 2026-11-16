@@ -1,0 +1,48 @@
+// The system (§23, C104): the arguments of the program, the environment, and other
+// programs to run.
+
+// The words written after the program: `lion run tri.lion a b` gives `["a", "b"]`, and
+// so does `./tri a b` once compiled.
+foreign "lion" fun args() in List of Text
+
+// The value of the environment variable `name`, such as `HOME`, or `none`.
+foreign "lion" fun env(name in Text) in maybe Text
+
+// What a program that ran left: its exit code, what it wrote on its output, and on its
+// error output. A byte that is not UTF-8 text is shown as `�`.
+struct Output:
+    code in Int
+    output in Text
+    errors in Text
+;
+
+// Whether the program succeeded: its exit code is 0.
+fun Output.ok() in Bool = self.code == 0
+
+// Runs the program `program` with its arguments, as written, without a shell, and waits
+// for its end. A program that cannot start gives an Error; one that fails gives its
+// `Output`, with a code other than 0. `input` is what it reads.
+fun run(program in Text, arguments in List of Text, input = "") in Output or Error:
+    let words = try execute(program, arguments, input)
+    return Output(number(words[1]), words[2], words[3])
+;
+
+// Runs a command line in the shell, `sh` (`cmd` on Windows): pipes, `*` and `~` work.
+// Never put text that comes from outside in it without care.
+fun shell(command in Text, input = "") in Output or Error:
+    return run(shell_name(), [shell_flag(), command], input)
+;
+
+// The code, the output and the errors.
+private foreign "lion" fun execute(program in Text, arguments in List of Text, input in Text) in List of Text or Error
+private foreign "lion" fun windows() in Bool
+
+private fun shell_name() in Text = if windows() then "cmd" else "sh"
+private fun shell_flag() in Text = if windows() then "/C" else "-c"
+
+private fun number(t in Text) in Int:
+    return match t as Int:
+        in Int n then n
+        otherwise then -1
+    ;
+;

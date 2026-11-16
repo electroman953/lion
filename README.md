@@ -42,7 +42,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
   - conversions `as` entre nombres et vers Text.
 - **Textes** : échappements et interpolation `"x = {x}"`.
 - **Modules** (§20) : `use geometry`, `use shapes.circle`, noms qualifiés (`geometry.area(...)`, `geometry.Point`), `private`, globales initialisées au premier usage, modules qui s'utilisent mutuellement.
-- **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles), `csv` (lecture et écriture), `sets` (tri, `min`, `max`, ensemble des parties, `any`, `all`, `count`, `group`), `json` (liste d'objets lue en lignes, `r.get("nom")`), `time` (horloge, mesure des durées, attente), `dates` (dates vérifiées, `d + 30`, `b - a`, jour de la semaine, format ISO) et `ui` (fenêtres : titres, textes, boutons, champs, cases à cocher, colonnes et lignes).
+- **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles), `csv` (lecture et écriture), `sets` (tri, `min`, `max`, ensemble des parties, `any`, `all`, `count`, `group`), `json` (liste d'objets lue en lignes, `r.get("nom")`), `time` (horloge, mesure des durées, attente), `dates` (dates vérifiées, `d + 30`, `b - a`, jour de la semaine, format ISO) `ui` (fenêtres : titres, textes, boutons, champs, cases à cocher, colonnes et lignes), `net` (requêtes web, HTTPS compris, et micro-serveurs HTTP) et `system` (arguments, variables d'environnement, autres programmes) ; `files` lit, écrit, ajoute, liste, copie, déplace et supprime.
 - **Tâches** (§19.1) : `task f(x)`, `wait t`, avec les règles de sûreté du §19.3 ; méthodes détachées `s.passes` (§12.6). Une tâche qui ne lit rien que le programme peut changer tourne sur son propre fil ; ce qu'elle écrit apparaît à son `wait` (C85).
 - **Partage explicite** (§17.2) : `var score = shared Counter()`, `shared synced` pour les tâches, `a same b`, méthodes détachées d'un objet partagé (`score.increment`), avec les règles de la spec vérifiées à la compilation.
 - **Parallélisme de données** (§19.2) : `parallel [...]`, `parallel {...}`, `parallel for`, avec les règles de sûreté du §19.3 vérifiées à la compilation. Les tours s'exécutent sur tous les cœurs (ou `LION_THREADS` fils), dans les deux modes, avec le résultat du calcul séquentiel : la sortie arrive dans l'ordre des tours, et le premier bug dans cet ordre arrête le programme (C83).
@@ -55,7 +55,44 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
 - **Alertes du mode interprété** (§22.3) : infini, NaN, perte de précision.
 - **Mode compilé** (§22) : `lion build f.lion` produit un exécutable natif, par Rust et LLVM, qui donne exactement la même sortie, les mêmes bugs et le même code de sortie que `lion run`, sans les alertes. Il va de 3 à 13 fois plus vite que la machine virtuelle sur nos mesures.
 
-**Pas encore implémenté** : types comme valeurs, lecture des éléments d'un n-uplet, module `net`, débogueur. La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+**Pas encore implémenté** : types comme valeurs, lecture des éléments d'un n-uplet, écriture de JSON, débogueur. La liste complète est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+
+## Scripts, web et micro-serveurs
+
+Les modules `net`, `system` et `files` suffisent aux scripts d'automatisation (C104) :
+
+```lion
+use net
+use system
+use files
+
+// Une requête web (HTTPS compris, par la commande `curl`).
+let page = try net.get("https://example.com")
+show("{page.status} {page.header("content-type")}")
+
+// Les arguments du script : `lion run sauve.lion rapport.txt`.
+for name in system.args():
+    try files.copy(name, "sauvegarde/{name}")
+;
+let git = try system.run("git", ["status", "--short"])
+show(git.output)
+```
+
+Un micro-serveur est une fonction de `net.Request` vers `net.Response` :
+
+```lion
+use net
+
+fun handle(r in net.Request) in net.Response or Error:
+    if r.path == "/": return net.html("<h1>Bonjour</h1>") ;
+    if r.path == "/hello": return net.plain("Bonjour {r.query("name")}") ;
+    return net.plain("introuvable", 404)
+;
+
+try net.serve(8080, handle)        // http://127.0.0.1:8080/hello?name=Léa
+```
+
+Une Error rendue par la fonction devient une réponse 500. Le serveur répond à une requête à la fois ; `host = "0.0.0.0"` l'ouvre aux autres ordinateurs. Les requêtes, elles, peuvent partir ensemble : `task net.get(url)`.
 
 ## Projets et paquets
 

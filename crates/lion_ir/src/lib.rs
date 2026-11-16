@@ -599,6 +599,25 @@ pub enum Native {
     UiHeadless,
     UiReady,
     UiNap,
+    FilesAppend,
+    FilesList,
+    FilesIsFolder,
+    FilesMakeFolder,
+    FilesRemove,
+    FilesCopy,
+    FilesMove,
+    SystemArgs,
+    SystemEnv,
+    SystemExecute,
+    SystemWindows,
+    NetFetch,
+    NetSave,
+    NetListen,
+    NetPort,
+    NetAccept,
+    NetReply,
+    NetPairs,
+    NetEncode,
 }
 
 impl Builtin {
@@ -611,7 +630,26 @@ impl Builtin {
             Builtin::Exit | Builtin::Fail => Some("stops the program"),
             Builtin::ExpectFailed => Some("records a failed test"),
             Builtin::Native(Native::FilesRead | Native::FilesExists) => Some("reads files"),
-            Builtin::Native(Native::FilesWrite) => Some("writes a file"),
+            Builtin::Native(Native::FilesList | Native::FilesIsFolder) => Some("reads files"),
+            Builtin::Native(
+                Native::FilesWrite
+                | Native::FilesAppend
+                | Native::FilesMakeFolder
+                | Native::FilesRemove
+                | Native::FilesCopy
+                | Native::FilesMove,
+            ) => Some("writes a file"),
+            Builtin::Native(Native::SystemArgs) => Some("reads the command line"),
+            Builtin::Native(Native::SystemEnv) => Some("reads the environment"),
+            Builtin::Native(Native::SystemExecute) => Some("runs a program"),
+            Builtin::Native(
+                Native::NetFetch
+                | Native::NetSave
+                | Native::NetListen
+                | Native::NetPort
+                | Native::NetAccept
+                | Native::NetReply,
+            ) => Some("uses the network"),
             Builtin::Native(
                 Native::RandomSeed | Native::TimeNow | Native::TimeClock | Native::DatesLocalDay,
             ) => Some("reads the clock"),
@@ -638,11 +676,23 @@ impl Builtin {
 
 impl Native {
     /// Whether it leaves the world as it is. A foreign function that is not pure may
-    /// change a global state: it does not run in parallel (§19.3, §21.2, D48).
+    /// change a global state: it does not run in parallel (§19.3, §21.2, D48). A web
+    /// request changes no state of the program, as `show`: tasks and parallel loops may
+    /// make them (C104).
     pub fn is_pure(self) -> bool {
         !matches!(
             self,
             Native::FilesWrite
+                | Native::FilesAppend
+                | Native::FilesMakeFolder
+                | Native::FilesRemove
+                | Native::FilesCopy
+                | Native::FilesMove
+                | Native::SystemExecute
+                | Native::NetSave
+                | Native::NetListen
+                | Native::NetAccept
+                | Native::NetReply
                 | Native::UiOpen
                 | Native::UiClear
                 | Native::UiFill
@@ -658,6 +708,25 @@ impl Native {
         ("files", "read", Native::FilesRead),
         ("files", "write", Native::FilesWrite),
         ("files", "exists", Native::FilesExists),
+        ("files", "append", Native::FilesAppend),
+        ("files", "list", Native::FilesList),
+        ("files", "is_folder", Native::FilesIsFolder),
+        ("files", "make_folder", Native::FilesMakeFolder),
+        ("files", "remove", Native::FilesRemove),
+        ("files", "copy", Native::FilesCopy),
+        ("files", "move", Native::FilesMove),
+        ("system", "args", Native::SystemArgs),
+        ("system", "env", Native::SystemEnv),
+        ("system", "execute", Native::SystemExecute),
+        ("system", "windows", Native::SystemWindows),
+        ("net", "fetch", Native::NetFetch),
+        ("net", "save", Native::NetSave),
+        ("net", "listen_on", Native::NetListen),
+        ("net", "server_port", Native::NetPort),
+        ("net", "accept", Native::NetAccept),
+        ("net", "reply", Native::NetReply),
+        ("net", "pairs", Native::NetPairs),
+        ("net", "encode", Native::NetEncode),
         ("text", "split", Native::TextSplit),
         ("text", "join", Native::TextJoin),
         ("text", "upper", Native::TextUpper),

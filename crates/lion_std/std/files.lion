@@ -16,3 +16,24 @@ fun lines(path in Text) in List of Text or Error:
     let content = try read(path)
     return text.lines(content)
 ;
+
+// Adds `content` at the end of the file, creating it when needed.
+foreign "lion" fun append(path in Text, content in Text) in None or Error
+
+// The names of what the folder holds, files and folders, in alphabetical order.
+foreign "lion" fun list(folder in Text) in List of Text or Error
+
+// Whether a folder exists at this path.
+foreign "lion" fun is_folder(path in Text) in Bool
+
+// Creates the folder, and the folders above it when needed.
+foreign "lion" fun make_folder(path in Text) in None or Error
+
+// Deletes a file, or a folder that is empty.
+foreign "lion" fun remove(path in Text) in None or Error
+
+// Copies the file `from` to `to`, which it replaces.
+foreign "lion" fun copy(from in Text, to in Text) in None or Error
+
+// Moves or renames a file or a folder.
+foreign "lion" fun move(from in Text, to in Text) in None or Error

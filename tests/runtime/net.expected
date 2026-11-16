@@ -1,0 +1,17 @@
+exit: 0
+----- stdout
+GET /hello 
+200 true Bonjour Léa M | text/plain; charset=utf-8
+POST /form name=L%C3%A9a%20%26%20Max
+201 true {"name": "Léa & Max", "type": "application/x-www-form-urlencoded"}
+DELETE /a/b 
+404 false no page at /a/b
+GET /old 
+GET /hello 
+200 Bonjour moved
+a%20b%2F%C3%A9%3F%26%3D~
+error("`ftp://example.com` is not a web address: it starts with http:// or https://")
+error("`get` is not an HTTP method, such as GET or POST")
+error("`Bad Name: x` is not a header: a name is a word, and no line end is allowed")
+error("70000 is not a port: a port goes from 0 to 65535")
+----- stderr
