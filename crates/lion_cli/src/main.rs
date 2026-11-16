@@ -2,6 +2,7 @@
 
 mod driver;
 mod lsp;
+mod mcp;
 mod native;
 mod project;
 
@@ -30,6 +31,8 @@ usage:
                                    or rust
   lion lsp                         the language server of editors, such as VS Code, on the
                                    standard input and output
+  lion mcp                         the server of AI assistants (Model Context Protocol), on
+                                   the standard input and output
   lion --version
 
   lion                             the interactive mode: type Lion line by line
@@ -88,6 +91,7 @@ fn dispatch(args: &[String]) -> ExitCode {
         ["update", name] => done(project::update(Some(name))),
         ["debug", stage, file] => driver::debug(stage, file),
         ["lsp"] => lsp::serve(),
+        ["mcp"] => mcp::serve(),
         ["test"] => match project::find_root(std::path::Path::new(".")) {
             Some(root) => {
                 let current =

@@ -173,6 +173,16 @@ fun verifier() in Bool:                        // rappelée toutes les 60 s tant
 time.every(60.0, verifier)
 ```
 
+## Assistants (MCP) : `lion mcp`
+
+`lion mcp` est un serveur du Model Context Protocol (C108) : une session Claude Code, ou tout assistant qui parle MCP, y trouve le guide du langage écrit pour elle (`docs/ai-guide.md`), l'API de chaque module, et les commandes `check`, `run`, `test`, `fmt` et `build`. Pour toutes les sessions de Claude Code :
+
+```sh
+claude mcp add --scope user lion -- ~/.cargo/bin/lion mcp
+```
+
+Quand Lion manque de quelque chose, l'assistant le note par `lion_report_gap` dans [docs/manques.md](docs/manques.md), la liste à trier pour améliorer le langage.
+
 ## Projets et paquets
 
 ```sh

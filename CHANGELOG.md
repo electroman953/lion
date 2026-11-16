@@ -26,6 +26,9 @@ Les décisions détaillées sont dans [docs/implementation-notes.md](docs/implem
   `system.which`, `system.folder` ; `files.walk`, `files.find(dossier, "*.\{jpg,png\}")`,
   `files.size`, `files.modified` ; le module `term` (couleurs) ; `time.every`.
 - `html` : sélecteurs `a + b`, `a ~ b`, `:not(…)` ; `regex` : références arrière `\1`.
+- `lion mcp` (C108) : un serveur MCP pour que les assistants écrivent du Lion (guide, API des
+  modules, check, run, test, fmt, build), et `docs/manques.md`, la liste de ce qui manque, que
+  les assistants remplissent par `lion_report_gap`.
 - `v as T` lit une `json.Value` comme une structure, une liste, une Map… de Lion (C107, décision
   de l'auteur) : `let user = try v as User`. L'Error dit où la valeur ne convient pas
   (`at \`tags[2].name\`: …`).
