@@ -1,0 +1,58 @@
+// Web addresses (§23, C105): their parts, links made absolute, and parameters.
+
+use text
+
+// The parts of `https://moi@site.fr:8080/a/b?x=1#top`: `scheme` (`https`), `user`
+// (`moi`), `host` (`site.fr`), `port` (8080, or `none` when not written), `path`
+// (`/a/b`, at least `/`), `query` (`x=1`, as written) and `fragment` (`top`).
+struct Url:
+    scheme in Text
+    user in Text
+    host in Text
+    port in maybe Int
+    path in Text
+    query in Text
+    fragment in Text
+;
+
+// The parts of an absolute address.
+fun parse(address in Text) in Url or Error:
+    let p = try parts(address)
+    let port = if p[4] == "" then none else number(p[4])
+    return Url(p[1], p[2], p[3], port, p[5], p[6], p[7])
+;
+
+// The value of the parameter `name` of the query, decoded, or `none`.
+fun Url.param(name in Text) in maybe Text:
+    let words = pairs(self.query)
+    for i in 1..words.size div 2:
+        if words[2 * i - 1] == name: return words[2 * i] ;
+    ;
+    return none
+;
+
+// The address that the link `link` designates on the page `base`, as a browser follows
+// it: `url.join("https://site.fr/a/b", "../c")` gives `https://site.fr/c`.
+foreign "lion" fun join(base in Text, link in Text) in Text or Error
+
+// The address with the parameter `name=value` added to its query, both encoded.
+fun with_param(address in Text, name in Text, value in Text) in Text:
+    let mark = if text.contains(address, "?") then "&" else "?"
+    return "{address}{mark}{encode(name)}={encode(value)}"
+;
+
+// `t` written for an address: every byte but letters, digits and `-._~` as `%XX`.
+foreign "lion" fun encode(t in Text) in Text
+
+// `t` with its `%XX` decoded, and `+` as a space; an Error if the result is not UTF-8.
+foreign "lion" fun decode(t in Text) in Text or Error
+
+private foreign "lion" fun parts(address in Text) in List of Text or Error
+private foreign "lion" fun pairs(query in Text) in List of Text
+
+private fun number(t in Text) in maybe Int:
+    return match t as Int:
+        in Int n then n
+        otherwise then none
+    ;
+;

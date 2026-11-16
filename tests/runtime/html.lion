@@ -1,0 +1,29 @@
+// The module `html` (C105): reading pages and finding their elements.
+use files
+use html
+
+let page = html.parse(try files.read("tests/runtime/data/news.html"))
+
+show(page.first("title"))
+for li in page.select("li.item"):
+    let a = li.first("a")
+    let price = li.first(".price")
+    if a != none and price != none:
+        show("{a.text} | {a.attr("href")} | {price.text} | {li.attr("class")}")
+    ;
+;
+show([p.text, p in page.select("#main > p")])
+show([e.tag, e in page.select("h1, img, li:last-child a")])
+show(page.select("a[data-id=7]")[1].attr("DATA-ID"))
+show(page.select("a[href^=https]")[1].attribute_names())
+show(page.first("[href$=.pdf]"))
+show(page.select("img")[1].outer_html())
+show(page.select("span")[1].html)
+let list = page.first("ul")
+if list != none:
+    show(list.select("li").size)
+    show(list.select("ul").size)
+;
+show(html.escape("<a href=\"x\">Léa & 'Max'</a>"))
+show(html.unescape("&lt;&#233;&#xE9;&eacute;&inconnu;"))
+show(page.select("a:hover"))

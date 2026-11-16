@@ -1,9 +1,9 @@
 # État de l'implémentation de Lion
 
-Mis à jour le 2026-09-28 : les huit étapes de la feuille de route sont atteintes, avec le compilateur natif (5), le parallélisme sur plusieurs cœurs (6), la bibliothèque graphique `ui` (7) et le gestionnaire de paquets (8). Le 2026-11-16, les modules `net` et `system` rendent Lion utile pour les scripts d'automatisation et les micro-serveurs (C104). Depuis l'étape 8, VS Code connaît Lion par le serveur de langage `lion lsp` (C102), qui donne aussi le survol, l'aller à la définition et les références, grâce à l'index des noms du vérificateur (C103). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète ces documents :
+Mis à jour le 2026-09-28 : les huit étapes de la feuille de route sont atteintes, avec le compilateur natif (5), le parallélisme sur plusieurs cœurs (6), la bibliothèque graphique `ui` (7) et le gestionnaire de paquets (8). Le 2026-11-16, les modules `net` et `system` rendent Lion utile pour les scripts d'automatisation et les micro-serveurs (C104), et `html`, `regex`, `url`, `base64`, `hash`, le JSON de toute forme et les sessions pour le scraping (C105). Depuis l'étape 8, VS Code connaît Lion par le serveur de langage `lion lsp` (C102), qui donne aussi le survol, l'aller à la définition et les références, grâce à l'index des noms du vérificateur (C103). Ce fichier suffit pour reprendre le travail dans une nouvelle session. Il complète ces documents :
 
 - [`docs/spec/lion-0.1.md`](docs/spec/lion-0.1.md) : la spécification, **source de vérité** ;
-- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C104) ;
+- [`docs/implementation-notes.md`](docs/implementation-notes.md) : chaque décision de l'implémentation (R1–R13, I1–I15, C1–C105) ;
 - [`docs/design/ui.md`](docs/design/ui.md) et [`docs/design/packages.md`](docs/design/packages.md) : les conceptions de `ui` et des paquets, validées par l'auteur et implémentées (C98, C101) ;
 - [`README.md`](README.md) : la présentation et l'usage ;
 - [`CHANGELOG.md`](CHANGELOG.md) : l'historique des modifications, session par session.
@@ -26,7 +26,7 @@ L'arbre de travail est propre, sans fichier non commité. Le dépôt est publié
 | Étape | État |
 | --- | --- |
 | 1–2. Frontend complet et mode interprété | **Atteinte** |
-| 3. Bibliothèque standard | **Atteinte** pour `files`, `text`, `math`, `random`, `csv`, `json`, `sets`, `time`, `dates`, `net`, `system` et le noyau (C104) |
+| 3. Bibliothèque standard | **Atteinte** pour `files`, `text`, `math`, `random`, `csv`, `json`, `sets`, `time`, `dates`, `net`, `system`, `html`, `regex`, `url`, `base64`, `hash` et le noyau (C104, C105) |
 | 4. Outillage | **Atteinte** : `lion test`, `lion fmt`, mode interactif |
 | 5. Compilateur natif `lion build` | **Atteinte** : les deux modes donnent les mêmes résultats sur tous les programmes de test (C81, C82) |
 | 6. Parallélisme et tâches | **Atteinte** : les parties parallèles utilisent tous les cœurs, dans les deux modes, avec le résultat du calcul séquentiel (C83, C84) ; les tâches tournent sur leur propre fil quand rien de ce qu'elles lisent ne peut changer (C85) |
@@ -151,9 +151,9 @@ Principes :
 - `Rt::task`, `Rt::wait` : les tâches à part (C85).
 - Aides : `enter` et `leave` autour de chaque appel, `called_from` pour la trace, et des conversions (`int`, `text`, `field`…).
 
-**`lion_runtime`** : `ops.rs` (arithmétique vérifiée, rationnels, conversions), `bug.rs` (les `BugKind` et leurs messages), `format.rs` (affichage des Float et des rationnels), `json.rs` (lecture stricte du JSON, et son écriture par `Display`, dont se sert `lion lsp`), `net.rs` (serveur HTTP/1.1 et requêtes par `curl`, C104), `stdlib.rs`.
+**`lion_runtime`** : `ops.rs` (arithmétique vérifiée, rationnels, conversions), `bug.rs` (les `BugKind` et leurs messages), `format.rs` (affichage des Float et des rationnels), `json.rs` (lecture stricte du JSON, et son écriture par `Display`, dont se sert `lion lsp`), `net.rs` (serveur HTTP/1.1 et requêtes par `curl`, C104), `regex.rs` (machine de Pike), `html.rs` (lecture tolérante et sélecteurs CSS), `codec.rs` (Base64, SHA-256, MD5, HMAC, adresses), `stdlib.rs` (C105).
 
-**`lion_std/std/*.lion`** : `csv`, `dates`, `files`, `json`, `math`, `net`, `random`, `sets`, `system`, `text`, `time`, `ui`.
+**`lion_std/std/*.lion`** : `base64`, `csv`, `dates`, `files`, `hash`, `html`, `json`, `math`, `net`, `random`, `regex`, `sets`, `system`, `text`, `time`, `ui`, `url`.
 
 **`lion_ui`** (C98) :
 - `x11.rs` : le protocole X11 parlé directement (connexion, `Xauthority`, fenêtre, `PutImage` par bandes, clavier, événements) ;
@@ -241,7 +241,7 @@ Chacun de ces cas donne une erreur « not implemented yet » ou un refus explici
 | --- | --- |
 | Types comme valeurs (`let t = Int`) | §7.1 |
 | Lire un élément de n-uplet : la spec ne dit pas comment (C53) | §16 |
-| Écriture de JSON ; serveur `net` qui répond à plusieurs requêtes à la fois | C100, C104 |
+| Serveur `net` qui répond à plusieurs requêtes à la fois ; sélecteurs HTML `+`, `~` et autres pseudo-classes ; références arrière des motifs | C104, C105 |
 | `ui` sur Windows et macOS, touches mortes, défilement, styles, images, écrans à haute densité | C98 |
 | Heures d'une journée, fuseaux horaires, ajout de mois dans `dates` | C89 |
 | Écriture littérale d'une Map, que la spec laisse ouverte (§29) | C79 |

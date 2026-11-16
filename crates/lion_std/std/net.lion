@@ -3,6 +3,7 @@
 // Requests go through the program `curl`, which brings HTTPS. A server answers one
 // request at a time; each `Response` closes its connection.
 
+use json
 use text
 
 // A header of a request or of a response: `Content-Type: text/html`.
@@ -44,8 +45,39 @@ fun post(url in Text, body in Text, headers in List of Header = [], timeout = 30
 
 // Any request: `method` is GET, POST, PUT, PATCH, DELETE…
 fun request(method in Text, url in Text, headers in List of Header, body in Text, timeout = 30.0) in Response or Error:
-    let answer = try fetch(method, url, flat(headers), body, timeout)
-    return Response(number(answer[1]), answer[2], unflat(answer[3..answer.size]))
+    let answer = try fetch(method, url, flat(headers), body, timeout, false, "")
+    return Response(number(answer[1]), answer[2], unflat(answer[4..answer.size]))
+;
+
+// The body of the answer read as JSON.
+fun Response.json() in json.Value or Error = json.decode(self.body)
+
+// A session: requests that keep the cookies the sites give, as a browser does, to stay
+// logged in. Its headers go with each of its requests (`User-Agent`, `Authorization`…).
+struct Session:
+    headers in List of Header
+    private cookies in Text
+;
+
+// A new session, without cookies.
+fun session(headers in List of Header = []) in Session = Session(headers, "")
+
+fun Session.get(var self, url in Text, headers in List of Header = [], timeout = 30.0) in Response or Error:
+    return self.request("GET", url, headers, "", timeout)
+;
+
+fun Session.post(var self, url in Text, body in Text, headers in List of Header = [], timeout = 30.0) in Response or Error:
+    return self.request("POST", url, headers, body, timeout)
+;
+
+// A request with the headers and the cookies of the session; the cookies of the answer
+// are kept.
+fun Session.request(var self, method in Text, url in Text, headers in List of Header, body in Text, timeout = 30.0) in Response or Error:
+    var all = flat(self.headers)
+    for word in flat(headers): all.add(word) ;
+    let answer = try fetch(method, url, all, body, timeout, true, self.cookies)
+    self.cookies = answer[3]
+    return Response(number(answer[1]), answer[2], unflat(answer[4..answer.size]))
 ;
 
 // Saves what `url` gives in the file `path`, images too. A status from 400 up is an
@@ -125,15 +157,16 @@ fun plain(body in Text, status = 200) in Response = Response(status, body, [Head
 // An answer in HTML.
 fun html(body in Text, status = 200) in Response = Response(status, body, [Header("Content-Type", "text/html; charset=utf-8")])
 
-// An answer that is JSON text.
-fun json(body in Text, status = 200) in Response = Response(status, body, [Header("Content-Type", "application/json")])
+// An answer that is data in JSON: `net.data(json.from(stats))`.
+fun data(v in json.Value, status = 200) in Response = Response(status, v.encode(), [Header("Content-Type", "application/json")])
 
 // An answer that sends the client to `location`.
 fun redirect(location in Text, status = 303) in Response = Response(status, "", [Header("Location", location)])
 
 // ---------------------------------------------------------------- inside
 
-private foreign "lion" fun fetch(method in Text, url in Text, headers in List of Text, body in Text, timeout in Float) in List of Text or Error
+// The status, the body, the cookies kept, then the names and values of the headers.
+private foreign "lion" fun fetch(method in Text, url in Text, headers in List of Text, body in Text, timeout in Float, session in Bool, cookies in Text) in List of Text or Error
 private foreign "lion" fun save(url in Text, path in Text, timeout in Float) in None or Error
 private foreign "lion" fun listen_on(host in Text, port in Int) in Int or Error
 private foreign "lion" fun server_port(server in Int) in Int

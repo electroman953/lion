@@ -1,0 +1,7 @@
+{
+  "total": 2,
+  "ok": true,
+  "next": null,
+  "data": {"items": [{"name": "Léa", "score": 12.5, "tags": ["a", "b"]},
+                     {"name": "Max", "score": 9}]}
+}

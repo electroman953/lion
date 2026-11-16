@@ -7,7 +7,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lion_ir::Native;
 use lion_runtime::BugKind;
-use lion_runtime::{net, stdlib};
+use lion_runtime::json::{self, Json};
+use lion_runtime::regex::Regex;
+use lion_runtime::{codec, html, net, stdlib};
 
 use crate::value::Value;
 
@@ -111,9 +113,11 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
         Native::SystemWindows => Value::Bool(cfg!(windows)),
         Native::NetFetch => {
             let headers = pairs_of(&text_list(&args[2]));
-            match net::fetch(text(0), text(1), &headers, text(3), float(4)) {
-                Ok(response) => {
-                    let mut words = vec![response.status.to_string(), response.body];
+            let Value::Bool(session) = args[5] else { panic!("net.fetch expected a Bool") };
+            let jar = session.then(|| text(6));
+            match net::fetch(text(0), text(1), &headers, text(3), float(4), jar) {
+                Ok((response, jar)) => {
+                    let mut words = vec![response.status.to_string(), response.body, jar.unwrap_or_default()];
                     flatten(response.headers, &mut words);
                     texts(words)
                 }
@@ -156,6 +160,180 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             texts(words)
         }
         Native::NetEncode => new_text(net::encode(text(0))),
+        Native::RegexSearch | Native::RegexSubstitute | Native::RegexSplit => {
+            let regex = pattern(text(0))?;
+            let t = text(1);
+            let all = |index: usize| matches!(args[index], Value::Bool(true));
+            match native {
+                Native::RegexSearch => {
+                    let found =
+                        if all(2) { regex.find_all(t) } else { regex.find_at(t, 0).into_iter().collect() };
+                    let piece = |range: Option<(usize, usize)>| {
+                        range.map_or(String::new(), |(a, b)| t[a..b].to_string())
+                    };
+                    Value::List(Arc::new(
+                        found
+                            .into_iter()
+                            .map(|m| {
+                                let (start, _) = m.groups[0].expect("a match has a range");
+                                let mut words = vec![(t[..start].chars().count() + 1).to_string()];
+                                words.extend(m.groups.iter().map(|range| piece(*range)));
+                                texts(words)
+                            })
+                            .collect(),
+                    ))
+                }
+                Native::RegexSubstitute => {
+                    let found =
+                        if all(3) { regex.find_all(t) } else { regex.find_at(t, 0).into_iter().collect() };
+                    let mut out = String::new();
+                    let mut last = 0;
+                    for m in &found {
+                        let (start, end) = m.groups[0].expect("a match has a range");
+                        out.push_str(&t[last..start]);
+                        out.push_str(&lion_runtime::regex::expand(&regex, t, m, text(2)));
+                        last = end;
+                    }
+                    out.push_str(&t[last..]);
+                    new_text(out)
+                }
+                _ => {
+                    let mut parts = Vec::new();
+                    let mut last = 0;
+                    for m in regex.find_all(t) {
+                        let (start, end) = m.groups[0].expect("a match has a range");
+                        if end == 0 || start == t.len() && end == start {
+                            continue;
+                        }
+                        parts.push(t[last..start].to_string());
+                        last = end;
+                    }
+                    parts.push(t[last..].to_string());
+                    texts(parts)
+                }
+            }
+        }
+        Native::RegexEscape => {
+            let mut out = String::new();
+            for c in text(0).chars() {
+                if "\\.+*?()|[]{}^$-#".contains(c) {
+                    out.push('\\');
+                }
+                out.push(c);
+            }
+            new_text(out)
+        }
+        Native::RegexCheck => match Regex::new(text(0)) {
+            Ok(_) => Value::None,
+            Err(problem) => error(format!("`{}` is not a pattern: {problem}", text(0))),
+        },
+        Native::HtmlSelect => {
+            let Value::Bool(inside) = args[2] else { panic!("html.select_in expected a Bool") };
+            let found =
+                html::select(text(0), text(1), inside).map_err(|problem| BugKind::InvalidArgument {
+                    message: format!("`{}` is not a selector", text(1)),
+                    details: problem,
+                })?;
+            Value::List(Arc::new(
+                found
+                    .into_iter()
+                    .map(|e| {
+                        let mut words = vec![e.tag, e.text, e.inner, e.outer];
+                        flatten(e.attributes, &mut words);
+                        texts(words)
+                    })
+                    .collect(),
+            ))
+        }
+        Native::HtmlText => new_text(html::text(text(0))),
+        Native::HtmlEscape => new_text(html::escape(text(0))),
+        Native::HtmlUnescape => new_text(html::unescape(text(0))),
+        Native::UrlParts => match codec::parse_url(text(0)) {
+            Ok(u) => texts(vec![u.scheme, u.user, u.host, u.port, u.path, u.query, u.fragment]),
+            Err(message) => error(message),
+        },
+        Native::UrlJoin => match codec::join_url(text(0), text(1)) {
+            Ok(joined) => new_text(joined),
+            Err(message) => error(message),
+        },
+        Native::UrlEncode => new_text(net::encode(text(0))),
+        Native::UrlDecode => match net::decode(text(0), true) {
+            Some(decoded) => new_text(decoded),
+            None => error(format!("`{}` decoded is not UTF-8 text", text(0))),
+        },
+        Native::UrlPairs => {
+            let mut words = Vec::new();
+            flatten(net::form_pairs(text(0)), &mut words);
+            texts(words)
+        }
+        Native::Base64Encode => {
+            let Value::Bool(url) = args[1] else { panic!("base64.encode_bytes expected a Bool") };
+            new_text(codec::base64_encode(text(0).as_bytes(), url))
+        }
+        Native::Base64Decode => match codec::base64_decode(text(0)) {
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(decoded) => new_text(decoded),
+                Err(_) => error("the bytes written in Base64 are not UTF-8 text".to_string()),
+            },
+            Err(message) => error(message),
+        },
+        Native::HashSha256 => new_text(codec::hex(&codec::sha256(text(0).as_bytes()))),
+        Native::HashMd5 => new_text(codec::hex(&codec::md5(text(0).as_bytes()))),
+        Native::HashHmac => new_text(codec::hex(&codec::hmac_sha256(text(0).as_bytes(), text(1).as_bytes()))),
+        Native::HashFile => match std::fs::read(text(0)) {
+            Ok(bytes) => new_text(codec::hex(&codec::sha256(&bytes))),
+            Err(problem) => error(format!("cannot read `{}`: {}", text(0), describe(&problem))),
+        },
+        Native::JsonCheck => match json::parse(text(0)) {
+            Ok(value) => new_text(value.to_string()),
+            Err(message) => error(message),
+        },
+        Native::JsonOf => new_text(to_json(&args[0])?.to_string()),
+        Native::JsonPretty => new_text(json::cached(text(0), Json::pretty)),
+        Native::JsonKind => new_text(json::cached(text(0), |v| v.kind().to_string())),
+        Native::JsonMember => json_part(json::cached(text(0), |v| v.member(text(1)).map(Json::to_string))),
+        Native::JsonElement => json_part(json::cached(text(0), |v| {
+            usize::try_from(int(1))
+                .map_err(|_| format!("there is no element {}", int(1)))
+                .and_then(|i| v.element(i).map(Json::to_string))
+        })),
+        Native::JsonFollow => json_part(json::cached(text(0), |v| v.follow(text(1)).map(Json::to_string))),
+        Native::JsonParts => texts(json::cached(text(0), |v| match v {
+            Json::List(items) => items.iter().map(Json::to_string).collect(),
+            Json::Object(members) => members.iter().map(|(_, value)| value.to_string()).collect(),
+            _ => Vec::new(),
+        })),
+        Native::JsonNames => texts(json::cached(text(0), |v| match v {
+            Json::Object(members) => members.iter().map(|(name, _)| name.clone()).collect(),
+            _ => Vec::new(),
+        })),
+        Native::JsonScalar => new_text(json::cached(text(0), |v| match v {
+            Json::Text(t) => t.clone(),
+            Json::Number(n) => n.clone(),
+            other => other.to_string(),
+        })),
+        Native::JsonWith | Native::JsonPlus => {
+            let mut value = json::cached(text(0), Json::clone);
+            let added = json::cached(text(if native == Native::JsonWith { 2 } else { 1 }), Json::clone);
+            match (&mut value, native) {
+                (Json::Object(members), Native::JsonWith) => {
+                    match members.iter_mut().find(|(name, _)| name == text(1)) {
+                        Some((_, old)) => *old = added,
+                        None => members.push((text(1).to_string(), added)),
+                    }
+                }
+                (Json::List(items), Native::JsonPlus) => items.push(added),
+                (other, _) => {
+                    let (wanted, call) =
+                        if native == Native::JsonWith { ("an object", "with") } else { ("a list", "plus") };
+                    return Err(BugKind::InvalidArgument {
+                        message: format!("`v.{call}(…)` needs {wanted}"),
+                        details: format!("the value is a {}", other.kind()),
+                    });
+                }
+            }
+            new_text(value.to_string())
+        }
         Native::TextSplit => {
             if text(1).is_empty() {
                 return Err(BugKind::InvalidArgument {
@@ -361,6 +539,68 @@ fn execute(program: &str, arguments: &[String], input: &str) -> Result<Vec<Strin
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
     ])
+}
+
+/// A pattern of the module `regex`; one that is not a pattern is a bug.
+fn pattern(source: &str) -> Result<Regex, BugKind> {
+    Regex::new(source).map_err(|problem| BugKind::InvalidArgument {
+        message: format!("`{source}` is not a pattern"),
+        details: problem,
+    })
+}
+
+/// A part of a JSON value, or an Error.
+fn json_part(part: Result<String, String>) -> Value {
+    match part {
+        Ok(part) => new_text(part),
+        Err(message) => Value::Error(Arc::new(message)),
+    }
+}
+
+/// The JSON form of a value of Lion (`json.of`, C105).
+fn to_json(value: &Value) -> Result<Json, BugKind> {
+    let all = |values: &[Value]| values.iter().map(to_json).collect::<Result<Vec<_>, _>>();
+    let number =
+        |x: f64| if x.is_finite() { Json::Number(lion_runtime::format::format_float(x)) } else { Json::Null };
+    Ok(match value {
+        Value::None => Json::Null,
+        Value::Bool(b) => Json::Bool(*b),
+        Value::Int(n) => Json::int(*n),
+        Value::Float(x) => number(*x),
+        Value::Rational(r) => number(r[0] as f64 / r[1] as f64),
+        Value::Text(t) => Json::text(t.as_str()),
+        Value::Error(message) => Json::object([("error", Json::text(message.as_str()))]),
+        Value::List(items) | Value::Tuple(items) => Json::List(all(items)?),
+        Value::Range(bounds) => Json::List((bounds[0]..=bounds[1]).map(Json::int).collect()),
+        Value::Set(set) => Json::List(all(set.items())?),
+        Value::Map(map) => Json::Object(
+            map.entries()
+                .iter()
+                .map(|(key, value)| Ok((key.to_text(), to_json(value)?)))
+                .collect::<Result<_, BugKind>>()?,
+        ),
+        // A `json.Value` is already JSON.
+        Value::Struct(record) if record.layout.name == "json.Value" && record.layout.fields.len() == 1 => {
+            json::parse(&record.fields[0].to_text()).unwrap_or(Json::Null)
+        }
+        Value::Struct(record) => Json::Object(
+            record
+                .layout
+                .fields
+                .iter()
+                .zip(&record.fields)
+                .map(|(name, value)| Ok((name.clone(), to_json(value)?)))
+                .collect::<Result<_, BugKind>>()?,
+        ),
+        Value::Enum(enumeration, position) => Json::text(enumeration.values[*position as usize].as_str()),
+        Value::Cell(cell) => to_json(&cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner()))?,
+        Value::Task(_) | Value::Function(_) | Value::Ref(_) => {
+            return Err(BugKind::InvalidArgument {
+                message: "this value has no JSON form".to_string(),
+                details: format!("a {} is neither data nor text", value.type_name()),
+            });
+        }
+    })
 }
 
 /// The Texts of a `List of Text`.

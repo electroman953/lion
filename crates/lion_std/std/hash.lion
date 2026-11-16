@@ -1,0 +1,15 @@
+// Fingerprints (§23, C105): SHA-256, MD5 and HMAC, written in lowercase hexadecimal.
+// Two different texts have different SHA-256 fingerprints, which tells whether a page or
+// a file has changed.
+
+// The SHA-256 of the UTF-8 bytes of `t`.
+foreign "lion" fun sha256(t in Text) in Text
+
+// The MD5 of `t`: for the sums that sites still publish; never for security.
+foreign "lion" fun md5(t in Text) in Text
+
+// The HMAC-SHA-256 of `message` with `key`, as APIs and webhooks sign messages.
+foreign "lion" fun hmac_sha256(key in Text, message in Text) in Text
+
+// The SHA-256 of the bytes of a file, images too.
+foreign "lion" fun file_sha256(path in Text) in Text or Error

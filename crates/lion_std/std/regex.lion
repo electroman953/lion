@@ -1,0 +1,66 @@
+// Regular expressions (§23, C105): finding, extracting and replacing patterns in a text.
+//
+// The syntax is the common one: `.`, `[a-z]`, `[^…]`, `\d \w \s` (and `\D \W \S`),
+// `\b`, `^ $`, groups `( )`, `(?: )` and `(?<name> )`, `|`, `* + ? {n} {n,} {n,m}`
+// (lazy with a `?` after), and the flags `(?i)` (any case), `(?m)` (`^ $` at each line)
+// and `(?s)` (`.` takes the line ends) at the start. `\w` takes every letter, `é` too.
+//
+// In a Lion text, `\` is written `\\` and the braces `\{ \}`, since `{…}` inserts a
+// value: `regex.all("\\d\{4\}", t)` is the pattern `\d{4}`. A pattern that is not one
+// is a bug; `regex.check` tells it beforehand for a pattern that comes from outside.
+
+// A match: its text, its position in characters from 1 (as `text.find`), and the text of
+// each group, `""` for a group that took no part.
+struct Match:
+    text in Text
+    position in Int
+    groups in List of Text
+;
+
+// The text of the group `i`; 0 is the whole match.
+fun Match.group(i in Int) in Text = if i == 0 then self.text else self.groups[i]
+
+// Whether the pattern is found in `t`.
+fun matches(pattern in Text, t in Text) in Bool = search(pattern, t, false).size > 0
+
+// The first match, or `none`.
+fun find(pattern in Text, t in Text) in maybe Match:
+    let found = search(pattern, t, false)
+    if found.size == 0: return none ;
+    return to_match(found[1])
+;
+
+// Every match, from left to right.
+fun find_all(pattern in Text, t in Text) in List of Match = [to_match(m), m in search(pattern, t, true)]
+
+// The text of every match: `regex.all("\\d+", "a1 b22")` gives `["1", "22"]`.
+fun all(pattern in Text, t in Text) in List of Text = [m[2], m in search(pattern, t, true)]
+
+// Every match replaced by `with`, where `$1` is the group 1, `$0` the match, `${name}` a
+// named group and `$$` a `$`.
+fun replace(pattern in Text, t in Text, with in Text) in Text = substitute(pattern, t, with, true)
+
+// Only the first match replaced.
+fun replace_first(pattern in Text, t in Text, with in Text) in Text = substitute(pattern, t, with, false)
+
+// The parts of `t` between the matches.
+foreign "lion" fun split(pattern in Text, t in Text) in List of Text
+
+// `t` with the characters that have a meaning in a pattern behind a `\`, to find it as
+// it is written.
+foreign "lion" fun escape(t in Text) in Text
+
+// Whether `pattern` is a pattern, and why not.
+foreign "lion" fun check(pattern in Text) in None or Error
+
+// Each match: its position, its text, then its groups.
+private foreign "lion" fun search(pattern in Text, t in Text, all in Bool) in List of List of Text
+private foreign "lion" fun substitute(pattern in Text, t in Text, with in Text, all in Bool) in Text
+
+private fun to_match(m in List of Text) in Match:
+    let position = match m[1] as Int:
+        in Int p then p
+        otherwise then 0
+    ;
+    return Match(m[2], position, m[3..m.size])
+;

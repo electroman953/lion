@@ -1,0 +1,31 @@
+// The module `regex` (C105).
+use regex
+
+show(regex.all("\\d+", "a1 b22 c333"))
+show(regex.all("\\w+", "Léa, Zoë_2 et l'été !"))
+show(regex.matches("(?i)^lion\\b", "LION rugit"))
+show(regex.matches("^\\d\{3\}$", "12a"))
+
+let m = regex.find("(?<year>\\d\{4\})-(\\d\\d)(-(\\d\\d))?", "le 2026-11 ou 2025-01-31")
+if m != none:
+    show("{m.text} at {m.position}: {m.group(1)} {m.group(2)} [{m.group(4)}]")
+;
+show(regex.find("x", "abc"))
+for d in regex.find_all("(\\d\{4\})-(\\d\\d)", "2026-11, 2025-01"): show(d.groups) ;
+
+show(regex.replace("(\\w+)@(\\w+)\\.fr", "léa@site.fr, max@web.fr", "$2 ($1)"))
+show(regex.replace("(?<y>\\d\{4\})-(?<m>\\d\\d)", "2026-11", "$\{m\}/$\{y\} $$5"))
+show(regex.replace_first("o", "foo boo", "0"))
+show(regex.replace("a*", "baaac", "-"))
+show(regex.split("\\s*[,;]\\s*", "un , deux;trois ;quatre"))
+show(regex.split(",", ""))
+show(regex.all("<.+?>", "<a><b>"))
+show(regex.all("(?s)<p>.*</p>", "<p>a\nb</p>"))
+show(regex.all("(?m)^#\\s*(.*)$", "# Un\ntexte\n#Deux"))
+show(regex.escape("1+1=2? (oui) [x] \{y\} $5 a.b"))
+show(regex.matches(regex.escape("a.b"), "axb"))
+show(regex.check("[a-"))
+show(regex.check("(?<n>a)"))
+// A pattern that explodes elsewhere stays fast here.
+show(regex.matches("(a*)*b", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+show(regex.all("(", "x"))

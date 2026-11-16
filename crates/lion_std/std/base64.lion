@@ -1,0 +1,14 @@
+// Base64 (§23, C105; RFC 4648): a text written with 64 safe characters, as HTTP
+// authentication and many APIs use it.
+
+// The UTF-8 bytes of `t` in Base64: `base64.encode("Lion!")` gives `TGlvbiE=`.
+fun encode(t in Text) in Text = encode_bytes(t, false)
+
+// The variant for addresses and tokens: `-` and `_` instead of `+` and `/`, no `=`.
+fun encode_url(t in Text) in Text = encode_bytes(t, true)
+
+// The text written in Base64, in either variant; an Error if it is not Base64 or not
+// UTF-8 text.
+foreign "lion" fun decode(t in Text) in Text or Error
+
+private foreign "lion" fun encode_bytes(t in Text, url in Bool) in Text

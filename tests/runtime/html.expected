@@ -1,0 +1,26 @@
+exit: 2
+----- stdout
+Element(tag: "title", text: "Les & nouvelles", html: "Les &amp; nouvelles", outer: "<title>Les &amp; nouvelles</title>", attributes: [])
+Premier | /a?x=1&y=2 | 12 € | item
+Deuxième | https://ex.com/b | 7 € | item hot
+["Un texte à lire", "Encore"]
+["h1", "a", "img"]
+7
+["href", "data-id"]
+none
+<img src="logo.png" alt="Logo">
+12&nbsp;&euro;
+2
+0
+&lt;a href=&quot;x&quot;&gt;Léa &amp; &#39;Max&#39;&lt;/a&gt;
+<ééé&inconnu;
+----- stderr
+bug: `a:hover` is not a selector
+   --> tests/runtime/html.lion:29:6
+    |
+ 29 | show(page.select("a:hover"))
+    |      ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = `:hover` is not supported: the pseudo-classes are :first-child, :last-child and :nth-child(n)
+    = help: check the value before the call
+

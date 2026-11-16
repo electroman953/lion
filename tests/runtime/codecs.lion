@@ -1,0 +1,32 @@
+// The modules `url`, `base64` and `hash` (C105).
+use url
+use base64
+use hash
+
+let u = try url.parse("HTTPS://moi@Site.fr:8080/a/b?q=l%C3%A9a+m&n=2#top")
+show(u)
+show("{u.param("q")} {u.param("n")} {u.param("x")}")
+show((try url.parse("http://site.fr")).path)
+show(url.parse("/relative"))
+show(url.parse("http://site.fr:80x/"))
+for link in ["d", "../d", "/d?x", "//cdn.fr/x", "?y=2", "#top", "mailto:a@b.fr"]:
+    show(try url.join("https://site.fr/a/b/c?q=1", link))
+;
+show(url.with_param(url.with_param("https://s.fr/search", "q", "lion & co"), "page", "2"))
+show(url.encode("é a/b?"))
+show(url.decode("%C3%A9+a%2Fb"))
+show(url.decode("%FF"))
+
+show(base64.encode("Léa:secret"))
+show(base64.encode_url("ÿÿ>"))
+show(base64.decode("TMOpYTpzZWNyZXQ="))
+show(base64.decode("w7_Dvz4"))
+show(base64.decode("TG*v"))
+show(base64.decode("/w=="))
+
+show(hash.sha256(""))
+show(hash.sha256("Lion"))
+show(hash.md5("The quick brown fox jumps over the lazy dog"))
+show(hash.hmac_sha256("key", "The quick brown fox jumps over the lazy dog"))
+show(hash.file_sha256("tests/runtime/data/api.json"))
+show(hash.file_sha256("tests/runtime/data/absent"))

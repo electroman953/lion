@@ -1,0 +1,51 @@
+// JSON values of any shape (C105): reading inside, building and writing.
+use json
+
+let api = try json.load("tests/runtime/data/api.json")
+show(api.kind())
+show(api.names())
+show(try (try api.get("total")).int())
+show(try (try api.get("ok")).bool())
+show((try api.get("next")).is_null())
+let items = try api.path("data.items")
+show(items.size())
+for item in items.items():
+    let name = try (try item.get("name")).text()
+    let score = try (try item.get("score")).float()
+    show("{name}: {score}, tags: {item.has("tags")}")
+;
+show(try (try api.path("data.items[1].tags[2]")).text())
+show(api.path("data.items[3]"))
+show(api.path("data.items[1].name.first"))
+show(api.get("missing"))
+show((try api.get("total")).text())
+show((try api.get("data")).items()[1].kind())
+show(json.decode("\{\"a\": \}"))
+
+struct Item:
+    name in Text
+    price in Float
+    tags in List of Text
+;
+Kind = [book, toy]
+var stock = {} in Map of (Text, Int)
+stock["livres"] = 3
+let out = (json.object()
+    .with("who", json.from("Léa \"L\""))
+    .with("items", json.from([Item("a", 1.5, ["x"]), Item("b", 2.0, [])]))
+    .with("stock", json.from(stock))
+    .with("kinds", json.from([Kind.book, Kind.toy]))
+    .with("none", json.null())
+    .with("half", json.from(1 over 2))
+    .with("api", try api.get("total"))
+    .with("who", json.from("Léa")))
+show(out.encode())
+show(json.from([1, 2]).plus(json.from("trois")).encode())
+show(out.get("stock"))
+show(json.from(none).encode())
+show((try json.decode(out.encode())) == out)
+try json.save("target/tmp/json_values.json", out)
+show((try json.load("target/tmp/json_values.json")) == out)
+show(json.from(["x"]).pretty())
+show(json.object().pretty())
+show(json.from(3).with("a", json.null()))

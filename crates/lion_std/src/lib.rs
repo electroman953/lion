@@ -5,6 +5,11 @@
 pub fn module(name: &str) -> Option<&'static str> {
     Some(match name {
         "csv" => include_str!("../std/csv.lion"),
+        "url" => include_str!("../std/url.lion"),
+        "regex" => include_str!("../std/regex.lion"),
+        "html" => include_str!("../std/html.lion"),
+        "hash" => include_str!("../std/hash.lion"),
+        "base64" => include_str!("../std/base64.lion"),
         "dates" => include_str!("../std/dates.lion"),
         "files" => include_str!("../std/files.lion"),
         "json" => include_str!("../std/json.lion"),
@@ -21,5 +26,7 @@ pub fn module(name: &str) -> Option<&'static str> {
 }
 
 /// The names of the standard modules.
-pub const MODULES: &[&str] =
-    &["csv", "dates", "files", "json", "math", "net", "random", "sets", "system", "text", "time", "ui"];
+pub const MODULES: &[&str] = &[
+    "base64", "csv", "dates", "files", "hash", "html", "json", "math", "net", "random", "regex", "sets",
+    "system", "text", "time", "ui", "url",
+];

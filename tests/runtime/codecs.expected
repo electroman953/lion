@@ -1,0 +1,31 @@
+exit: 0
+----- stdout
+Url(scheme: "https", user: "moi", host: "site.fr", port: 8080, path: "/a/b", query: "q=l%C3%A9a+m&n=2", fragment: "top")
+léa m 2 none
+/
+error("`/relative` is not an absolute address, such as https://site.fr/page")
+error("`80x` is not a port")
+https://site.fr/a/b/d
+https://site.fr/a/d
+https://site.fr/d?x
+https://cdn.fr/x
+https://site.fr/a/b/c?y=2
+https://site.fr/a/b/c?q=1#top
+mailto:a@b.fr
+https://s.fr/search?q=lion%20%26%20co&page=2
+%C3%A9%20a%2Fb%3F
+é a/b
+error("`%FF` decoded is not UTF-8 text")
+TMOpYTpzZWNyZXQ=
+w7_Dvz4
+Léa:secret
+ÿÿ>
+error("`*` at position 3 is not Base64")
+error("the bytes written in Base64 are not UTF-8 text")
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+ffee89e3ddeb59c589c78e13fdde6702ab73bc0e3510fdaede786890360d3a48
+9e107d9d372bb6826bd81d3542a419d6
+f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8
+81297f41effe7a08d794b783898ed6d3f13b20e0c4ffe4cab70031720e7e4999
+error("cannot read `tests/runtime/data/absent`: the file does not exist")
+----- stderr

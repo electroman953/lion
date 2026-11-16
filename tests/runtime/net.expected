@@ -3,7 +3,7 @@ exit: 0
 GET /hello 
 200 true Bonjour Léa M | text/plain; charset=utf-8
 POST /form name=L%C3%A9a%20%26%20Max
-201 true {"name": "Léa & Max", "type": "application/x-www-form-urlencoded"}
+201 true {"name":"Léa & Max","type":"application/x-www-form-urlencoded"}
 DELETE /a/b 
 404 false no page at /a/b
 GET /old 

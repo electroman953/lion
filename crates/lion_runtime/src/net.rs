@@ -316,7 +316,8 @@ pub fn fetch(
     headers: &[(String, String)],
     body: &str,
     timeout: f64,
-) -> Result<Response, String> {
+    jar: Option<&str>,
+) -> Result<(Response, Option<String>), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err(format!("`{url}` is not a web address: it starts with http:// or https://"));
     }
@@ -335,7 +336,16 @@ pub fn fetch(
     command
         .args(["--silent", "--show-error", "--location", "--max-redirs", "10"])
         .args(["--proto", "=http,https", "--proto-redir", "=http,https"])
-        .args(["--max-time", &format!("{timeout}"), "--dump-header", "-", "--request", method]);
+        .args(["--max-time", &format!("{timeout}"), "--dump-header", "-"]);
+    // GET and POST are curl's own: a POST answered by 303 then goes on with a GET, as in a
+    // browser, which `--request POST` would prevent.
+    if method != "GET" && method != "POST" {
+        command.args(["--request", method]);
+    }
+    // A request says it comes from Lion, unless the program says otherwise.
+    if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("user-agent")) {
+        command.args(["--user-agent", concat!("lion/", env!("CARGO_PKG_VERSION"))]);
+    }
     for (name, value) in headers {
         command.arg("--header").arg(if value.is_empty() {
             format!("{name};")
@@ -347,7 +357,36 @@ pub fn fetch(
     if sends {
         command.args(["--data-binary", "@-"]);
     }
+    // The cookies of a session go through a file of curl's own format, read back after.
+    let jar_file = match jar {
+        Some(jar) => {
+            let path = std::env::temp_dir().join(format!(
+                "lion-cookies-{}-{}.txt",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::write(&path, jar).map_err(|problem| format!("cannot keep the cookies: {problem}"))?;
+            command.arg("--cookie").arg(&path).arg("--cookie-jar").arg(&path);
+            Some(path)
+        }
+        None => None,
+    };
     command.arg("--url").arg(url).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let output = run_curl(command, sends, body);
+    let jar = jar_file.map(|path| {
+        let kept = std::fs::read_to_string(&path).unwrap_or_default();
+        let _ = std::fs::remove_file(&path);
+        kept
+    });
+    let output = output?;
+    if !output.status.success() {
+        return Err(format!("cannot reach `{url}`: {}", curl_message(&output.stderr)));
+    }
+    let response = parse_response(&output.stdout).map_err(|problem| format!("`{url}`: {problem}"))?;
+    Ok((response, jar))
+}
+
+fn run_curl(mut command: Command, sends: bool, body: &str) -> Result<std::process::Output, String> {
     let mut child = command.spawn().map_err(|problem| curl_missing(&problem))?;
     let mut stdin = child.stdin.take().expect("piped");
     let body = body.to_string();
@@ -356,12 +395,9 @@ pub fn fetch(
             let _ = stdin.write_all(body.as_bytes());
         }
     });
-    let output = child.wait_with_output().map_err(|problem| format!("`curl` failed: {problem}"))?;
+    let output = child.wait_with_output().map_err(|problem| format!("`curl` failed: {problem}"));
     let _ = writer.join();
-    if !output.status.success() {
-        return Err(format!("cannot reach `{url}`: {}", curl_message(&output.stderr)));
-    }
-    parse_response(&output.stdout).map_err(|problem| format!("`{url}`: {problem}"))
+    output
 }
 
 /// The answer that `curl --dump-header -` writes: the heads of the redirections and of

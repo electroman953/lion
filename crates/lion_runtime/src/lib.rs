@@ -5,10 +5,13 @@
 //! modes produce exactly the same results and the same bugs (spec §22.2).
 
 pub mod bug;
+pub mod codec;
 pub mod format;
+pub mod html;
 pub mod json;
 pub mod net;
 pub mod ops;
+pub mod regex;
 pub mod stdlib;
 
 pub use bug::{BugKind, IntOp, MAX_CALL_DEPTH};

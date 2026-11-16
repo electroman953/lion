@@ -2,7 +2,7 @@
 
 Les décisions détaillées sont dans [docs/implementation-notes.md](docs/implementation-notes.md) (Rn, In, Cn). Ce qui reste à faire est dans [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) (§5, §8 et §9). Chaque ligne correspond à un commit du dépôt.
 
-## 2026-11-16, sixième session : scripts et micro-serveurs
+## 2026-11-16, sixième session : scripts, scraping et micro-serveurs
 
 **Ajouté**
 - Le module `net` (C104) : requêtes web (`net.get`, `net.post`, `net.request`, `net.download`),
@@ -12,6 +12,16 @@ Les décisions détaillées sont dans [docs/implementation-notes.md](docs/implem
 - Le module `system` (C104) : `system.args()`, `system.env(nom)`, `system.run(programme, arguments)`
   et `system.shell(ligne)`. `lion run f.lion a b` donne `a` et `b` au programme.
 - `files` : `append`, `list`, `is_folder`, `make_folder`, `remove`, `copy`, `move`.
+
+- Outils pour le scraping (C105) : `html` (pages lues comme par un navigateur, sélecteurs CSS),
+  `regex` (moteur en temps linéaire), `url` (`parse`, `join`, `with_param`), `base64`, `hash`
+  (SHA-256, MD5, HMAC), JSON de toute forme (`json.decode`, `v.path("a.b[1]")`, `json.from(x)`,
+  `v.with`, `v.pretty()`), sessions avec cookies (`net.session()`) et `r.json()`.
+
+**Modifié**
+- `net.json(texte)` devient `net.data(valeur)`, qui prend une `json.Value`.
+- Une requête envoie `User-Agent: lion/0.1.0` si le programme n'en donne pas ; un POST redirigé
+  par 303 continue en GET, comme dans un navigateur.
 
 **Corrigé**
 - La valeur par défaut d'un paramètre se vérifie avec le type écrit du paramètre :

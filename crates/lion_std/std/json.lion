@@ -37,3 +37,126 @@ fun Row.get(name in Text) in Text or Error:
     ;
     return error("there is no member `{name}`")
 ;
+
+// ---------------------------------------------------------------- any JSON (C105)
+
+// A JSON value of any shape: an object, a list, a text, a number, a Bool or `null`.
+// `v.get("name")`, `v.at(1)` and `v.path("data.items[1].name")` go inside it; `v.text()`,
+// `v.int()`, `v.float()` and `v.bool()` read it; `json.from(x)` makes one from a value of
+// Lion, and `v.encode()` writes it.
+struct Value:
+    private source in Text
+;
+
+// The value of a JSON text, of any shape.
+fun decode(content in Text) in Value or Error:
+    let source = try check(content)
+    return Value(source)
+;
+
+// The value of a JSON file.
+fun load(path in Text) in Value or Error:
+    let content = try files.read(path)
+    return decode(content)
+;
+
+// Writes the value in a file, indented.
+fun save(path in Text, v in Value) in None or Error:
+    return files.write(path, "{v.pretty()}\n")
+;
+
+// The JSON form of a value of Lion: a List, a Set or a tuple gives a list, a Map or a
+// structure an object (with all its fields), a Text a text, an Int, a Float or a
+// Rational a number, a Bool a Bool, `none` gives `null` and an enumeration value its
+// name. A `json.Value` stays as it is. A Float that is NaN or infinite gives `null`.
+fun from(x in T) in Value, T in Type = Value(encode_any(x))
+
+fun null() in Value = Value("null")
+
+// An empty object, to fill with `with`.
+fun object() in Value = Value("\{\}")
+
+// The JSON text, on one line.
+fun Value.encode() in Text = self.source
+
+// The JSON text, indented by two spaces.
+fun Value.pretty() in Text = pretty_text(self.source)
+
+// `null`, `bool`, `number`, `text`, `list` or `object`.
+fun Value.kind() in Text = kind_of(self.source)
+
+fun Value.is_null() in Bool = self.source == "null"
+
+// The member `name` of an object.
+fun Value.get(name in Text) in Value or Error:
+    let found = try member(self.source, name)
+    return Value(found)
+;
+
+// Whether the value is an object with a member `name`.
+fun Value.has(name in Text) in Bool = self.get(name) in Value
+
+// The element `i` of a list, from 1.
+fun Value.at(i in Int) in Value or Error:
+    let found = try element(self.source, i)
+    return Value(found)
+;
+
+// The value at a path of names and positions: `"data.items[1].name"`.
+fun Value.path(p in Text) in Value or Error:
+    let found = try follow(self.source, p)
+    return Value(found)
+;
+
+// The elements of a list, or the values of an object.
+fun Value.items() in List of Value = [Value(part), part in parts(self.source)]
+
+// The names of the members of an object.
+fun Value.names() in List of Text = names_of(self.source)
+
+// The number of elements of a list or of members of an object; 0 for the others.
+fun Value.size() in Int = parts(self.source).size
+
+// The text of a JSON text.
+fun Value.text() in Text or Error:
+    if self.kind() != "text": return error("the value is a {self.kind()}, not a text") ;
+    return scalar(self.source)
+;
+
+// A number without a fraction, as an Int.
+fun Value.int() in Int or Error:
+    if self.kind() != "number": return error("the value is a {self.kind()}, not a number") ;
+    return scalar(self.source) as Int
+;
+
+// A number, as a Float.
+fun Value.float() in Float or Error:
+    if self.kind() != "number": return error("the value is a {self.kind()}, not a number") ;
+    return scalar(self.source) as Float
+;
+
+fun Value.bool() in Bool or Error:
+    if self.kind() != "bool": return error("the value is a {self.kind()}, not a Bool") ;
+    return self.source == "true"
+;
+
+// The object with the member `name` set to `v`, after the others when it is new.
+// On a value that is not an object, a bug.
+fun Value.with(name in Text, v in Value) in Value = Value(with_member(self.source, name, v.source))
+
+// The list with `v` added at its end. On a value that is not a list, a bug.
+fun Value.plus(v in Value) in Value = Value(with_item(self.source, v.source))
+
+private foreign "lion" fun check(content in Text) in Text or Error
+private foreign "lion" fun encode_any(x in T) in Text, T in Type
+private foreign "lion" fun pretty_text(source in Text) in Text
+private foreign "lion" fun kind_of(source in Text) in Text
+private foreign "lion" fun member(source in Text, name in Text) in Text or Error
+private foreign "lion" fun element(source in Text, i in Int) in Text or Error
+private foreign "lion" fun follow(source in Text, p in Text) in Text or Error
+private foreign "lion" fun parts(source in Text) in List of Text
+private foreign "lion" fun names_of(source in Text) in List of Text
+// A text without its quotes, a number as written, `true`, `false` or `null`.
+private foreign "lion" fun scalar(source in Text) in Text
+private foreign "lion" fun with_member(source in Text, name in Text, v in Text) in Text
+private foreign "lion" fun with_item(source in Text, v in Text) in Text

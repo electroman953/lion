@@ -1,4 +1,5 @@
 // The module `net` (C104): a server on a free port, and requests made by tasks.
+use json
 use net
 
 let server = try net.listen(0)
@@ -8,7 +9,7 @@ let base = "http://127.0.0.1:{server.port()}"
 fun answer(r in net.Request) in net.Response:
     if r.path == "/hello": return net.plain("Bonjour {r.query("name")}") ;
     if r.path == "/form" and r.method == "POST":
-        return net.json("\{\"name\": \"{r.form("name")}\", \"type\": \"{r.header("CONTENT-TYPE")}\"\}", 201)
+        return net.data(json.object().with("name", json.from(r.form("name"))).with("type", json.from(r.header("CONTENT-TYPE"))), 201)
     ;
     if r.path == "/old": return net.redirect("/hello?name=moved") ;
     return net.plain("no page at {r.path}", 404)

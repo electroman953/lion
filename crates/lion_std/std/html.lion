@@ -1,0 +1,63 @@
+// HTML pages (§23, C105): reading a page as a browser does, and finding its elements
+// with CSS selectors, to extract data from the web.
+//
+// Selectors: `a`, `*`, `#id`, `.class`, `[href]`, `[type=text]`, `[class~=word]`,
+// `[href^=https]`, `[href$=.pdf]`, `[href*=lion]`, `:first-child`, `:last-child`,
+// `:nth-child(2)`, `div p` (inside), `ul > li` (child), and `h1, h2`. A selector that is
+// not one is a bug.
+
+use text
+
+// An element: its tag (`a`, `div`…), its text without tags, entities decoded and spaces
+// made one, and the HTML inside it.
+struct Element:
+    tag in Text
+    text in Text
+    html in Text
+    private outer in Text
+    private attributes in List of Text
+;
+
+// The page, as the element that holds everything.
+fun parse(page in Text) in Element = Element("", text_of(page), page, page, [])
+
+// The elements inside this one that match the selector, in the order of the page.
+fun Element.select(selector in Text) in List of Element:
+    return [to_element(e), e in select_in(self.outer, selector, self.tag != "")]
+;
+
+// The first element inside this one that matches the selector, or `none`.
+fun Element.first(selector in Text) in maybe Element:
+    let found = self.select(selector)
+    if found.size == 0: return none ;
+    return found[1]
+;
+
+// The value of the attribute `name` (`href`, `src`, `class`…), entities decoded, or
+// `none`.
+fun Element.attr(name in Text) in maybe Text:
+    let wanted = text.lower(name)
+    for i in 1..self.attributes.size div 2:
+        if self.attributes[2 * i - 1] == wanted: return self.attributes[2 * i] ;
+    ;
+    return none
+;
+
+// The names of the attributes, as written.
+fun Element.attribute_names() in List of Text = [self.attributes[2 * i - 1], i in 1..self.attributes.size div 2]
+
+// The HTML of the element, its own tags included.
+fun Element.outer_html() in Text = self.outer
+
+// `t` with `&`, `<`, `>`, `"` and `'` written as entities, to put it in a page.
+foreign "lion" fun escape(t in Text) in Text
+
+// `t` with its entities decoded: `&eacute;` and `&#233;` give `é`.
+foreign "lion" fun unescape(t in Text) in Text
+
+// The tag, the text, the inner and outer HTML, then the names and values of the
+// attributes of each element found.
+private foreign "lion" fun select_in(source in Text, selector in Text, inside in Bool) in List of List of Text
+private foreign "lion" fun text_of(source in Text) in Text
+
+private fun to_element(e in List of Text) in Element = Element(e[1], e[2], e[3], e[4], e[5..e.size])

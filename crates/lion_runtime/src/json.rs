@@ -72,6 +72,127 @@ impl Json {
     }
 }
 
+impl Json {
+    /// `null`, `bool`, `number`, `text`, `list` or `object`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Json::Null => "null",
+            Json::Bool(_) => "bool",
+            Json::Number(_) => "number",
+            Json::Text(_) => "text",
+            Json::List(_) => "list",
+            Json::Object(_) => "object",
+        }
+    }
+
+    /// The value at `path`, such as `data.items[1].name`; lists count from 1, as in
+    /// Lion (§16.2).
+    pub fn follow(&self, path: &str) -> Result<&Json, String> {
+        let mut current = self;
+        let mut walked = String::new();
+        let mut rest = path.trim();
+        while !rest.is_empty() {
+            if let Some(after) = rest.strip_prefix('[') {
+                let close = after.find(']').ok_or(format!("`[` in the path `{path}` has no `]`"))?;
+                let index: usize = after[..close].trim().parse().map_err(|_| {
+                    format!("`[{}]` in the path `{path}` is not a position from 1", &after[..close])
+                })?;
+                current = current.element(index).map_err(|problem| at(&walked, problem))?;
+                walked.push_str(&format!("[{index}]"));
+                rest = &after[close + 1..];
+            } else {
+                let rest_name = rest.strip_prefix('.').unwrap_or(rest);
+                let end = rest_name.find(['.', '[']).unwrap_or(rest_name.len());
+                let name = &rest_name[..end];
+                if name.is_empty() {
+                    return Err(format!("the path `{path}` has an empty name"));
+                }
+                current = current.member(name).map_err(|problem| at(&walked, problem))?;
+                if !walked.is_empty() {
+                    walked.push('.');
+                }
+                walked.push_str(name);
+                rest = &rest_name[end..];
+            }
+        }
+        Ok(current)
+    }
+
+    /// The member `name` of an object, or why there is none.
+    pub fn member(&self, name: &str) -> Result<&Json, String> {
+        match self {
+            Json::Object(members) => members
+                .iter()
+                .rev()
+                .find(|(member, _)| member == name)
+                .map(|(_, value)| value)
+                .ok_or_else(|| format!("there is no member `{name}`")),
+            other => Err(format!("the value is a {}, not an object with a member `{name}`", other.kind())),
+        }
+    }
+
+    /// The element at `index`, from 1, of a list, or why there is none.
+    pub fn element(&self, index: usize) -> Result<&Json, String> {
+        match self {
+            Json::List(items) if index >= 1 && index <= items.len() => Ok(&items[index - 1]),
+            Json::List(items) => Err(format!("there is no element {index} in a list of {}", items.len())),
+            other => Err(format!("the value is a {}, not a list", other.kind())),
+        }
+    }
+
+    /// The JSON text, indented by two spaces.
+    pub fn pretty(&self) -> String {
+        let mut out = String::new();
+        self.write_pretty(&mut out, 0);
+        out
+    }
+
+    fn write_pretty(&self, out: &mut String, depth: usize) {
+        let indent = |out: &mut String, depth: usize| out.extend(std::iter::repeat_n("  ", depth));
+        match self {
+            Json::List(items) if !items.is_empty() => {
+                out.push_str("[\n");
+                for (index, item) in items.iter().enumerate() {
+                    indent(out, depth + 1);
+                    item.write_pretty(out, depth + 1);
+                    out.push_str(if index + 1 < items.len() { ",\n" } else { "\n" });
+                }
+                indent(out, depth);
+                out.push(']');
+            }
+            Json::Object(members) if !members.is_empty() => {
+                out.push_str("{\n");
+                for (index, (name, value)) in members.iter().enumerate() {
+                    indent(out, depth + 1);
+                    out.push_str(&Json::Text(name.clone()).to_string());
+                    out.push_str(": ");
+                    value.write_pretty(out, depth + 1);
+                    out.push_str(if index + 1 < members.len() { ",\n" } else { "\n" });
+                }
+                indent(out, depth);
+                out.push('}');
+            }
+            other => out.push_str(&other.to_string()),
+        }
+    }
+}
+
+fn at(walked: &str, problem: String) -> String {
+    if walked.is_empty() { problem } else { format!("at `{walked}`: {problem}") }
+}
+
+static LAST: std::sync::Mutex<Option<(String, Json)>> = std::sync::Mutex::new(None);
+
+/// The value of a JSON text known to be valid, read once for several uses in a row.
+pub fn cached<R>(text: &str, f: impl FnOnce(&Json) -> R) -> R {
+    let mut last = LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if last.as_ref().is_none_or(|(source, _)| source != text) {
+        let value = parse(text).unwrap_or(Json::Null);
+        *last = Some((text.to_string(), value));
+    }
+    f(&last.as_ref().expect("read above").1)
+}
+
 /// The JSON text of a value, on one line.
 impl std::fmt::Display for Json {
     fn fmt(&self, out: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -437,5 +558,32 @@ mod tests {
         assert_eq!(table[0].problems[2], "the value of `tags` is a list, not a text");
         assert_eq!(rows("{}").err().unwrap(), "the JSON text is not a list of objects");
         assert_eq!(rows("[1]").err().unwrap(), "the element 1 of the JSON list is a number, not an object");
+    }
+}
+
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+
+    #[test]
+    fn follows_paths_and_writes_indented() {
+        let value =
+            parse(r#"{"data": {"items": [{"name": "Léa"}, {"name": "Max", "tags": []}]}, "n": 2}"#).unwrap();
+        assert_eq!(value.follow("data.items[2].name").unwrap(), &Json::text("Max"));
+        assert_eq!(value.follow("n").unwrap(), &Json::int(2));
+        assert_eq!(
+            value.follow("data.items[3]").unwrap_err(),
+            "at `data.items`: there is no element 3 in a list of 2"
+        );
+        assert_eq!(
+            value.follow("n.x").unwrap_err(),
+            "at `n`: the value is a number, not an object with a member `x`"
+        );
+        assert_eq!(
+            value.follow("data.items[0]").unwrap_err(),
+            "at `data.items`: there is no element 0 in a list of 2"
+        );
+        let small = parse(r#"{"a": [1, {}], "b": []}"#).unwrap();
+        assert_eq!(small.pretty(), "{\n  \"a\": [\n    1,\n    {}\n  ],\n  \"b\": []\n}");
     }
 }

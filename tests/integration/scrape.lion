@@ -1,0 +1,75 @@
+// Scraping from end to end (C104, C105): a small shop served by Lion, a session that
+// logs in and keeps its cookie, a page read with selectors, prices found by a pattern,
+// links made absolute, a JSON API, and the result written in a CSV file.
+use csv
+use files
+use html
+use json
+use net
+use regex
+use url
+
+let server = try net.listen(0)
+let base = "http://127.0.0.1:{server.port()}"
+
+struct Stock:
+    id in Int
+    left in Int
+;
+
+fun shop(r in net.Request) in net.Response:
+    let logged = r.header("Cookie") == "session=abc123"
+    if r.path == "/login" and r.method == "POST":
+        if r.form("user") != "léa": return net.plain("refused", 403) ;
+        return net.Response(303, "", [net.Header("Set-Cookie", "session=abc123; Path=/"), net.Header("Location", "/shop/list")])
+    ;
+    if not logged: return net.plain("log in first", 401) ;
+    if r.path == "/shop/list":
+        return net.html("<h1>Shop</h1><ul><li class=p><a href='item/1'>Lampe &amp; abat-jour</a> <b>12,50 €</b><li class=p><a href='/shop/item/2'>Tasse</a> <b>4 €</b><li class=ad>Pub</ul>")
+    ;
+    if r.path == "/api/stock": return net.data(json.from([Stock(1, 3), Stock(2, 0)])) ;
+    return net.plain("no page at {r.path}", 404)
+;
+
+fun serve_some(count in Int) in None or Error:
+    for i in 1..count:
+        let r = try server.next()
+        show("server: {r.method} {r.path} cookie={r.header("Cookie")} agent={r.header("User-Agent")}")
+        try r.respond(shop(r))
+    ;
+    return none
+;
+
+// The client, on its own thread: what it found, row by row.
+fun scrape(base in Text) in List of List of Text or Error:
+    var s = net.session([net.Header("User-Agent", "lion-scraper")])
+    let page = try s.post("{base}/login", "user={url.encode("léa")}")
+    var rows = [] in List of List of Text
+    let stock = try (try s.get("{base}/api/stock")).json()
+    for li in html.parse(page.body).select("li.p"):
+        let link = li.first("a")
+        let price = regex.find("(\\d+)(,(\\d+))?\\s*€", li.text)
+        let href = if link == none then none else link.attr("href")
+        if link != none and price != none and href != none:
+            let address = try url.join("{base}/shop/list", href)
+            let cents = if price.group(3) == "" then "00" else price.group(3)
+            let id = regex.all("\\d+$", address)[1]
+            var left = "?"
+            for item in stock.items():
+                if "{try (try item.get("id")).int()}" == id: left = "{try (try item.get("left")).int()}" ;
+            ;
+            rows.add([link.text, "{price.group(1)}.{cents}", (try url.parse(address)).path, left])
+        ;
+    ;
+    return rows
+;
+
+let client = task scrape(base)
+try serve_some(3)
+let rows = try wait client
+for row in rows: show(row) ;
+let outsider = task net.get("{base}/shop/list")
+try serve_some(1)
+show((try wait outsider).status)
+try csv.write("target/tmp/scrape.csv", ["name", "price", "link", "left"], rows)
+show(try files.read("target/tmp/scrape.csv"))

@@ -1,0 +1,14 @@
+exit: 0
+----- stdout
+server: POST /login cookie=none agent=lion-scraper
+server: GET /shop/list cookie=session=abc123 agent=lion-scraper
+server: GET /api/stock cookie=session=abc123 agent=lion-scraper
+["Lampe & abat-jour", "12.50", "/shop/item/1", "3"]
+["Tasse", "4.00", "/shop/item/2", "0"]
+server: GET /shop/list cookie=none agent=lion/0.1.0
+401
+name,price,link,left
+Lampe & abat-jour,12.50,/shop/item/1,3
+Tasse,4.00,/shop/item/2,0
+
+----- stderr
