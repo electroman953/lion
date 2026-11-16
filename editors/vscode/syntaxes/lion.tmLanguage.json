@@ -72,6 +72,52 @@
     "texts": {
       "patterns": [
         {
+          "name": "string.quoted.triple.lion",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.lion"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.lion"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.lion",
+              "match": "\\\\[nt\\\\\\\"{}]"
+            },
+            {
+              "name": "invalid.illegal.escape.lion",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.interpolation.lion",
+              "contentName": "meta.embedded.expression.lion",
+              "begin": "\\{",
+              "end": "\\}",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.section.interpolation.begin.lion"
+                }
+              },
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.section.interpolation.end.lion"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#expression"
+                }
+              ]
+            }
+          ]
+        },
+        {
           "name": "string.quoted.double.lion",
           "begin": "\"",
           "end": "\"|$",
@@ -250,7 +296,7 @@
       "patterns": [
         {
           "name": "support.type.primitive.lion",
-          "match": "\\b(Int|Float|Rational|Text|Bool|None|List|Set|Map|Range|Domain|Error|Type|Comparable)\\b"
+          "match": "\\b(Int|Float|Rational|Text|Bytes|Bool|None|List|Set|Map|Range|Domain|Error|Type|Comparable)\\b"
         },
         {
           "name": "entity.name.type.lion",

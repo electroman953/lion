@@ -207,6 +207,8 @@ impl Checker<'_> {
                     self.structs[self.struct_index(structure)].fields.iter().map(|field| field.ty).collect();
                 fields.into_iter().all(|field| field.is_some_and(|ty| self.embeddable(ty, seen)))
             }
+            // Bytes have no literal form (C117).
+            Type::Bytes => false,
             Type::Fun(_)
             | Type::Domain(_)
             | Type::Task(_)

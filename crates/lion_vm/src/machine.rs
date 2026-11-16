@@ -977,6 +977,14 @@ impl<'a> Machine<'a> {
                     let value = shared::text_to_int(self.text(a));
                     self.set(dst, value);
                 }
+                Instr::TextToBytes { dst, a } => {
+                    let value = shared::text_to_bytes(self.text(a));
+                    self.set(dst, value);
+                }
+                Instr::BytesToText { dst, a } => {
+                    let value = shared::bytes_to_text(&self.stack[self.base + a as usize]);
+                    self.set(dst, value);
+                }
                 Instr::TextToFloat { dst, a } => {
                     let value = shared::text_to_float(self.text(a));
                     self.set(dst, value);

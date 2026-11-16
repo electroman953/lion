@@ -18,6 +18,8 @@ pub enum Value {
     /// An exact fraction, simplified (§8.3); boxed, so that a value stays small.
     Rational(Arc<[i64; 2]>),
     Text(Arc<String>),
+    /// Binary data (C117).
+    Bytes(Arc<Vec<u8>>),
     /// An Error made by `error(...)` or by a failed conversion: its message (§18).
     Error(Arc<String>),
     /// A List, copied only when it is changed while shared (§17.1).
@@ -71,6 +73,7 @@ impl Value {
             Value::Float(value) => format_float(*value),
             Value::Rational(value) => format_rational(**value),
             Value::Text(text) => text.to_string(),
+            Value::Bytes(bytes) => describe_bytes(bytes),
             Value::Range(bounds) => format!("{}..{}", bounds[0], bounds[1]),
             Value::Error(message) => format!("error({})", quote_text(message)),
             Value::List(elements) => {
@@ -152,13 +155,14 @@ impl Value {
     }
 
     /// The kind of the value, as one bit, for type tests (§7.1).
-    pub fn kind(&self) -> u16 {
+    pub fn kind(&self) -> u32 {
         match self {
             Value::Int(_) => kinds::INT,
             Value::Float(_) => kinds::FLOAT,
             Value::Rational(_) => kinds::RATIONAL,
             Value::Bool(_) => kinds::BOOL,
             Value::Text(_) => kinds::TEXT,
+            Value::Bytes(_) => kinds::BYTES,
             Value::None => kinds::NONE,
             Value::Range(_) => kinds::RANGE,
             Value::List(_) => kinds::LIST,
@@ -185,6 +189,7 @@ impl Value {
             // Always simplified: equal fractions have equal parts.
             (Value::Rational(a), Value::Rational(b)) => a == b,
             (Value::Text(a), Value::Text(b)) => a == b,
+            (Value::Bytes(a), Value::Bytes(b)) => a == b,
             (Value::Range(a), Value::Range(b)) => a == b,
             (Value::Error(a), Value::Error(b)) => a == b,
             (Value::List(a), Value::List(b)) => {
@@ -212,6 +217,7 @@ impl Value {
             Value::Float(_) => "Float",
             Value::Rational(_) => "Rational",
             Value::Text(_) => "Text",
+            Value::Bytes(_) => "Bytes",
             Value::Range(_) => "Range",
             Value::Error(_) => "Error",
             Value::List(_) => "List",
@@ -230,23 +236,35 @@ impl Value {
 
 /// The kinds of values, as bits: a type test checks the kind of a value against the
 /// set of kinds of the tested type (§7.1).
+/// `<5 bytes: 89 50 4e 47 0d>`, the first 16 of them in hexadecimal (C117).
+pub fn describe_bytes(bytes: &[u8]) -> String {
+    let shown: Vec<String> = bytes.iter().take(16).map(|b| format!("{b:02x}")).collect();
+    let more = if bytes.len() > 16 { " …" } else { "" };
+    let plural = if bytes.len() == 1 { "" } else { "s" };
+    if bytes.is_empty() {
+        return "<0 bytes>".to_string();
+    }
+    format!("<{} byte{plural}: {}{more}>", bytes.len(), shown.join(" "))
+}
+
 pub mod kinds {
-    pub const INT: u16 = 1;
-    pub const FLOAT: u16 = 1 << 1;
-    pub const BOOL: u16 = 1 << 2;
-    pub const TEXT: u16 = 1 << 3;
-    pub const NONE: u16 = 1 << 4;
-    pub const RANGE: u16 = 1 << 5;
-    pub const LIST: u16 = 1 << 6;
-    pub const ERROR: u16 = 1 << 7;
-    pub const STRUCT: u16 = 1 << 8;
-    pub const ENUM: u16 = 1 << 9;
-    pub const SET: u16 = 1 << 10;
-    pub const TUPLE: u16 = 1 << 11;
-    pub const FUN: u16 = 1 << 12;
-    pub const TASK: u16 = 1 << 13;
-    pub const RATIONAL: u16 = 1 << 14;
-    pub const MAP: u16 = 1 << 15;
+    pub const INT: u32 = 1;
+    pub const FLOAT: u32 = 1 << 1;
+    pub const BOOL: u32 = 1 << 2;
+    pub const TEXT: u32 = 1 << 3;
+    pub const NONE: u32 = 1 << 4;
+    pub const RANGE: u32 = 1 << 5;
+    pub const LIST: u32 = 1 << 6;
+    pub const ERROR: u32 = 1 << 7;
+    pub const STRUCT: u32 = 1 << 8;
+    pub const ENUM: u32 = 1 << 9;
+    pub const SET: u32 = 1 << 10;
+    pub const TUPLE: u32 = 1 << 11;
+    pub const FUN: u32 = 1 << 12;
+    pub const TASK: u32 = 1 << 13;
+    pub const RATIONAL: u32 = 1 << 14;
+    pub const MAP: u32 = 1 << 15;
+    pub const BYTES: u32 = 1 << 16;
 }
 
 /// The value of a cell. A thread that panicked while holding it has already stopped the

@@ -169,16 +169,19 @@ pub enum Instr {
     SumRational { dst: Reg, values: Reg },
 
     /// Whether the kind of the value in `src` is one of the bits of `kinds`.
-    TypeTest { dst: Reg, src: Reg, kinds: u16 },
+    TypeTest { dst: Reg, src: Reg, kinds: u32 },
     /// Whether the kind of the value in `src` is one of the bits of `kinds`, or the value
     /// is a structure or an enumeration of one of the types in `Program::type_sets[set]`.
-    TypeTestNamed { dst: Reg, src: Reg, kinds: u16, set: u32 },
+    TypeTestNamed { dst: Reg, src: Reg, kinds: u32, set: u32 },
     /// The value in `src`, unless it is an Error: then the function returns it, or the
     /// script stops (§18.3).
     Try { dst: Reg, src: Reg, errors: u32 },
     NewError { dst: Reg, a: Reg },
     ErrorMessage { dst: Reg, a: Reg },
     TextToInt { dst: Reg, a: Reg },
+    /// `t as Bytes`, `b as Text` (C117).
+    TextToBytes { dst: Reg, a: Reg },
+    BytesToText { dst: Reg, a: Reg },
     TextToFloat { dst: Reg, a: Reg },
 
     /// A value of the structure `layout`, from the values of its fields in the `count`

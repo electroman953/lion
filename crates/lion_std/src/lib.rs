@@ -4,6 +4,7 @@
 /// The source of the standard module `name`, as `use name` loads it.
 pub fn module(name: &str) -> Option<&'static str> {
     Some(match name {
+        "bytes" => include_str!("../std/bytes.lion"),
         "csv" => include_str!("../std/csv.lion"),
         "url" => include_str!("../std/url.lion"),
         "regex" => include_str!("../std/regex.lion"),
@@ -28,6 +29,6 @@ pub fn module(name: &str) -> Option<&'static str> {
 
 /// The names of the standard modules.
 pub const MODULES: &[&str] = &[
-    "base64", "csv", "dates", "files", "hash", "html", "json", "math", "net", "random", "regex", "sets",
-    "system", "term", "text", "time", "ui", "url",
+    "base64", "bytes", "csv", "dates", "files", "hash", "html", "json", "math", "net", "random", "regex",
+    "sets", "system", "term", "text", "time", "ui", "url",
 ];

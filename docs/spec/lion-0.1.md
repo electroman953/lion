@@ -261,6 +261,7 @@ if ("Léa", 25) in Student: ... ;       // faux : l'invariant de Student est vio
 | `Rational` | fraction exacte, optionnelle | §8 |
 | `Bool` | `{true, false}` | §13 |
 | `Text` | texte Unicode | §16 |
+| `Bytes` | octets de 0 à 255, pour les données binaires ; `b.size`, `b[i]` (un Int), `b[a..c]`, `for x in b` \[C117\] | §23 |
 | `None` | la seule valeur `none` | §7.4 |
 | `List of T`, `Set of T`, `Domain of T`, `Range`, `Map of (K, V)` | collections | §16 |
 | `(Text, Int)` | couple ou n-uplet | §16 |
@@ -332,6 +333,7 @@ Les entiers sont fixes et rapides, mais un débordement arrête toujours le prog
 | Float → Int | `3.7 as Int` | `3` : troncature vers zéro. NaN, infini ou valeur hors limites : bug \[D74\] |
 | Rational → Float | `r as Float`, ou automatique dans un calcul mixte | Float |
 | Texte → nombre | `"12" as Int` | `Int or Error` : l'erreur dit pourquoi \[D14\] |
+| Texte ↔ octets | `t as Bytes`, `b as Text` | les octets UTF-8 du texte ; dans l'autre sens, `Text or Error` \[C117\] |
 | Nombre → texte | `12 as Text` | `"12"` |
 | `json.Value` → type de Lion | `v as User`, `v as List of Int` | `User or Error` : l'erreur dit où et pourquoi la valeur ne convient pas \[C107\] |
 

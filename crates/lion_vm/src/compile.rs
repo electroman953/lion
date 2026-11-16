@@ -709,6 +709,8 @@ impl Compiler<'_> {
                     Conversion::RationalToFloat => Instr::RationalToFloat { dst, a },
                     Conversion::ToText => Instr::ToText { dst, a },
                     Conversion::TextToInt => Instr::TextToInt { dst, a },
+                    Conversion::TextToBytes => Instr::TextToBytes { dst, a },
+                    Conversion::BytesToText => Instr::BytesToText { dst, a },
                     Conversion::TextToFloat => Instr::TextToFloat { dst, a },
                     Conversion::Literal => Instr::Literal { dst, a },
                     Conversion::EnumPosition => Instr::EnumPosition { dst, a },
@@ -934,7 +936,7 @@ impl Compiler<'_> {
         use crate::value::kinds;
         let kinds = kinds_of(part);
         let (tested, all) = (self.named_types(part), self.named_types(whole));
-        let needed = |kind: u16| {
+        let needed = |kind: u32| {
             kinds & kind != 0
                 && tested.iter().filter(|(k, _)| *k == kind).count()
                     < all.iter().filter(|(k, _)| *k == kind).count()
@@ -959,7 +961,7 @@ impl Compiler<'_> {
     }
 
     /// The structures and enumerations among the members of `ty`: their kind and number.
-    fn named_types(&self, ty: ir::Type) -> Vec<(u16, u32)> {
+    fn named_types(&self, ty: ir::Type) -> Vec<(u32, u32)> {
         use crate::value::kinds;
         ty.members()
             .into_iter()
@@ -1114,7 +1116,7 @@ fn calls_function(expr: &ir::Expr) -> bool {
 }
 
 /// The kinds of values of a type, as the bits of [`crate::value::kinds`].
-fn kinds_of(ty: ir::Type) -> u16 {
+fn kinds_of(ty: ir::Type) -> u32 {
     use crate::value::kinds;
     ty.members()
         .into_iter()
@@ -1124,6 +1126,7 @@ fn kinds_of(ty: ir::Type) -> u16 {
             ir::Type::Rational => kinds::RATIONAL,
             ir::Type::Bool => kinds::BOOL,
             ir::Type::Text => kinds::TEXT,
+            ir::Type::Bytes => kinds::BYTES,
             ir::Type::None => kinds::NONE,
             ir::Type::Range => kinds::RANGE,
             ir::Type::List(_) => kinds::LIST,

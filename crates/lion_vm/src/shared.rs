@@ -434,6 +434,7 @@ pub fn get_index(object: &Value, index: i64) -> Result<Value, BugKind> {
             let character = text.chars().nth(position).expect("the position is inside the text");
             Ok(Value::Text(Arc::new(character.to_string())))
         }
+        Value::Bytes(bytes) => Ok(Value::Int(i64::from(bytes[position(index, bytes.len())?]))),
         other => panic!("expected a List or a Text but found {}", other.type_name()),
     }
 }
@@ -444,6 +445,7 @@ pub fn get_slice(object: &Value, [start, end]: [i64; 2]) -> Result<Value, BugKin
     let size = match object {
         Value::List(elements) => elements.len(),
         Value::Text(text) => text.chars().count(),
+        Value::Bytes(bytes) => bytes.len(),
         other => panic!("expected a List or a Text but found {}", other.type_name()),
     };
     let (from, to) = if start > end {
@@ -456,6 +458,7 @@ pub fn get_slice(object: &Value, [start, end]: [i64; 2]) -> Result<Value, BugKin
     Ok(match object {
         Value::List(elements) => Value::List(Arc::new(elements[from..to].to_vec())),
         Value::Text(text) => Value::Text(Arc::new(text.chars().skip(from).take(to - from).collect())),
+        Value::Bytes(bytes) => Value::Bytes(Arc::new(bytes[from..to].to_vec())),
         _ => unreachable!("checked above"),
     })
 }
@@ -468,6 +471,7 @@ pub fn size(value: &Value) -> Result<i64, BugKind> {
         Value::Set(set) => set.len() as i64,
         Value::Map(map) => map.len() as i64,
         Value::Text(text) => text.chars().count() as i64,
+        Value::Bytes(bytes) => bytes.len() as i64,
         Value::Range(bounds) => range_size(bounds[0], bounds[1])?,
         other => panic!("expected a List, Text or Range but found {}", other.type_name()),
     })
@@ -497,6 +501,7 @@ pub fn sequence_len(value: &Value) -> usize {
         Value::List(elements) => elements.len(),
         Value::Set(set) => set.len(),
         Value::Map(map) => map.len(),
+        Value::Bytes(bytes) => bytes.len(),
         other => panic!("expected a List, Set or Map but found {}", other.type_name()),
     }
 }
@@ -507,7 +512,26 @@ pub fn sequence_at(value: &Value, position: usize) -> Value {
         Value::List(elements) => elements[position].clone(),
         Value::Set(set) => set.items()[position].clone(),
         Value::Map(map) => map.key_at(position).clone(),
+        Value::Bytes(bytes) => Value::Int(i64::from(bytes[position])),
         other => panic!("expected a List, Set or Map but found {}", other.type_name()),
+    }
+}
+
+/// `t as Bytes`: the UTF-8 bytes of a Text (C117).
+pub fn text_to_bytes(text: &str) -> Value {
+    Value::Bytes(Arc::new(text.as_bytes().to_vec()))
+}
+
+/// `b as Text`: the Text the bytes write in UTF-8, or an Error that says where they stop
+/// being UTF-8 (C117).
+pub fn bytes_to_text(value: &Value) -> Value {
+    let Value::Bytes(bytes) = value else { panic!("expected Bytes but found {}", value.type_name()) };
+    match std::str::from_utf8(bytes) {
+        Ok(text) => Value::Text(Arc::new(text.to_string())),
+        Err(problem) => Value::Error(Arc::new(format!(
+            "these bytes are not UTF-8 text: the byte {} is not",
+            problem.valid_up_to() + 1
+        ))),
     }
 }
 
@@ -556,7 +580,7 @@ pub fn sum_rational(values: &Value) -> Result<[i64; 2], BugKind> {
 
 /// Whether the value is of one of the kinds, or is a structure or an enumeration whose
 /// type number is in `named` (§7.1).
-pub fn type_test_named(value: &Value, kinds: u16, named: &[u32]) -> bool {
+pub fn type_test_named(value: &Value, kinds: u32, named: &[u32]) -> bool {
     value.kind() & kinds != 0 || type_number(value).is_some_and(|number| named.contains(&number))
 }
 

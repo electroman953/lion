@@ -1,0 +1,37 @@
+// Bytes over the network (C117): an answer of any kind, read as bytes.
+use bytes
+use net
+
+let server = try net.listen(0)
+let base = "http://127.0.0.1:{server.port()}"
+let png = bytes.from_list([137, 80, 78, 71, 13, 10, 26, 10, 0, 255])
+
+fun answer(r in net.Request) in net.Response:
+    if r.path == "/logo.png": return net.bytes(png, "image/png") ;
+    if r.path == "/echo": return net.plain("{r.bytes().size} bytes: {r.body}") ;
+    return net.plain("no page", 404)
+;
+
+fun serve_one() in None or Error:
+    let r = try server.next()
+    try r.respond(answer(r))
+    return none
+;
+
+let image = task net.get_bytes("{base}/logo.png")
+try serve_one()
+let got = try wait image
+show(got == png)
+show(got)
+
+let text = task net.get("{base}/logo.png")
+try serve_one()
+show((wait text) in Error)
+
+let echo = task net.post("{base}/echo", "héllo")
+try serve_one()
+show((try wait echo).body)
+
+let missing = task net.get_bytes("{base}/nothing")
+try serve_one()
+show((wait missing) in Error)

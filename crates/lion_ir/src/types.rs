@@ -12,6 +12,8 @@ pub enum Type {
     Rational,
     Bool,
     Text,
+    /// Bytes from 0 to 255, for binary data: images, files, bodies (C117).
+    Bytes,
     /// The type whose only value is `none`.
     None,
     /// `a..b`: increasing integers, never stored element by element (§16.3, D46).
@@ -162,6 +164,8 @@ impl Type {
             Type::List(element) | Type::Set(element) => Some(element.get()),
             // A Map is gone through by its keys (C79).
             Type::Map(_) => self.map_parts().map(|(key, _)| key),
+            // Bytes, as Ints from 0 to 255 (C117).
+            Type::Bytes => Some(Type::Int),
             _ => None,
         }
     }
@@ -175,6 +179,7 @@ impl fmt::Display for Type {
             Type::Rational => f.write_str("Rational"),
             Type::Bool => f.write_str("Bool"),
             Type::Text => f.write_str("Text"),
+            Type::Bytes => f.write_str("Bytes"),
             Type::None => f.write_str("None"),
             Type::Range => f.write_str("Range"),
             // `of` nests to the right and binds more tightly than `or` (§15.1, D34).

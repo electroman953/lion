@@ -60,3 +60,9 @@ foreign "lion" fun size(path in Text) in Int or Error
 // When the file was last changed, in seconds since 1970-01-01 at 00:00 UTC, as
 // `time.now()`.
 foreign "lion" fun modified(path in Text) in Float or Error
+
+// The content of a file of any kind, an image too (C117).
+foreign "lion" fun read_bytes(path in Text) in Bytes or Error
+
+// Replaces the content of the file by these bytes, creating it when needed.
+foreign "lion" fun write_bytes(path in Text, content in Bytes) in None or Error

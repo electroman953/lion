@@ -1,0 +1,28 @@
+exit: 2
+----- stdout
+<8 bytes: 89 50 4e 47 0d 0a 1a 0a>
+8
+80
+<3 bytes: 50 4e 47>
+89504e470d0a1a0a
+true
+3
+[274, 160, 156]
+<4 bytes: 4c c3 a9 61>
+Léa
+error("these bytes are not UTF-8 text: the byte 1 is not")
+true
+true
+iVBORw0KGgo=
+true
+<6 bytes: 89 50 4c c3 a9 61>
+----- stderr
+bug: a byte goes from 0 to 255
+   --> tests/runtime/bytes.lion:26:6
+    |
+ 26 | show(bytes.from_list([256]))
+    |      ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = the element 1 is 256
+    = help: check the value before the call
+

@@ -497,6 +497,8 @@ pub enum Conversion {
     ToText,
     /// `"12" as Int`: an Int, or an Error that says why (§8.5, D14).
     TextToInt,
+    TextToBytes,
+    BytesToText,
     /// `"2.5" as Float`: a Float, or an Error that says why (§8.5, D14).
     TextToFloat,
     /// The text of any value as a literal: a Text is written between quotes, as in a
@@ -659,6 +661,18 @@ pub enum Native {
     TextRepeat,
     TextFixed,
     MathRoundTo,
+    BytesOf,
+    BytesHex,
+    BytesFromHex,
+    BytesConcat,
+    BytesFind,
+    FilesReadBytes,
+    FilesWriteBytes,
+    HashSha256Bytes,
+    Base64EncodeBytes,
+    Base64DecodeBytes,
+    NetFetchBytes,
+    NetBodyBytes,
     FilesWalk,
     FilesGlob,
     FilesSize,
@@ -684,6 +698,7 @@ impl Builtin {
                 | Native::FilesIsFolder
                 | Native::HashFile
                 | Native::FilesWalk
+                | Native::FilesReadBytes
                 | Native::FilesSize
                 | Native::FilesModified
                 | Native::SystemFolder
@@ -692,6 +707,7 @@ impl Builtin {
             Builtin::Native(Native::TermEnabled | Native::TermPaint) => Some("looks at the terminal"),
             Builtin::Native(
                 Native::FilesWrite
+                | Native::FilesWriteBytes
                 | Native::FilesAppend
                 | Native::FilesMakeFolder
                 | Native::FilesRemove
@@ -703,6 +719,8 @@ impl Builtin {
             Builtin::Native(Native::SystemExecute) => Some("runs a program"),
             Builtin::Native(
                 Native::NetFetch
+                | Native::NetFetchBytes
+                | Native::NetBodyBytes
                 | Native::NetSave
                 | Native::NetListen
                 | Native::NetPort
@@ -743,6 +761,7 @@ impl Native {
         !matches!(
             self,
             Native::FilesWrite
+                | Native::FilesWriteBytes
                 | Native::FilesAppend
                 | Native::FilesMakeFolder
                 | Native::FilesRemove
@@ -800,7 +819,7 @@ impl Native {
         ("url", "encode", Native::UrlEncode),
         ("url", "decode", Native::UrlDecode),
         ("url", "pairs", Native::UrlPairs),
-        ("base64", "encode_bytes", Native::Base64Encode),
+        ("base64", "encode_utf8", Native::Base64Encode),
         ("base64", "decode", Native::Base64Decode),
         ("hash", "sha256", Native::HashSha256),
         ("hash", "md5", Native::HashMd5),
@@ -824,6 +843,18 @@ impl Native {
         ("text", "repeat", Native::TextRepeat),
         ("text", "fixed", Native::TextFixed),
         ("math", "round_to", Native::MathRoundTo),
+        ("bytes", "from_list", Native::BytesOf),
+        ("bytes", "hex", Native::BytesHex),
+        ("bytes", "from_hex", Native::BytesFromHex),
+        ("bytes", "concat", Native::BytesConcat),
+        ("bytes", "find", Native::BytesFind),
+        ("files", "read_bytes", Native::FilesReadBytes),
+        ("files", "write_bytes", Native::FilesWriteBytes),
+        ("hash", "sha256_bytes", Native::HashSha256Bytes),
+        ("base64", "encode_raw", Native::Base64EncodeBytes),
+        ("base64", "decode_raw", Native::Base64DecodeBytes),
+        ("net", "fetch_bytes", Native::NetFetchBytes),
+        ("net", "body_bytes", Native::NetBodyBytes),
         ("files", "walk", Native::FilesWalk),
         ("files", "matches", Native::FilesGlob),
         ("files", "size", Native::FilesSize),
@@ -974,6 +1005,8 @@ impl Conversion {
             Conversion::RationalToFloat => "rational_to_float",
             Conversion::ToText => "to_text",
             Conversion::TextToInt => "text_to_int",
+            Conversion::TextToBytes => "text_to_bytes",
+            Conversion::BytesToText => "bytes_to_text",
             Conversion::TextToFloat => "text_to_float",
             Conversion::Literal => "literal",
             Conversion::EnumPosition => "enum_position",

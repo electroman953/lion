@@ -1,0 +1,23 @@
+// Bytes (§23, C117): binary data, such as an image, a file or the body of a request.
+// `b.size`, `b[i]` (an Int from 0 to 255, from 1 as in a List), `b[a..c]`, `for x in b`,
+// `==`, `t as Bytes` (the UTF-8 of a Text) and `b as Text` (a `Text or Error`) are part
+// of the language; this module adds the rest.
+
+// The bytes of a list of Ints from 0 to 255: `bytes.from_list([137, 80, 78, 71])`. Another
+// number is a bug.
+foreign "lion" fun from_list(l in List of Int) in Bytes
+
+// The bytes in hexadecimal, two lowercase digits each: `89504e47`.
+foreign "lion" fun hex(b in Bytes) in Text
+
+// The bytes written in hexadecimal, spaces allowed: `"89 50 4E 47"`.
+foreign "lion" fun from_hex(t in Text) in Bytes or Error
+
+// The parts one after the other.
+foreign "lion" fun concat(parts in List of Bytes) in Bytes
+
+// Where `part` starts in `b`, from 1, or `none`.
+foreign "lion" fun find(b in Bytes, part in Bytes) in maybe Int
+
+// The bytes as a list of Ints.
+fun list(b in Bytes) in List of Int = [x, x in b]

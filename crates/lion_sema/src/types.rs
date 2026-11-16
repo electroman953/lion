@@ -14,6 +14,7 @@ const SUPPORTED: &[(&str, Type)] = &[
     ("Rational", Type::Rational),
     ("Bool", Type::Bool),
     ("Text", Type::Text),
+    ("Bytes", Type::Bytes),
     ("None", Type::None),
     ("Range", Type::Range),
 ];

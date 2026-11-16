@@ -97,6 +97,27 @@ fn files_stay_in_their_folder_and_a_silent_client_delays_no_one() {
 }
 
 #[test]
+fn a_body_that_is_not_text_is_read_as_bytes() {
+    let folder = folder("server-bytes");
+    let program = folder.join("bytes.lion");
+    std::fs::write(
+        &program,
+        "use net\nuse system\nuse bytes\nlet port = try system.args()[1] as Int\n\
+         fun echo(r in net.Request) in net.Response = net.bytes(r.bytes(), \"application/octet-stream\")\n\
+         try net.serve(port, echo)\n",
+    )
+    .unwrap();
+    let port = free_port();
+    let _server = start(&program, port);
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream.write_all(b"POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n\xff\x00\xfe\x01").unwrap();
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).unwrap();
+    assert!(answer.starts_with(b"HTTP/1.1 200 OK\r\n"), "{}", String::from_utf8_lossy(&answer));
+    assert!(answer.ends_with(b"\r\n\r\n\xff\x00\xfe\x01"), "{}", String::from_utf8_lossy(&answer));
+}
+
+#[test]
 fn serve_parallel_answers_several_requests_at_once() {
     let folder = folder("server-parallel");
     let program = folder.join("slow.lion");

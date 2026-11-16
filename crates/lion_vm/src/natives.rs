@@ -33,6 +33,12 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             panic!("the native function {} expected a Float but found {}", native.name(), other.type_name())
         }
     };
+    let bytes = |index: usize| match &args[index] {
+        Value::Bytes(bytes) => bytes.as_slice(),
+        other => {
+            panic!("the native function {} expected Bytes but found {}", native.name(), other.type_name())
+        }
+    };
     let texts = |values: Vec<String>| Value::List(Arc::new(values.into_iter().map(new_text).collect()));
     let error = |message: String| Value::Error(Arc::new(message));
     Ok(match native {
@@ -118,6 +124,10 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             let jar = session.then(|| text(7));
             match net::fetch(text(0), text(1), &headers, text(3), &files, float(5), jar) {
                 Ok((response, jar)) => {
+                    let response = match response.text() {
+                        Ok(response) => response,
+                        Err(message) => return Ok(error(message)),
+                    };
                     let mut words = vec![response.status.to_string(), response.body, jar.unwrap_or_default()];
                     flatten(response.headers, &mut words);
                     texts(words)
@@ -161,7 +171,11 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
         },
         Native::NetReply => {
             let headers = pairs_of(&text_list(&args[2]));
-            match net::respond(int(0), int(1), &headers, text(3), text(4)) {
+            let body: &[u8] = match &args[3] {
+                Value::Bytes(bytes) => bytes,
+                _ => text(3).as_bytes(),
+            };
+            match net::respond(int(0), int(1), &headers, body, text(4)) {
                 Ok(()) => Value::None,
                 Err(message) => error(message),
             }
@@ -172,6 +186,87 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             texts(words)
         }
         Native::NetEncode => new_text(net::encode(text(0))),
+        Native::NetFetchBytes => {
+            let headers = pairs_of(&text_list(&args[2]));
+            let Value::Bool(session) = args[5] else { panic!("net.fetch_bytes expected a Bool") };
+            let jar = session.then(|| text(6));
+            match net::fetch(text(0), text(1), &headers, text(3), &[], float(4), jar) {
+                Ok((response, jar)) => {
+                    let mut words = vec![response.status.to_string(), jar.unwrap_or_default()];
+                    flatten(response.headers, &mut words);
+                    Value::Tuple(Arc::new(vec![texts(words), new_bytes(response.body)]))
+                }
+                Err(message) => error(message),
+            }
+        }
+        Native::NetBodyBytes => new_bytes(net::body_bytes(int(0))),
+        Native::BytesOf => {
+            let Value::List(items) = &args[0] else { panic!("bytes.of expected a List") };
+            let mut out = Vec::with_capacity(items.len());
+            for (position, item) in items.iter().enumerate() {
+                let Value::Int(n) = item else { panic!("bytes.of expected Ints") };
+                let Ok(byte) = u8::try_from(*n) else {
+                    return Err(BugKind::InvalidArgument {
+                        message: "a byte goes from 0 to 255".to_string(),
+                        details: format!("the element {} is {n}", position + 1),
+                    });
+                };
+                out.push(byte);
+            }
+            new_bytes(out)
+        }
+        Native::BytesHex => new_text(codec::hex(bytes(0))),
+        Native::BytesFromHex => {
+            let digits: Vec<char> = text(0).chars().filter(|c| !c.is_whitespace()).collect();
+            let value = |c: char| c.to_digit(16);
+            if !digits.len().is_multiple_of(2) {
+                error("hexadecimal bytes have two digits each".to_string())
+            } else {
+                let parsed: Option<Vec<u8>> = digits
+                    .chunks(2)
+                    .map(|pair| Some((value(pair[0])? * 16 + value(pair[1])?) as u8))
+                    .collect();
+                match parsed {
+                    Some(out) => new_bytes(out),
+                    None => error(format!("`{}` is not hexadecimal", text(0))),
+                }
+            }
+        }
+        Native::BytesConcat => {
+            let Value::List(items) = &args[0] else { panic!("bytes.concat expected a List") };
+            let mut out = Vec::new();
+            for item in items.iter() {
+                let Value::Bytes(part) = item else { panic!("bytes.concat expected Bytes") };
+                out.extend_from_slice(part);
+            }
+            new_bytes(out)
+        }
+        Native::BytesFind => {
+            let (whole, part) = (bytes(0), bytes(1));
+            let found = if part.is_empty() {
+                Some(0)
+            } else {
+                whole.windows(part.len()).position(|window| window == part)
+            };
+            found.map_or(Value::None, |at| Value::Int(at as i64 + 1))
+        }
+        Native::FilesReadBytes => match std::fs::read(text(0)) {
+            Ok(content) => new_bytes(content),
+            Err(problem) => error(format!("cannot read `{}`: {}", text(0), describe(&problem))),
+        },
+        Native::FilesWriteBytes => match std::fs::write(text(0), bytes(1)) {
+            Ok(()) => Value::None,
+            Err(problem) => error(format!("cannot write `{}`: {}", text(0), describe(&problem))),
+        },
+        Native::HashSha256Bytes => new_text(codec::hex(&codec::sha256(bytes(0)))),
+        Native::Base64EncodeBytes => {
+            let Value::Bool(url) = args[1] else { panic!("base64.encode_raw expected a Bool") };
+            new_text(codec::base64_encode(bytes(0), url))
+        }
+        Native::Base64DecodeBytes => match codec::base64_decode(text(0)) {
+            Ok(out) => new_bytes(out),
+            Err(message) => error(message),
+        },
         Native::FilesWalk => {
             let mut found = Vec::new();
             match walk(std::path::Path::new(text(0)), "", &mut found) {
@@ -726,6 +821,8 @@ fn to_json(value: &Value) -> Result<Json, BugKind> {
         Value::Float(x) => number(*x),
         Value::Rational(r) => number(r[0] as f64 / r[1] as f64),
         Value::Text(t) => Json::text(t.as_str()),
+        // Bytes in Base64, as JSON has no binary data.
+        Value::Bytes(bytes) => Json::text(codec::base64_encode(bytes, false)),
         Value::Error(message) => Json::object([("error", Json::text(message.as_str()))]),
         Value::List(items) | Value::Tuple(items) => Json::List(all(items)?),
         Value::Range(bounds) => Json::List((bounds[0]..=bounds[1]).map(Json::int).collect()),
@@ -869,6 +966,10 @@ pub fn made_special_float(native: Native, args: &[Value], result: &Value) -> Opt
     );
     let finite_args = args.iter().all(|arg| !matches!(arg, Value::Float(value) if !value.is_finite()));
     (math && finite_args && !value.is_finite()).then_some(*value)
+}
+
+fn new_bytes(bytes: Vec<u8>) -> Value {
+    Value::Bytes(Arc::new(bytes))
 }
 
 fn new_text(text: String) -> Value {

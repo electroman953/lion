@@ -41,6 +41,8 @@ struct Server {
 struct Connection {
     stream: TcpStream,
     uploads: Vec<PathBuf>,
+    /// The body as it came, for `r.bytes()` (C117).
+    raw: Vec<u8>,
 }
 
 /// A file sent with a form (`multipart/form-data`), saved in a temporary file that is
@@ -106,14 +108,14 @@ pub fn listen(host: &str, port: i64) -> Result<i64, String> {
                 let read = read_request(&mut stream);
                 reading.fetch_sub(1, Ordering::SeqCst);
                 match read {
-                    Ok((mut request, uploads)) => {
+                    Ok((mut request, uploads, raw)) => {
                         let id = NEXT.fetch_add(1, Ordering::Relaxed);
                         request.connection = id;
                         CONNECTIONS
                             .lock()
                             .expect("never poisoned")
                             .get_or_insert_with(HashMap::new)
-                            .insert(id, Connection { stream, uploads });
+                            .insert(id, Connection { stream, uploads, raw });
                         let _ = sender.send(request);
                     }
                     Err(Some((status, message))) => {
@@ -166,10 +168,10 @@ pub fn respond(
     connection: i64,
     status: i64,
     headers: &[(String, String)],
-    body: &str,
+    body: &[u8],
     file: &str,
 ) -> Result<(), String> {
-    let Some(Connection { mut stream, uploads }) =
+    let Some(Connection { mut stream, uploads, .. }) =
         CONNECTIONS.lock().expect("never poisoned").as_mut().and_then(|open| open.remove(&connection))
     else {
         return Err("this request already has its answer".to_string());
@@ -181,11 +183,17 @@ pub fn respond(
     answered
 }
 
+/// The body of a request waiting for its answer, as it came (C117).
+pub fn body_bytes(connection: i64) -> Vec<u8> {
+    let open = CONNECTIONS.lock().expect("never poisoned");
+    open.as_ref().and_then(|open| open.get(&connection)).map(|c| c.raw.clone()).unwrap_or_default()
+}
+
 fn answer(
     stream: &mut TcpStream,
     status: i64,
     headers: &[(String, String)],
-    body: &str,
+    body: &[u8],
     file: &str,
 ) -> Result<(), String> {
     if !(100..=999).contains(&status) {
@@ -199,7 +207,7 @@ fn answer(
         ));
     }
     let written = if file.is_empty() {
-        write_response(stream, status, headers, body.as_bytes())
+        write_response(stream, status, headers, body)
     } else {
         match std::fs::read(file) {
             Ok(content) => {
@@ -250,7 +258,7 @@ type Refusal = Option<(i64, &'static str)>;
 
 /// A request read from the stream, and the temporary files of its uploads; or the
 /// answer to give instead (`None`: none, the client left).
-fn read_request(stream: &mut TcpStream) -> Result<(Request, Vec<PathBuf>), Refusal> {
+fn read_request(stream: &mut TcpStream) -> Result<(Request, Vec<PathBuf>, Vec<u8>), Refusal> {
     let mut data = Vec::new();
     let mut chunk = [0u8; 8192];
     let head_end = loop {
@@ -312,12 +320,11 @@ fn read_request(stream: &mut TcpStream) -> Result<(Request, Vec<PathBuf>), Refus
     }
     body.truncate(length);
     let content_type = header("content-type").unwrap_or_default();
+    let raw = body.clone();
     let (body, uploads) = match boundary(&content_type) {
         Some(boundary) => multipart(&body, &boundary)?,
-        None => (
-            String::from_utf8(body).map_err(|_| Some((400, "the body of the request is not UTF-8 text")))?,
-            Vec::new(),
-        ),
+        // A body that is not text is read by `r.bytes()`; its Text is empty (C117).
+        None => (String::from_utf8(body).unwrap_or_default(), Vec::new()),
     };
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let path = decode(path, false).ok_or(Some((400, "the path of the request is not UTF-8 text")))?;
@@ -331,7 +338,7 @@ fn read_request(stream: &mut TcpStream) -> Result<(Request, Vec<PathBuf>), Refus
         body,
         uploads,
     };
-    Ok((request, paths))
+    Ok((request, paths, raw))
 }
 
 /// The boundary of a `multipart/form-data` body.
@@ -535,7 +542,7 @@ pub fn fetch(
     files: &[(String, String)],
     timeout: f64,
     jar: Option<&str>,
-) -> Result<(Response, Option<String>), String> {
+) -> Result<(RawResponse, Option<String>), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err(format!("`{url}` is not a web address: it starts with http:// or https://"));
     }
@@ -616,8 +623,26 @@ pub fn fetch(
     if !output.status.success() {
         return Err(format!("cannot reach `{url}`: {}", curl_message(&output.stderr)));
     }
-    let response = parse_response(&output.stdout).map_err(|problem| format!("`{url}`: {problem}"))?;
+    let response = parse_head(&output.stdout).map_err(|problem| format!("`{url}`: {problem}"))?;
     Ok((response, jar))
+}
+
+/// An answer whose body may be of any kind (C117).
+pub struct RawResponse {
+    pub status: i64,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl RawResponse {
+    /// The answer with its body as a Text, which must be UTF-8.
+    pub fn text(self) -> Result<Response, String> {
+        let body = String::from_utf8(self.body).map_err(|_| {
+            "the answer is not UTF-8 text: read it with `net.get_bytes`, or save it with `net.download`"
+                .to_string()
+        })?;
+        Ok(Response { status: self.status, headers: self.headers, body })
+    }
 }
 
 fn run_curl(mut command: Command, sends: bool, body: &str) -> Result<std::process::Output, String> {
@@ -636,7 +661,7 @@ fn run_curl(mut command: Command, sends: bool, body: &str) -> Result<std::proces
 
 /// The answer that `curl --dump-header -` writes: the heads of the redirections and of
 /// the proxy, then the last head and the body.
-fn parse_response(mut data: &[u8]) -> Result<Response, String> {
+fn parse_head(mut data: &[u8]) -> Result<RawResponse, String> {
     loop {
         let Some(end) = find(data, b"\r\n\r\n") else { return Err("the answer has no headers".to_string()) };
         let head = String::from_utf8_lossy(&data[..end]);
@@ -659,9 +684,7 @@ fn parse_response(mut data: &[u8]) -> Result<Response, String> {
         if more && ((100..200).contains(&status) || established || followed) {
             continue;
         }
-        let body = String::from_utf8(data.to_vec())
-            .map_err(|_| "the answer is not UTF-8 text: save it in a file with `net.download`".to_string())?;
-        return Ok(Response { status, headers, body });
+        return Ok(RawResponse { status, headers, body: data.to_vec() });
     }
 }
 
@@ -739,12 +762,12 @@ mod tests {
     #[test]
     fn reads_the_last_head_of_an_answer() {
         let data = b"HTTP/1.1 301 Moved\r\nLocation: /b\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHTTP/ body";
-        let response = parse_response(data).unwrap();
+        let response = parse_head(data).unwrap();
         assert_eq!(response.status, 200);
         assert_eq!(response.headers, vec![("content-type".to_string(), "text/plain".to_string())]);
-        assert_eq!(response.body, "HTTP/ body");
-        let not_found = parse_response(b"HTTP/2 404 \r\n\r\n").unwrap();
-        assert_eq!((not_found.status, not_found.body.as_str()), (404, ""));
+        assert_eq!(response.body, b"HTTP/ body");
+        let missing = parse_head(b"HTTP/2 404 \r\n\r\n").unwrap();
+        assert_eq!((missing.status, missing.body.len()), (404, 0));
     }
 
     #[test]
@@ -764,8 +787,8 @@ mod tests {
         assert_eq!((request.method.as_str(), request.path.as_str()), ("POST", "/a b"));
         assert_eq!((request.query.as_str(), request.body.as_str()), ("x=1", "hello"));
         assert_eq!(request.headers[0], ("host".to_string(), "h".to_string()));
-        respond(request.connection, 201, &[("X-A".to_string(), "b".to_string())], "done", "").unwrap();
-        assert!(respond(request.connection, 200, &[], "", "").is_err());
+        respond(request.connection, 201, &[("X-A".to_string(), "b".to_string())], b"done", "").unwrap();
+        assert!(respond(request.connection, 200, &[], b"", "").is_err());
         let answer = client.join().unwrap();
         assert!(answer.starts_with("HTTP/1.1 201 Created\r\nX-A: b\r\nContent-Length: 4\r\n"), "{answer}");
         assert!(answer.ends_with("\r\n\r\ndone"));

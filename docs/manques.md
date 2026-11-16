@@ -52,7 +52,7 @@ show(text.repeat("-", 20))
 - **Besoin** : `r.query("page")` rend `maybe Text` ; il faut un `if` ou un `match` pour donner une valeur par défaut.
 - **Exemple souhaité** : `let page = r.query("page") otherwise "1"` (à concevoir : `??` n'existe pas).
 
-## 2026-11-16 — Des octets
+## ~~2026-11-16 — Des octets~~ — fait (C117)
 
 - **Besoin** : lire une image en mémoire, calculer sur des données binaires, recevoir un corps qui n'est pas du texte. Un `Text` est toujours de l'UTF-8.
 - **Contournement** : passer par des fichiers (`net.download`, `net.file`, `r.upload(...).path`, `hash.file_sha256`).

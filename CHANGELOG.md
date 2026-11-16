@@ -35,6 +35,9 @@ Les décisions détaillées sont dans [docs/implementation-notes.md](docs/implem
   `"""` sur plusieurs lignes (C114) ; `t[1]` et `let (a, b) = t` (C115) ; `fun T.text()` pour
   l'affichage (C116). Et dans la bibliothèque : `text.sorted`, `sets.sorted_by`,
   `sets.sorted_with`, `text.fixed`, `math.round_to`, `text.pad_left`, `text.repeat` (C109).
+- Le type `Bytes` (C117) : `b.size`, `b[i]`, `b[a..c]`, `for x in b`, `t as Bytes`, `b as Text` ;
+  le module `bytes` ; `files.read_bytes`/`write_bytes`, `hash.sha256_bytes`,
+  `base64.encode_bytes`/`decode_bytes`, `net.get_bytes`, `net.bytes`, `r.bytes()`.
 - `v as T` lit une `json.Value` comme une structure, une liste, une Map… de Lion (C107, décision
   de l'auteur) : `let user = try v as User`. L'Error dit où la valeur ne convient pas
   (`at \`tags[2].name\`: …`).

@@ -8,7 +8,7 @@ error: cannot find the module `missing.thing`
    |     ^^^^^^^^^^^^^
    |
    = there is no file `tests/errors/missing/thing.lion`
-   = the modules of the standard library are base64, csv, dates, files, hash, html, json, math, net, random, regex, sets, system, term, text, time, ui, url
+   = the modules of the standard library are base64, bytes, csv, dates, files, hash, html, json, math, net, random, regex, sets, system, term, text, time, ui, url
    = help: a package is added with `lion add`, in a project (C101)
 
 1 error found

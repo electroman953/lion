@@ -2,13 +2,21 @@
 // authentication and many APIs use it.
 
 // The UTF-8 bytes of `t` in Base64: `base64.encode("Lion!")` gives `TGlvbiE=`.
-fun encode(t in Text) in Text = encode_bytes(t, false)
+fun encode(t in Text) in Text = encode_utf8(t, false)
 
 // The variant for addresses and tokens: `-` and `_` instead of `+` and `/`, no `=`.
-fun encode_url(t in Text) in Text = encode_bytes(t, true)
+fun encode_url(t in Text) in Text = encode_utf8(t, true)
 
 // The text written in Base64, in either variant; an Error if it is not Base64 or not
 // UTF-8 text.
 foreign "lion" fun decode(t in Text) in Text or Error
 
-private foreign "lion" fun encode_bytes(t in Text, url in Bool) in Text
+// Bytes of any kind in Base64; with `url`, the variant for addresses (C117).
+fun encode_bytes(b in Bytes, url = false) in Text = encode_raw(b, url)
+
+// The bytes written in Base64, of any kind (C117).
+fun decode_bytes(t in Text) in Bytes or Error = decode_raw(t)
+
+private foreign "lion" fun encode_utf8(t in Text, url in Bool) in Text
+private foreign "lion" fun encode_raw(b in Bytes, url in Bool) in Text
+private foreign "lion" fun decode_raw(t in Text) in Bytes or Error

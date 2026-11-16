@@ -490,6 +490,8 @@ impl Checker<'_> {
         let element = match object.ty {
             Type::List(element) => element.get(),
             Type::Text => Type::Text,
+            // A byte, from 0 to 255 (C117).
+            Type::Bytes => Type::Int,
             other => {
                 self.diagnostics.push(
                     Diagnostic::error(format!("{} has no elements to index", capitalize(&article(other))))
@@ -530,9 +532,10 @@ impl Checker<'_> {
             return Some(typed(ir::ExprKind::Field { object: Box::new(object), field }, ty, span));
         }
         let (property, ty) = match (object.ty, name.name.as_str()) {
-            (Type::List(_) | Type::Set(_) | Type::Map(_) | Type::Text | Type::Range, "size") => {
-                (ir::Property::Size, Type::Int)
-            }
+            (
+                Type::List(_) | Type::Set(_) | Type::Map(_) | Type::Text | Type::Bytes | Type::Range,
+                "size",
+            ) => (ir::Property::Size, Type::Int),
             (Type::List(element), "first") => (ir::Property::First, element.get()),
             (Type::List(element), "last") => (ir::Property::Last, element.get()),
             (Type::List(_), "add") => {

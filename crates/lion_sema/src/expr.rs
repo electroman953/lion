@@ -1137,6 +1137,12 @@ impl Checker<'_> {
                 let ty = Type::union([Type::Float, Type::Error]);
                 return Some(ir::Expr { span, ..convert(ir::Conversion::TextToFloat, value, ty) });
             }
+            // The UTF-8 bytes of a Text; and back, an Error if they are not UTF-8 (C117).
+            (Type::Text, Type::Bytes) => ir::Conversion::TextToBytes,
+            (Type::Bytes, Type::Text) => {
+                let ty = Type::union([Type::Text, Type::Error]);
+                return Some(ir::Expr { span, ..convert(ir::Conversion::BytesToText, value, ty) });
+            }
             (from, to) => {
                 let mut error = Diagnostic::error(format!("cannot convert {} to {to} with `as`", article(from)))
                     .with_primary(span, "")

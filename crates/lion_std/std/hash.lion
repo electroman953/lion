@@ -13,3 +13,6 @@ foreign "lion" fun hmac_sha256(key in Text, message in Text) in Text
 
 // The SHA-256 of the bytes of a file, images too.
 foreign "lion" fun file_sha256(path in Text) in Text or Error
+
+// The SHA-256 of bytes (C117).
+foreign "lion" fun sha256_bytes(b in Bytes) in Text

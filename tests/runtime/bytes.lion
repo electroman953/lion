@@ -1,0 +1,26 @@
+// Bytes (C117): binary data, its operations and the modules that read and write it.
+use bytes
+use files
+use hash
+use base64
+let png = bytes.from_list([137, 80, 78, 71, 13, 10, 26, 10])
+show(png)
+show(png.size)
+show(png[2])
+show(png[2..4])
+show(bytes.hex(png))
+show(bytes.from_hex("89 50 4E 47") == png[1..4])
+show(bytes.find(png, bytes.from_list([78, 71])))
+show([x * 2, x in png[1..3]])
+let t = "Léa" as Bytes
+show(t)
+show(t as Text)
+show(png as Text)
+try files.write_bytes("target/tmp/by.bin", png)
+let back = try files.read_bytes("target/tmp/by.bin")
+show(back == png)
+show(hash.sha256_bytes(back) == hash.file_sha256("target/tmp/by.bin"))
+show(base64.encode_bytes(png))
+show((try base64.decode_bytes(base64.encode_bytes(png))) == png)
+show(bytes.concat([png[1..2], t]))
+show(bytes.from_list([256]))

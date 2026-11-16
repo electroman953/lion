@@ -373,7 +373,7 @@ impl<'p> Generator<'p> {
 
     /// The type number of each structure and enumeration among the members of `ty`,
     /// with its kind, as the virtual machine numbers them.
-    fn named_types(&self, ty: Type) -> Vec<(u16, u32)> {
+    fn named_types(&self, ty: Type) -> Vec<(u32, u32)> {
         ty.members()
             .into_iter()
             .filter_map(|member| match member {
@@ -1683,6 +1683,12 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
             Conversion::TextToFloat => {
                 self.temp(Repr::Value, format!("shared::text_to_float(text({}))", a.by_ref()))
             }
+            Conversion::TextToBytes => {
+                self.temp(Repr::Value, format!("shared::text_to_bytes(text({}))", a.by_ref()))
+            }
+            Conversion::BytesToText => {
+                self.temp(Repr::Value, format!("shared::bytes_to_text({})", a.by_ref()))
+            }
             Conversion::EnumPosition => self.temp(Repr::Int, format!("enum_position({})", a.by_ref())),
         }
     }
@@ -1791,7 +1797,7 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
     fn type_test(&mut self, whole: Type, part: Type, value: &str) -> String {
         let kinds = kinds_of(part);
         let (tested, all) = (self.g.named_types(part), self.g.named_types(whole));
-        let needed = |kind: u16| {
+        let needed = |kind: u32| {
             kinds & kind != 0
                 && tested.iter().filter(|(k, _)| *k == kind).count()
                     < all.iter().filter(|(k, _)| *k == kind).count()
@@ -1811,7 +1817,7 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
 }
 
 /// The kinds of values of a type, as the bits of `lion_vm::kinds`.
-fn kinds_of(ty: Type) -> u16 {
+fn kinds_of(ty: Type) -> u32 {
     ty.members()
         .into_iter()
         .map(|member| match member {
@@ -1820,6 +1826,7 @@ fn kinds_of(ty: Type) -> u16 {
             Type::Rational => kinds::RATIONAL,
             Type::Bool => kinds::BOOL,
             Type::Text => kinds::TEXT,
+            Type::Bytes => kinds::BYTES,
             Type::None => kinds::NONE,
             Type::Range => kinds::RANGE,
             Type::List(_) => kinds::LIST,

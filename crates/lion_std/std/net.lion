@@ -22,6 +22,8 @@ struct Response:
     headers in List of Header
     // A file sent as the body, of any kind: `net.file(path)`.
     private file in Text = ""
+    // Bytes sent as the body: `net.bytes(b)` (C117).
+    private raw in maybe Bytes = none
 ;
 
 // A request received by a server. `path` is decoded (`/a%20b` gives `/a b`), without
@@ -98,6 +100,15 @@ fun Session.request(var self, method in Text, url in Text, headers in List of He
     let answer = try fetch(method, url, all, body, [], timeout, true, self.cookies)
     self.cookies = answer[3]
     return Response(number(answer[1]), answer[2], unflat(answer[4..answer.size]))
+;
+
+// The body of the answer at `url` as bytes, an image too; a status from 400 up is an
+// Error (C117).
+fun get_bytes(url in Text, headers in List of Header = [], timeout = 30.0) in Bytes or Error:
+    let (head, body) = try fetch_bytes("GET", url, flat(headers), "", timeout, false, "")
+    let status = number(head[1])
+    if status >= 400: return error("`{url}` answered {status}") ;
+    return body
 ;
 
 // Saves what `url` gives in the file `path`, images too. A status from 400 up is an
@@ -194,7 +205,8 @@ fun Server.next() in Request or Error:
 
 // Answers the request; a request has one answer.
 fun Request.respond(answer in Response) in None or Error:
-    return reply(self.connection, answer.status, flat(answer.headers), answer.body, answer.file)
+    let body = answer.raw otherwise answer.body
+    return reply(self.connection, answer.status, flat(answer.headers), body, answer.file)
 ;
 
 // The value of the header `name`, whatever its case, or `none`.
@@ -206,6 +218,10 @@ fun Request.query(name in Text) in maybe Text = find_pair(pairs(self.query_text)
 
 // The value of the field `name` of a form sent by POST, decoded, or `none`.
 fun Request.form(name in Text) in maybe Text = find_pair(pairs(self.body), name)
+
+// The body as it came, of any kind (C117); `body` is empty when it is not UTF-8 text.
+// It is read before the answer.
+fun Request.bytes() in Bytes = body_bytes(self.connection)
 
 // The file sent in the field `field`, or `none`.
 fun Request.upload(field in Text) in maybe Upload:
@@ -230,6 +246,11 @@ fun data(v in json.Value, status = 200) in Response = Response(status, v.encode(
 // An answer that is the file `path`, of any kind; its type comes from its extension
 // (`.png`, `.css`…). A file that cannot be read gives the answer 404.
 fun file(path in Text, status = 200) in Response = Response(status, "", [], path)
+
+// An answer whose body is bytes, of the type `kind` (`image/png`…) (C117).
+fun bytes(b in Bytes, kind = "application/octet-stream", status = 200) in Response:
+    return Response(status, "", [Header("Content-Type", kind)], "", b)
+;
 
 // An answer that sends the client to `location`.
 fun redirect(location in Text, status = 303) in Response = Response(status, "", [Header("Location", location)])
@@ -354,7 +375,10 @@ private foreign "lion" fun server_port(server in Int) in Int
 // The connection, the method, the path, the query and the body; the names and values
 // of the headers; the field, file name, type, path and size of each upload.
 private foreign "lion" fun accept(server in Int) in List of List of Text or Error
-private foreign "lion" fun reply(connection in Int, status in Int, headers in List of Text, body in Text, file in Text) in None or Error
+private foreign "lion" fun reply(connection in Int, status in Int, headers in List of Text, body in Text or Bytes, file in Text) in None or Error
+// The status, the cookies kept, the names and values of the headers; and the body.
+private foreign "lion" fun fetch_bytes(method in Text, url in Text, headers in List of Text, body in Text, timeout in Float, session in Bool, cookies in Text) in (List of Text, Bytes) or Error
+private foreign "lion" fun body_bytes(connection in Int) in Bytes
 // The names and the values of a query or a form, decoded.
 private foreign "lion" fun pairs(t in Text) in List of Text
 

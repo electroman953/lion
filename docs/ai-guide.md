@@ -252,8 +252,10 @@ try net.serve(8080, app.handle)       // net.serve_parallel(8080, app.handle) fo
 ```
 
 HTML scraping: `html.parse(t).select("li.item > a")`, `e.text`, `e.attr("href")`;
-`url.join(base, href)`; `regex.all("\\d+", t)`. A binary file never goes in a Text:
-use `net.download`, `net.file`, `r.upload("field").path`.
+`url.join(base, href)`; `regex.all("\\d+", t)`. Binary data is `Bytes`, never a Text:
+`net.get_bytes(url)`, `files.read_bytes(p)`, `files.write_bytes(p, b)`,
+`net.bytes(b, "image/png")`, `r.bytes()`, `b.size`, `b[1]` (an Int), `bytes.hex(b)`,
+`t as Bytes`, `b as Text` (`Text or Error`).
 
 ## 13. What Lion does not have yet
 

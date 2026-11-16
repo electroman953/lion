@@ -77,6 +77,13 @@ test('texts hold escapes and interpolations', async () => {
   assert.equal(scope(open, 'u'), 'variable.other.declaration.lion');
 });
 
+test('texts of several lines (C114)', async () => {
+  const found = await tokens('let page = """\n    <p class="x">{name}</p>\n    """\nlet after = 1');
+  assert.equal(scope(found, '<p class="x">'), 'string.quoted.triple.lion');
+  assert.equal(scope(found, 'name'), 'meta.embedded.expression.lion');
+  assert.equal(scope(found, 'after'), 'variable.other.declaration.lion');
+});
+
 test('keywords, comments and numbers', async () => {
   const found = await tokens(
     'if x mod 2 == 0 and not done: show(0xFF) ; // even\n/* a\n block */ while true: break ;\n/// doc',

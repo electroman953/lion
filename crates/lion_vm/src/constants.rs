@@ -96,6 +96,7 @@ fn literal(value: &Value, ty: Type, span: Span, program: &ir::Program) -> ir::Ex
             ir::ExprKind::Binary { op: ir::BinaryOp::Over, lhs: part(value[0]), rhs: part(value[1]) }
         }
         Value::Text(text) => ir::ExprKind::Text(text.to_string()),
+        Value::Bytes(_) => unreachable!("Bytes are not written as literals (C117)"),
         Value::Error(message) => ir::ExprKind::CallBuiltin {
             builtin: ir::Builtin::Error,
             args: vec![typed(ir::ExprKind::Text(message.to_string()), Type::Text)],
