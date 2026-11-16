@@ -1,0 +1,20 @@
+// The terminal (§23, C106): colors and styles for what a script shows. They appear only
+// when the output is a terminal, without `NO_COLOR` set (no-color.org): written to a
+// file or a pipe, the text stays as it is.
+
+// Whether the output takes colors.
+foreign "lion" fun enabled() in Bool
+
+fun red(t in Text) in Text = paint(t, 31)
+fun green(t in Text) in Text = paint(t, 32)
+fun yellow(t in Text) in Text = paint(t, 33)
+fun blue(t in Text) in Text = paint(t, 34)
+fun magenta(t in Text) in Text = paint(t, 35)
+fun cyan(t in Text) in Text = paint(t, 36)
+fun gray(t in Text) in Text = paint(t, 90)
+fun bold(t in Text) in Text = paint(t, 1)
+fun dim(t in Text) in Text = paint(t, 2)
+fun underline(t in Text) in Text = paint(t, 4)
+
+// `t` in the style of the ANSI code `code`.
+private foreign "lion" fun paint(t in Text, code in Int) in Text

@@ -1,0 +1,31 @@
+exit: 0
+----- stdout
+GET /
+200 text/html; charset=utf-8 | <h1>Bonjour</h1>
+GET /users/42?tab=notes
+200 text/plain; charset=utf-8 | user 42, tab notes
+GET /users/42/x
+404 text/plain; charset=utf-8 | no page at /users/42/x
+
+GET /docs/a/b/c.txt
+200 text/plain; charset=utf-8 | rest: a/b/c.txt
+GET /static/
+200 text/html; charset=utf-8 | <h1>Accueil statique</h1>
+
+GET /static/css/style.css
+200 text/css; charset=utf-8 | body { color: red }
+
+GET /static/%2e%2e/site.lion
+404 text/plain; charset=utf-8 | no page at /site.lion
+
+GET /static/css/%2E%2E/%2E%2E/%2E%2E/site.lion
+404 text/plain; charset=utf-8 | no page at /site.lion
+
+GET /static/absent.txt
+404 text/plain; charset=utf-8 | no page at /static/absent.txt
+
+true
+405 allow=GET
+200 text/plain; charset=utf-8 | Mon logo: logo.png (image/png, 11 bytes, 8d8f29eda9395f8468c7ffbb07ad00f965fafa4d56f411de742286f7f5dabf89)
+true
+----- stderr

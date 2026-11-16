@@ -2,28 +2,57 @@
 //! requests made by the `curl` program, which brings HTTPS, redirections and proxies
 //! without a dependency, as `git` brings the packages (C101).
 //!
-//! The server answers one request at a time, then closes the connection. A request that
+//! The server reads the requests on threads of its own and gives them in the order they
+//! were completed; each answer closes its connection. A request that
 //! the server cannot read gets its answer here (400, 411, 413…) and never reaches the
 //! program.
 
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// The largest head of a request: its first line and its headers.
 const MAX_HEAD: usize = 64 * 1024;
 /// The largest body of a request.
-const MAX_BODY: usize = 16 * 1024 * 1024;
+const MAX_BODY: usize = 64 * 1024 * 1024;
 /// How long a client may take to send its request, or to read the answer.
 const PATIENCE: Duration = Duration::from_secs(10);
 
 static NEXT: AtomicI64 = AtomicI64::new(1);
-static SERVERS: Mutex<Option<HashMap<i64, TcpListener>>> = Mutex::new(None);
-static CONNECTIONS: Mutex<Option<HashMap<i64, TcpStream>>> = Mutex::new(None);
+static SERVERS: Mutex<Option<HashMap<i64, Server>>> = Mutex::new(None);
+static CONNECTIONS: Mutex<Option<HashMap<i64, Connection>>> = Mutex::new(None);
+
+/// The most requests read at the same time; the next ones get 503.
+const MAX_READING: usize = 64;
+
+struct Server {
+    port: i64,
+    /// The requests read, in the order they were completed.
+    ready: Arc<Mutex<Receiver<Request>>>,
+}
+
+/// A request waiting for its answer, and the files sent with it.
+struct Connection {
+    stream: TcpStream,
+    uploads: Vec<PathBuf>,
+}
+
+/// A file sent with a form (`multipart/form-data`), saved in a temporary file that is
+/// deleted once the request has its answer.
+#[derive(Debug, PartialEq, Clone)]
+pub struct Upload {
+    pub field: String,
+    pub filename: String,
+    pub content_type: String,
+    pub path: String,
+    pub size: i64,
+}
 
 /// A request received by a server.
 #[derive(Debug, PartialEq)]
@@ -37,7 +66,9 @@ pub struct Request {
     pub query: String,
     /// The names, lowercase, and the values of the headers.
     pub headers: Vec<(String, String)>,
+    /// The body; for a form with files, its other fields, as `a=1&b=2`.
     pub body: String,
+    pub uploads: Vec<Upload>,
 }
 
 /// An answer to a request made with `fetch`.
@@ -49,86 +80,177 @@ pub struct Response {
 }
 
 /// Starts a server on `host:port`; port 0 lets the system choose a free one. Gives the
-/// number of the server.
+/// number of the server. Connections are accepted and read on threads of their own, so
+/// that a slow client delays no one.
 pub fn listen(host: &str, port: i64) -> Result<i64, String> {
     let Ok(port) = u16::try_from(port) else {
         return Err(format!("{port} is not a port: a port goes from 0 to 65535"));
     };
     let listener = TcpListener::bind((host, port))
         .map_err(|problem| format!("cannot listen on {host}:{port}: {}", describe(&problem)))?;
+    let port = listener.local_addr().map_or(0, |address| i64::from(address.port()));
+    let (sender, receiver) = channel();
+    std::thread::spawn(move || {
+        let reading = Arc::new(AtomicUsize::new(0));
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let _ = stream.set_read_timeout(Some(PATIENCE));
+            let _ = stream.set_write_timeout(Some(PATIENCE));
+            if reading.fetch_add(1, Ordering::SeqCst) >= MAX_READING {
+                reading.fetch_sub(1, Ordering::SeqCst);
+                let _ = write_response(&mut stream, 503, &text_type(), b"too many requests at once\n");
+                continue;
+            }
+            let (sender, reading) = (sender.clone(), reading.clone());
+            std::thread::spawn(move || {
+                let read = read_request(&mut stream);
+                reading.fetch_sub(1, Ordering::SeqCst);
+                match read {
+                    Ok((mut request, uploads)) => {
+                        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+                        request.connection = id;
+                        CONNECTIONS
+                            .lock()
+                            .expect("never poisoned")
+                            .get_or_insert_with(HashMap::new)
+                            .insert(id, Connection { stream, uploads });
+                        let _ = sender.send(request);
+                    }
+                    Err(Some((status, message))) => {
+                        let _ = write_response(
+                            &mut stream,
+                            status,
+                            &text_type(),
+                            format!("{message}\n").as_bytes(),
+                        );
+                    }
+                    Err(None) => {}
+                }
+            });
+        }
+    });
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    SERVERS.lock().expect("never poisoned").get_or_insert_with(HashMap::new).insert(id, listener);
+    let server = Server { port, ready: Arc::new(Mutex::new(receiver)) };
+    SERVERS.lock().expect("never poisoned").get_or_insert_with(HashMap::new).insert(id, server);
     Ok(id)
+}
+
+fn text_type() -> [(String, String); 1] {
+    [("Content-Type".to_string(), "text/plain; charset=utf-8".to_string())]
 }
 
 /// The port on which the server listens.
 pub fn port(server: i64) -> i64 {
-    with_server(server, |listener| listener.local_addr().map_or(0, |address| i64::from(address.port())))
-}
-
-fn with_server<R>(server: i64, f: impl FnOnce(&TcpListener) -> R) -> R {
     let servers = SERVERS.lock().expect("never poisoned");
-    let listener =
-        servers.as_ref().and_then(|servers| servers.get(&server)).expect("a server made by `listen`");
-    f(listener)
+    servers.as_ref().and_then(|servers| servers.get(&server)).expect("a server made by `listen`").port
 }
 
-/// Waits for the next request that can be read. The others get their answer here.
+/// Waits for the next request that could be read.
 pub fn accept(server: i64) -> Result<Request, String> {
-    let listener = with_server(server, TcpListener::try_clone)
-        .map_err(|problem| format!("cannot wait for a request: {}", describe(&problem)))?;
-    loop {
-        let (mut stream, _) = match listener.accept() {
-            Ok(accepted) => accepted,
-            Err(problem) if problem.kind() == ErrorKind::Interrupted => continue,
-            Err(problem) => return Err(format!("cannot wait for a request: {}", describe(&problem))),
-        };
-        let _ = stream.set_read_timeout(Some(PATIENCE));
-        let _ = stream.set_write_timeout(Some(PATIENCE));
-        match read_request(&mut stream) {
-            Ok(mut request) => {
-                let id = NEXT.fetch_add(1, Ordering::Relaxed);
-                request.connection = id;
-                CONNECTIONS
-                    .lock()
-                    .expect("never poisoned")
-                    .get_or_insert_with(HashMap::new)
-                    .insert(id, stream);
-                return Ok(request);
-            }
-            Err(Some((status, message))) => {
-                let headers = [("Content-Type".to_string(), "text/plain; charset=utf-8".to_string())];
-                let _ = write_response(&mut stream, status, &headers, &format!("{message}\n"));
-            }
-            Err(None) => {}
-        }
-    }
+    let ready = {
+        let servers = SERVERS.lock().expect("never poisoned");
+        servers
+            .as_ref()
+            .and_then(|servers| servers.get(&server))
+            .expect("a server made by `listen`")
+            .ready
+            .clone()
+    };
+    let ready = ready.lock().expect("never poisoned");
+    ready.recv().map_err(|_| "the server stopped listening".to_string())
 }
 
-/// Answers the request `connection`, then closes it.
-pub fn respond(connection: i64, status: i64, headers: &[(String, String)], body: &str) -> Result<(), String> {
-    let Some(mut stream) =
+/// Answers the request `connection`, then closes it and deletes the files sent with it.
+/// With `file`, the body is the content of that file, of any kind.
+pub fn respond(
+    connection: i64,
+    status: i64,
+    headers: &[(String, String)],
+    body: &str,
+    file: &str,
+) -> Result<(), String> {
+    let Some(Connection { mut stream, uploads }) =
         CONNECTIONS.lock().expect("never poisoned").as_mut().and_then(|open| open.remove(&connection))
     else {
         return Err("this request already has its answer".to_string());
     };
+    let answered = answer(&mut stream, status, headers, body, file);
+    for upload in uploads {
+        let _ = std::fs::remove_file(upload);
+    }
+    answered
+}
+
+fn answer(
+    stream: &mut TcpStream,
+    status: i64,
+    headers: &[(String, String)],
+    body: &str,
+    file: &str,
+) -> Result<(), String> {
     if !(100..=999).contains(&status) {
-        let _ = write_response(&mut stream, 500, &[], "");
+        let _ = write_response(stream, 500, &[], b"");
         return Err(format!("{status} is not an HTTP status: a status has three digits"));
     }
     if let Some((name, value)) = headers.iter().find(|(name, value)| !valid_header(name, value)) {
-        let _ = write_response(&mut stream, 500, &[], "");
+        let _ = write_response(stream, 500, &[], b"");
         return Err(format!(
             "`{name}: {value}` is not a header: a name is a word, and no line end is allowed"
         ));
     }
-    write_response(&mut stream, status, headers, body)
-        .map_err(|problem| format!("cannot answer the request: {}", describe(&problem)))
+    let written = if file.is_empty() {
+        write_response(stream, status, headers, body.as_bytes())
+    } else {
+        match std::fs::read(file) {
+            Ok(content) => {
+                let mut headers = headers.to_vec();
+                if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("content-type")) {
+                    headers.push(("Content-Type".to_string(), media_type(file).to_string()));
+                }
+                write_response(stream, status, &headers, &content)
+            }
+            Err(problem) => {
+                let _ = write_response(stream, 404, &text_type(), b"not found\n");
+                return Err(format!("cannot send `{file}`: {}", describe(&problem)));
+            }
+        }
+    };
+    written.map_err(|problem| format!("cannot answer the request: {}", describe(&problem)))
 }
 
-/// A request read from the stream; or the answer to give instead (`None`: none, the
-/// client left).
-fn read_request(stream: &mut TcpStream) -> Result<Request, Option<(i64, &'static str)>> {
+/// The media type of a file, from its extension.
+pub fn media_type(path: &str) -> &'static str {
+    let extension = path.rsplit_once('.').map_or("", |(_, e)| e).to_ascii_lowercase();
+    match extension.as_str() {
+        "html" | "htm" => "text/html; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "json" => "application/json",
+        "txt" | "md" | "lion" => "text/plain; charset=utf-8",
+        "csv" => "text/csv; charset=utf-8",
+        "xml" => "application/xml",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "wasm" => "application/wasm",
+        "mp3" => "audio/mpeg",
+        "mp4" => "video/mp4",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        _ => "application/octet-stream",
+    }
+}
+
+type Refusal = Option<(i64, &'static str)>;
+
+/// A request read from the stream, and the temporary files of its uploads; or the
+/// answer to give instead (`None`: none, the client left).
+fn read_request(stream: &mut TcpStream) -> Result<(Request, Vec<PathBuf>), Refusal> {
     let mut data = Vec::new();
     let mut chunk = [0u8; 8192];
     let head_end = loop {
@@ -165,7 +287,7 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, Option<(i64, &'static
         };
         headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
     }
-    let header = |name: &str| headers.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str());
+    let header = |name: &str| headers.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     if header("transfer-encoding").is_some() {
         return Err(Some((411, "send the body with a Content-Length")));
     }
@@ -189,18 +311,113 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, Option<(i64, &'static
         }
     }
     body.truncate(length);
-    let body =
-        String::from_utf8(body).map_err(|_| Some((400, "the body of the request is not UTF-8 text")))?;
+    let content_type = header("content-type").unwrap_or_default();
+    let (body, uploads) = match boundary(&content_type) {
+        Some(boundary) => multipart(&body, &boundary)?,
+        None => (
+            String::from_utf8(body).map_err(|_| Some((400, "the body of the request is not UTF-8 text")))?,
+            Vec::new(),
+        ),
+    };
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let path = decode(path, false).ok_or(Some((400, "the path of the request is not UTF-8 text")))?;
-    Ok(Request { connection: 0, method: method.to_string(), path, query: query.to_string(), headers, body })
+    let paths = uploads.iter().map(|upload: &Upload| PathBuf::from(&upload.path)).collect();
+    let request = Request {
+        connection: 0,
+        method: method.to_string(),
+        path,
+        query: query.to_string(),
+        headers,
+        body,
+        uploads,
+    };
+    Ok((request, paths))
+}
+
+/// The boundary of a `multipart/form-data` body.
+fn boundary(content_type: &str) -> Option<String> {
+    let (kind, parameters) = content_type.split_once(';')?;
+    if !kind.trim().eq_ignore_ascii_case("multipart/form-data") {
+        return None;
+    }
+    parameters.split(';').find_map(|parameter| {
+        let (name, value) = parameter.split_once('=')?;
+        name.trim().eq_ignore_ascii_case("boundary").then(|| value.trim().trim_matches('"').to_string())
+    })
+}
+
+/// The fields of a form with files: the text fields as `a=1&b=2`, and the files saved
+/// in temporary files.
+fn multipart(body: &[u8], boundary: &str) -> Result<(String, Vec<Upload>), Refusal> {
+    let unreadable = Some((400, "the form of the request is not readable"));
+    let delimiter = format!("--{boundary}");
+    let mut fields = Vec::new();
+    let mut uploads = Vec::new();
+    let mut rest = &body[find(body, delimiter.as_bytes()).ok_or(unreadable)? + delimiter.len()..];
+    loop {
+        if rest.starts_with(b"--") {
+            break;
+        }
+        rest = rest.strip_prefix(b"\r\n").ok_or(unreadable)?;
+        let head_end = find(rest, b"\r\n\r\n").ok_or(unreadable)?;
+        let head = String::from_utf8_lossy(&rest[..head_end]).to_string();
+        rest = &rest[head_end + 4..];
+        let end = find(rest, format!("\r\n{delimiter}").as_bytes()).ok_or(unreadable)?;
+        let content = &rest[..end];
+        rest = &rest[end + 2 + delimiter.len()..];
+        let mut name = String::new();
+        let mut filename = None;
+        let mut content_type = String::from("application/octet-stream");
+        for line in head.split("\r\n") {
+            let Some((header, value)) = line.split_once(':') else { continue };
+            if header.trim().eq_ignore_ascii_case("content-type") {
+                content_type = value.trim().to_string();
+            } else if header.trim().eq_ignore_ascii_case("content-disposition") {
+                for parameter in value.split(';') {
+                    if let Some((key, value)) = parameter.split_once('=') {
+                        let value = value.trim().trim_matches('"').to_string();
+                        match key.trim() {
+                            "name" => name = value,
+                            "filename" => filename = Some(value),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        match filename {
+            Some(filename) => {
+                let path = std::env::temp_dir().join(format!(
+                    "lion-upload-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                std::fs::write(&path, content)
+                    .map_err(|_| Some((500, "the server cannot keep the file sent")))?;
+                uploads.push(Upload {
+                    field: name,
+                    // Only the name: a client chooses no folder of the server.
+                    filename: filename.rsplit(['/', '\\']).next().unwrap_or_default().to_string(),
+                    content_type,
+                    path: path.to_string_lossy().into_owned(),
+                    size: content.len() as i64,
+                });
+            }
+            None => {
+                let value = std::str::from_utf8(content)
+                    .map_err(|_| Some((400, "a field of the form is not UTF-8 text")))?;
+                fields.push(format!("{}={}", encode(&name), encode(value)));
+            }
+        }
+    }
+    Ok((fields.join("&"), uploads))
 }
 
 fn write_response(
     stream: &mut TcpStream,
     status: i64,
     headers: &[(String, String)],
-    body: &str,
+    body: &[u8],
 ) -> std::io::Result<()> {
     let mut out = format!("HTTP/1.1 {status} {}\r\n", reason(status));
     for (name, value) in headers {
@@ -210,7 +427,7 @@ fn write_response(
     }
     out.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()));
     stream.write_all(out.as_bytes())?;
-    stream.write_all(body.as_bytes())?;
+    stream.write_all(body)?;
     stream.flush()?;
     let _ = stream.shutdown(std::net::Shutdown::Write);
     Ok(())
@@ -315,6 +532,7 @@ pub fn fetch(
     url: &str,
     headers: &[(String, String)],
     body: &str,
+    files: &[(String, String)],
     timeout: f64,
     jar: Option<&str>,
 ) -> Result<(Response, Option<String>), String> {
@@ -353,9 +571,25 @@ pub fn fetch(
             format!("{name}: {value}")
         });
     }
-    let sends = !body.is_empty() || matches!(method, "POST" | "PUT" | "PATCH");
+    // With files, the body is a form (`a=1&b=2`) sent with them as `multipart/form-data`.
+    let sends = files.is_empty() && (!body.is_empty() || matches!(method, "POST" | "PUT" | "PATCH"));
     if sends {
         command.args(["--data-binary", "@-"]);
+    }
+    if !files.is_empty() {
+        for (name, value) in form_pairs(body) {
+            command.arg("--form-string").arg(format!("{name}={value}"));
+        }
+        for (field, path) in files {
+            if field.is_empty() || field.contains(['=', ';', '"', '\r', '\n']) {
+                return Err(format!("`{field}` is not a field name: a name has no `=`, `;` or quote"));
+            }
+            if !std::path::Path::new(path).is_file() {
+                return Err(format!("cannot send `{path}`: the file does not exist"));
+            }
+            let quoted = path.replace('\\', "\\\\").replace('"', "\\\"");
+            command.arg("--form").arg(format!("{field}=@\"{quoted}\""));
+        }
     }
     // The cookies of a session go through a file of curl's own format, read back after.
     let jar_file = match jar {
@@ -530,8 +764,8 @@ mod tests {
         assert_eq!((request.method.as_str(), request.path.as_str()), ("POST", "/a b"));
         assert_eq!((request.query.as_str(), request.body.as_str()), ("x=1", "hello"));
         assert_eq!(request.headers[0], ("host".to_string(), "h".to_string()));
-        respond(request.connection, 201, &[("X-A".to_string(), "b".to_string())], "done").unwrap();
-        assert!(respond(request.connection, 200, &[], "").is_err());
+        respond(request.connection, 201, &[("X-A".to_string(), "b".to_string())], "done", "").unwrap();
+        assert!(respond(request.connection, 200, &[], "", "").is_err());
         let answer = client.join().unwrap();
         assert!(answer.starts_with("HTTP/1.1 201 Created\r\nX-A: b\r\nContent-Length: 4\r\n"), "{answer}");
         assert!(answer.ends_with("\r\n\r\ndone"));

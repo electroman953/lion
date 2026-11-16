@@ -1,0 +1,70 @@
+// A small site (C106): routes with parameters, static files, a form with a file, and
+// the answers 404 and 405.
+use files
+use hash
+use net
+
+fun home(r in net.Request) in net.Response = net.html("<h1>Bonjour</h1>")
+
+fun user(r in net.Request) in net.Response = net.plain("user {r.param("id")}, tab {r.query("tab")}")
+
+fun rest(r in net.Request) in net.Response = net.plain("rest: {r.param("*")}")
+
+fun receive(r in net.Request) in net.Response or Error:
+    let photo = r.upload("photo")
+    if photo == none: return net.plain("no photo", 400) ;
+    try files.make_folder("target/tmp/site")
+    try files.copy(photo.path, "target/tmp/site/{photo.filename}")
+    return net.plain("{r.form("title")}: {photo.filename} ({photo.kind}, {photo.size} bytes, {hash.file_sha256(photo.path)})")
+;
+
+let app = (net.router()
+    .get("/", home)
+    .get("/users/:id", user)
+    .get("/docs/*", rest)
+    .post("/photos", receive)
+    .files("/static", "tests/integration/data/public"))
+
+let server = try net.listen(0)
+let base = "http://127.0.0.1:{server.port()}"
+
+fun serve_some(count in Int) in None or Error:
+    for i in 1..count:
+        let r = try server.next()
+        let answer = match app.handle(r):
+            in net.Response a then a
+            in Error e then net.plain(e.message(), 500)
+        ;
+        try r.respond(answer)
+    ;
+    return none
+;
+
+fun show_answer(t in Task of (net.Response or Error)) in None or Error:
+    let a = try wait t
+    show("{a.status} {a.header("content-type")} | {a.body}")
+    return none
+;
+
+let paths = ["/", "/users/42?tab=notes", "/users/42/x", "/docs/a/b/c.txt", "/static/", "/static/css/style.css", "/static/%2e%2e/site.lion", "/static/css/%2E%2E/%2E%2E/%2E%2E/site.lion", "/static/absent.txt"]
+for p in paths:
+    let t = task net.get("{base}{p}")
+    try serve_some(1)
+    show("GET {p}")
+    try show_answer(t)
+;
+// A file that is not text cannot be a Text: `net.download` saves it.
+let png = task net.get("{base}/static/logo.png")
+try serve_some(1)
+let p = wait png
+show(p in Error)
+
+let wrong = task net.request("DELETE", "{base}/users/1", [], "")
+try serve_some(1)
+let w = try wait wrong
+show("{w.status} allow={w.header("allow")}")
+
+let sent = task net.upload("{base}/photos", "photo", "tests/integration/data/public/logo.png", "title=Mon%20logo")
+try serve_some(1)
+try show_answer(sent)
+show(hash.file_sha256("target/tmp/site/logo.png") == hash.file_sha256("tests/integration/data/public/logo.png"))

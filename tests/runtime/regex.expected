@@ -22,11 +22,14 @@ false
 error("`[a-` is not a pattern: a class `[` has no `]`")
 none
 false
+["le le", "chat chat"]
+x = <a> + <b>
+error("`(a)\\2` is not a pattern: `\\2` refers to no group: the pattern has 1")
 ----- stderr
 bug: `(` is not a pattern
-   --> tests/runtime/regex.lion:31:6
+   --> tests/runtime/regex.lion:35:6
     |
- 31 | show(regex.all("(", "x"))
+ 35 | show(regex.all("(", "x"))
     |      ^^^^^^^^^^^^^^^^^^^
     |
     = a group `(` has no `)`

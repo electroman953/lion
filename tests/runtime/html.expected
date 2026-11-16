@@ -14,13 +14,16 @@ none
 0
 &lt;a href=&quot;x&quot;&gt;Léa &amp; &#39;Max&#39;&lt;/a&gt;
 <ééé&inconnu;
+["12 €", "7 €"]
+["Un texte à lire", "Encore"]
+["Premier"]
 ----- stderr
 bug: `a:hover` is not a selector
-   --> tests/runtime/html.lion:29:6
+   --> tests/runtime/html.lion:32:6
     |
- 29 | show(page.select("a:hover"))
+ 32 | show(page.select("a:hover"))
     |      ^^^^^^^^^^^^^^^^^^^^^^
     |
-    = `:hover` is not supported: the pseudo-classes are :first-child, :last-child and :nth-child(n)
+    = `:hover` is not supported: the pseudo-classes are :first-child, :last-child, :nth-child(n) and :not(…)
     = help: check the value before the call
 

@@ -1,5 +1,7 @@
-// The system (§23, C104): the arguments of the program, the environment, and other
-// programs to run.
+// The system (§23, C104, C106): the arguments of the program, the environment, and
+// other programs to run.
+
+use text
 
 // The words written after the program: `lion run tri.lion a b` gives `["a", "b"]`, and
 // so does `./tri a b` once compiled.
@@ -7,6 +9,102 @@ foreign "lion" fun args() in List of Text
 
 // The value of the environment variable `name`, such as `HOME`, or `none`.
 foreign "lion" fun env(name in Text) in maybe Text
+
+// The options and the other words of the command line: `--verbose`, `-v`,
+// `--out=a.csv`, `--out a.csv` or `-o a.csv` when `out` or `o` takes a value, `-abc`
+// for `-a -b -c`; `--` ends the options. `rest` keeps the other words, in order.
+struct Args:
+    rest in List of Text
+    // The names and the values of the options; `""` for a flag.
+    private found in List of Text
+;
+
+// The command line of the program, read with the names of the options that take a
+// value: `system.parse_args(["out", "o"])`.
+fun parse_args(with_value in List of Text = []) in Args = parse(args(), with_value)
+
+// The words read as `parse_args` reads the command line.
+fun parse(words in List of Text, with_value in List of Text = []) in Args:
+    var rest = [] in List of Text
+    var found = [] in List of Text
+    var options = true
+    var i = 1
+    while i <= words.size:
+        let w = words[i]
+        if not options or w == "-" or not text.starts_with(w, "-"):
+            rest.add(w)
+        elif w == "--":
+            options = false
+        elif text.starts_with(w, "--"):
+            let body = w[3..w.size]
+            let equal = text.find(body, "=")
+            if equal != none:
+                found.add(body[1..equal - 1])
+                found.add(body[equal + 1..body.size])
+            elif body in with_value and i < words.size:
+                found.add(body)
+                found.add(words[i + 1])
+                i += 1
+            else:
+                found.add(body)
+                found.add("")
+            ;
+        else:
+            var j = 2
+            while j <= w.size:
+                let letter = w[j]
+                found.add(letter)
+                if letter in with_value:
+                    if j < w.size:
+                        found.add(w[j + 1..w.size])
+                    elif i < words.size:
+                        found.add(words[i + 1])
+                        i += 1
+                    else:
+                        found.add("")
+                    ;
+                    j = w.size + 1
+                else:
+                    found.add("")
+                    j += 1
+                ;
+            ;
+        ;
+        i += 1
+    ;
+    return Args(rest, found)
+;
+
+// Whether the option was given: `a.flag("verbose")` for `--verbose`, `a.flag("v")` for
+// `-v`.
+fun Args.flag(name in Text) in Bool:
+    for i in 1..self.found.size div 2:
+        if self.found[2 * i - 1] == name: return true ;
+    ;
+    return false
+;
+
+// The value of the last option `name`, or `none` when it was not given.
+fun Args.option(name in Text) in maybe Text:
+    var value = none in maybe Text
+    for i in 1..self.found.size div 2:
+        if self.found[2 * i - 1] == name: value = self.found[2 * i] ;
+    ;
+    return value
+;
+
+// Asks a question at the keyboard, and whether the answer is yes (`y`, `yes`, `o`,
+// `oui`, in any case).
+fun confirm(question in Text) in Bool:
+    let answer = text.lower(text.trim(ask("{question} [y/n] ")))
+    return answer in ["y", "yes", "o", "oui"]
+;
+
+// The current folder.
+foreign "lion" fun folder() in Text or Error
+
+// Where the program `name` is, as a command line would find it in `PATH`, or `none`.
+foreign "lion" fun which(name in Text) in maybe Text
 
 // What a program that ran left: its exit code, what it wrote on its output, and on its
 // error output. A byte that is not UTF-8 text is shown as `�`.

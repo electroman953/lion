@@ -1,0 +1,23 @@
+exit: 0
+----- stdout
+["in.csv", "-z", "-"]
+true true false x.csv y 5 none
+true [] []
+[]
+false rouge gras
+["public/css/style.css", "public/index.html", "public/logo.png"]
+["tests/integration/data/public/css/style.css", "tests/integration/data/public/logo.png"]
+["tests/integration/data/public/index.html"]
+true
+11
+true
+error("cannot read `tests/absent`: the file does not exist")
+error("cannot list `tests/absent`: the folder does not exist")
+true
+none
+true
+Continue? [y/n]  false
+tick 1
+tick 2
+tick 3
+----- stderr

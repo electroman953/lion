@@ -10,3 +10,18 @@ foreign "lion" fun clock() in Float
 
 // Waits `seconds`, which may have a fraction; a negative duration is a bug.
 foreign "lion" fun sleep(seconds in Float) in None
+
+// Calls `f` now, then every `seconds`, as long as it gives `true`: to watch a page, a
+// folder or a service. The time of `f` counts in the wait.
+fun every(seconds in Float, f in fun() in Bool) in None:
+    var keep = true
+    while keep:
+        let started = clock()
+        keep = f()
+        if keep:
+            let rest = seconds - (clock() - started)
+            if rest > 0.0: sleep(rest) ;
+        ;
+    ;
+    return none
+;

@@ -1,0 +1,38 @@
+// Everyday scripts (C106): options of the command line, folders, colors, waiting.
+use files
+use system
+use term
+use time
+
+let a = system.parse(["in.csv", "-v", "--out=x.csv", "-abo", "y", "--limit", "5", "--", "-z", "-"], ["o", "limit"])
+show(a.rest)
+show("{a.flag("v")} {a.flag("b")} {a.flag("z")} {a.option("out")} {a.option("o")} {a.option("limit")} {a.option("q")}")
+let b = system.parse(["--name", "-o"], ["o"])
+show("{b.flag("name")} [{b.option("o")}] {b.rest}")
+show(system.parse_args().rest)
+
+// Without a terminal, the text stays as it is.
+show("{term.enabled()} {term.red("rouge")} {term.bold("gras")}")
+
+show(files.walk("tests/integration/data"))
+show(files.find("tests/integration/data", "*.\{css,png\}"))
+show(files.find("tests/integration", "data/**/index.html"))
+show(files.matches("img_??.[jp][pn]g", "photos/img_01.png"))
+show(files.size("tests/integration/data/public/logo.png"))
+show((try files.modified("tests/integration/data/public/logo.png")) > 1_000_000_000.0)
+show(files.size("tests/absent"))
+show(files.walk("tests/absent"))
+
+show(system.which("sh") != none)
+show(system.which("lion-surely-absent"))
+show((try system.folder()) != "")
+// Without a keyboard, the answer is empty: no.
+show(system.confirm("Continue?"))
+
+var n = 0
+fun tick() in Bool modifies n:
+    n += 1
+    show("tick {n}")
+    return n < 3
+;
+time.every(0.01, tick)

@@ -42,7 +42,7 @@ Le bilan détaillé, avec les limites connues et les prochaines étapes, est dan
   - conversions `as` entre nombres et vers Text.
 - **Textes** : échappements et interpolation `"x = {x}"`.
 - **Modules** (§20) : `use geometry`, `use shapes.circle`, noms qualifiés (`geometry.area(...)`, `geometry.Point`), `private`, globales initialisées au premier usage, modules qui s'utilisent mutuellement.
-- **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles), `csv` (lecture et écriture), `sets` (tri, `min`, `max`, ensemble des parties, `any`, `all`, `count`, `group`), `json` (liste d'objets lue en lignes, `r.get("nom")`), `time` (horloge, mesure des durées, attente), `dates` (dates vérifiées, `d + 30`, `b - a`, jour de la semaine, format ISO) `ui` (fenêtres : titres, textes, boutons, champs, cases à cocher, colonnes et lignes), `net` (requêtes web, HTTPS compris, sessions avec cookies, et micro-serveurs HTTP), `system` (arguments, variables d'environnement, autres programmes), `html` (pages lues avec des sélecteurs CSS), `regex`, `url`, `base64` et `hash` ; `json` lit et écrit aussi du JSON de toute forme ; `files` lit, écrit, ajoute, liste, copie, déplace et supprime.
+- **Bibliothèque standard** (§23), écrite en Lion : `files`, `text`, `math`, `random` (générateurs reproductibles), `csv` (lecture et écriture), `sets` (tri, `min`, `max`, ensemble des parties, `any`, `all`, `count`, `group`), `json` (liste d'objets lue en lignes, `r.get("nom")`), `time` (horloge, mesure des durées, attente), `dates` (dates vérifiées, `d + 30`, `b - a`, jour de la semaine, format ISO) `ui` (fenêtres : titres, textes, boutons, champs, cases à cocher, colonnes et lignes), `net` (requêtes web, HTTPS compris, sessions avec cookies, et micro-serveurs HTTP), `system` (arguments, variables d'environnement, autres programmes), `html` (pages lues avec des sélecteurs CSS), `regex`, `url`, `base64`, `hash` et `term` (couleurs) ; `json` lit et écrit aussi du JSON de toute forme ; `files` lit, écrit, ajoute, liste, copie, déplace et supprime.
 - **Tâches** (§19.1) : `task f(x)`, `wait t`, avec les règles de sûreté du §19.3 ; méthodes détachées `s.passes` (§12.6). Une tâche qui ne lit rien que le programme peut changer tourne sur son propre fil ; ce qu'elle écrit apparaît à son `wait` (C85).
 - **Partage explicite** (§17.2) : `var score = shared Counter()`, `shared synced` pour les tâches, `a same b`, méthodes détachées d'un objet partagé (`score.increment`), avec les règles de la spec vérifiées à la compilation.
 - **Parallélisme de données** (§19.2) : `parallel [...]`, `parallel {...}`, `parallel for`, avec les règles de sûreté du §19.3 vérifiées à la compilation. Les tours s'exécutent sur tous les cœurs (ou `LION_THREADS` fils), dans les deux modes, avec le résultat du calcul séquentiel : la sortie arrive dans l'ordre des tours, et le premier bug dans cet ordre arrête le programme (C83).
@@ -92,7 +92,29 @@ fun handle(r in net.Request) in net.Response or Error:
 try net.serve(8080, handle)        // http://127.0.0.1:8080/hello?name=Léa
 ```
 
-Une Error rendue par la fonction devient une réponse 500. Pour répondre en JSON : `net.data(json.from(valeur))`, où `valeur` peut être une liste, une Map ou une structure. Le serveur répond à une requête à la fois ; `host = "0.0.0.0"` l'ouvre aux autres ordinateurs. Les requêtes, elles, peuvent partir ensemble : `task net.get(url)`.
+Pour un vrai site, un routeur décrit les pages, sert un dossier de fichiers et reçoit des fichiers envoyés par formulaire (C106) :
+
+```lion
+use files
+use net
+
+fun user(r in net.Request) in net.Response = net.plain("utilisateur {r.param("id")}")
+
+fun upload(r in net.Request) in net.Response or Error:
+    let photo = r.upload("photo")
+    if photo == none: return net.plain("pas de photo", 400) ;
+    try files.move(photo.path, "photos/{photo.filename}")
+    return net.redirect("/")
+;
+
+let app = (net.router()
+    .get("/users/:id", user)
+    .post("/photos", upload)
+    .files("/", "public"))                 // public/index.html, public/style.css…
+try net.serve(8080, app.handle)
+```
+
+`net.serve_parallel(8080, app.handle)` répond à plusieurs requêtes à la fois, quand les fonctions de réponse ne modifient rien hors d'elles. Une Error rendue par la fonction devient une réponse 500. Pour répondre en JSON : `net.data(json.from(valeur))`, où `valeur` peut être une liste, une Map ou une structure. Le serveur répond à une requête à la fois ; `host = "0.0.0.0"` l'ouvre aux autres ordinateurs. Les requêtes, elles, peuvent partir ensemble : `task net.get(url)`.
 
 ### Scraping
 
@@ -121,6 +143,27 @@ show(json.object().with("nom", json.from("Léa")).with("notes", json.from([12, 1
 ```
 
 Dans un motif écrit en Lion, `\` s'écrit `\\` et les accolades `\{ \}`, puisque `{…}` insère une valeur. Le test `tests/integration/scrape.lion` montre un scraping complet : connexion avec cookie, page lue, prix extraits, liens rendus absolus, API JSON et fichier CSV.
+
+### Scripts du quotidien
+
+```lion
+use files
+use system
+use term
+use time
+
+let args = system.parse_args(["out"])          // tri.lion photos --out liste.txt -v
+for photo in try files.find(args.rest[1], "*.\{jpg,png\}"):
+    if args.flag("v"): show(term.gray(photo)) ;
+;
+if system.confirm("Continuer ?"): show(term.green("c'est parti")) ;
+
+fun verifier() in Bool:                        // rappelée toutes les 60 s tant qu'elle rend true
+    show(term.bold("encore là"))
+    return true
+;
+time.every(60.0, verifier)
+```
 
 ## Projets et paquets
 

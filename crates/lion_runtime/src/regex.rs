@@ -1,6 +1,8 @@
 //! Regular expressions (module `regex`, C105), without a dependency: the pattern is
 //! compiled to a program run by a Pike machine, whose time grows with the length of the
-//! text times the size of the pattern, never more: no pattern makes it run for ever.
+//! text times the size of the pattern, never more: no pattern makes it run for ever. A
+//! pattern with back references (`\1`, C106) needs to go back in the text: it runs by
+//! backtracking, within a number of steps, past which the search is an error.
 //!
 //! The syntax is the common one: `.`, `[a-z]`, `[^…]`, `\d \w \s \D \W \S`, `\b \B`,
 //! `^ $`, `( )`, `(?: )`, `(?<name> )`, `|`, `* + ? {n} {n,} {n,m}` and their lazy
@@ -17,7 +19,12 @@ pub struct Regex {
     names: Vec<(String, usize)>,
     insensitive: bool,
     multiline: bool,
+    /// Whether the pattern has back references, which the Pike machine cannot follow.
+    backtracks: bool,
 }
+
+/// The most steps of a search by backtracking.
+const MAX_STEPS: usize = 10_000_000;
 
 /// A match: the byte ranges of the whole match and of each group.
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +41,7 @@ enum Inst {
     Jump(usize),
     Save(usize),
     Assert(Assertion),
+    Backref(usize),
     Match,
 }
 
@@ -61,6 +69,7 @@ enum Node {
     Class(Class),
     Assert(Assertion),
     Group(Box<Node>, Option<usize>),
+    Backref(usize),
     Concat(Vec<Node>),
     Alt(Vec<Node>),
     Repeat { node: Box<Node>, min: u32, max: Option<u32>, greedy: bool },
@@ -74,7 +83,13 @@ const MAX_PROGRAM: usize = 100_000;
 impl Regex {
     /// The pattern compiled, or why it is not one.
     pub fn new(pattern: &str) -> Result<Regex, String> {
-        let mut parser = Parser { chars: pattern.chars().collect(), pos: 0, groups: 1, names: Vec::new() };
+        let mut parser = Parser {
+            chars: pattern.chars().collect(),
+            pos: 0,
+            groups: 1,
+            names: Vec::new(),
+            backrefs: Vec::new(),
+        };
         let (mut insensitive, mut multiline, mut dot_all) = (false, false, false);
         while parser.chars[parser.pos..].starts_with(&['(', '?'])
             && parser.chars.get(parser.pos + 2).is_some_and(|c| "ims".contains(*c))
@@ -99,6 +114,9 @@ impl Regex {
         if parser.pos < parser.chars.len() {
             return Err(format!("the `)` at position {} closes no group", parser.pos + 1));
         }
+        if let Some(missing) = parser.backrefs.iter().find(|n| **n >= parser.groups) {
+            return Err(format!("`\\{missing}` refers to no group: the pattern has {}", parser.groups - 1));
+        }
         let mut compiler = Compiler { program: Vec::new(), classes: Vec::new(), dot_all };
         compiler.program.push(Inst::Save(0));
         compiler.node(&node)?;
@@ -111,6 +129,7 @@ impl Regex {
             names: parser.names,
             insensitive,
             multiline,
+            backtracks: !parser.backrefs.is_empty(),
         })
     }
 
@@ -124,8 +143,110 @@ impl Regex {
         self.names.iter().find(|(n, _)| n == name).map(|(_, i)| *i)
     }
 
-    /// The first match that starts at byte `from` or after.
-    pub fn find_at(&self, text: &str, from: usize) -> Option<Found> {
+    /// The first match that starts at byte `from` or after; an Error when a pattern with
+    /// back references takes too many steps.
+    pub fn find_at(&self, text: &str, from: usize) -> Result<Option<Found>, String> {
+        if self.backtracks {
+            let mut steps = 0;
+            let mut start = from;
+            loop {
+                if let Some(caps) = self.backtrack(text, start, &mut steps)? {
+                    return Ok(Some(Found {
+                        groups: caps.chunks(2).map(|pair| pair[0].zip(pair[1])).collect(),
+                    }));
+                }
+                match text[start..].chars().next() {
+                    Some(c) => start += c.len_utf8(),
+                    None => return Ok(None),
+                }
+            }
+        }
+        Ok(self.pike(text, from))
+    }
+
+    /// The match that starts at `start`, found by trying each way in turn.
+    fn backtrack(
+        &self,
+        text: &str,
+        start: usize,
+        steps: &mut usize,
+    ) -> Result<Option<Vec<Option<usize>>>, String> {
+        enum Job {
+            Try(usize, usize),
+            Restore(usize, Option<usize>),
+        }
+        let mut caps = vec![None; self.groups * 2];
+        let mut jobs = vec![Job::Try(0, start)];
+        while let Some(job) = jobs.pop() {
+            let (mut pc, mut position) = match job {
+                Job::Restore(slot, old) => {
+                    caps[slot] = old;
+                    continue;
+                }
+                Job::Try(pc, position) => (pc, position),
+            };
+            loop {
+                *steps += 1;
+                if *steps > MAX_STEPS {
+                    return Err("the pattern takes too many steps on this text: its back references make it try too many ways".to_string());
+                }
+                let c = text[position..].chars().next();
+                match &self.program[pc] {
+                    Inst::Match => return Ok(Some(caps)),
+                    Inst::Jump(to) => pc = *to,
+                    Inst::Split(first, second) => {
+                        jobs.push(Job::Try(*second, position));
+                        pc = *first;
+                    }
+                    Inst::Save(slot) => {
+                        jobs.push(Job::Restore(*slot, caps[*slot]));
+                        caps[*slot] = Some(position);
+                        pc += 1;
+                    }
+                    Inst::Assert(assertion) => {
+                        if !self.holds(*assertion, text, position) {
+                            break;
+                        }
+                        pc += 1;
+                    }
+                    Inst::Backref(group) => {
+                        let Some((a, b)) = caps[group * 2].zip(caps[group * 2 + 1]) else { break };
+                        let mut rest = text[position..].chars();
+                        let mut length = 0;
+                        let same = text[a..b].chars().all(|expected| match rest.next() {
+                            Some(c) if self.same(expected, c) => {
+                                length += c.len_utf8();
+                                true
+                            }
+                            _ => false,
+                        });
+                        if !same {
+                            break;
+                        }
+                        position += length;
+                        pc += 1;
+                    }
+                    inst => {
+                        let Some(c) = c else { break };
+                        let accepted = match inst {
+                            Inst::Char(expected) => self.same(*expected, c),
+                            Inst::Any { line_ends } => *line_ends || c != '\n',
+                            Inst::Class(class) => self.in_class(&self.classes[*class], c),
+                            _ => false,
+                        };
+                        if !accepted {
+                            break;
+                        }
+                        position += c.len_utf8();
+                        pc += 1;
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn pike(&self, text: &str, from: usize) -> Option<Found> {
         let slots = self.groups * 2;
         let mut current = Threads::new(self.program.len(), slots);
         let mut next = Threads::new(self.program.len(), slots);
@@ -175,11 +296,11 @@ impl Regex {
     }
 
     /// Every match, from left to right, without overlaps.
-    pub fn find_all(&self, text: &str) -> Vec<Found> {
+    pub fn find_all(&self, text: &str) -> Result<Vec<Found>, String> {
         let mut all = Vec::new();
         let mut from = 0;
         while from <= text.len() {
-            let Some(found) = self.find_at(text, from) else { break };
+            let Some(found) = self.find_at(text, from)? else { break };
             let (start, end) = found.groups[0].expect("a match has a range");
             from = if end > start {
                 end
@@ -189,7 +310,7 @@ impl Regex {
             };
             all.push(found);
         }
-        all
+        Ok(all)
     }
 
     /// Follows the instructions that consume nothing from `pc`, and adds the threads
@@ -291,6 +412,7 @@ struct Parser {
     pos: usize,
     groups: usize,
     names: Vec<(String, usize)>,
+    backrefs: Vec<usize>,
 }
 
 impl Parser {
@@ -457,7 +579,11 @@ impl Parser {
             'n' => Node::Char('\n'),
             't' => Node::Char('\t'),
             'r' => Node::Char('\r'),
-            '1'..='9' => return Err("back references such as `\\1` are not supported".to_string()),
+            '1'..='9' if !in_class => {
+                let n = c.to_digit(10).expect("a digit") as usize;
+                self.backrefs.push(n);
+                Node::Backref(n)
+            }
             c if c.is_alphanumeric() => return Err(format!("`\\{c}` is not an escape")),
             c => Node::Char(c),
         })
@@ -569,6 +695,7 @@ impl Compiler {
                 self.program.push(Inst::Class(self.classes.len() - 1));
             }
             Node::Assert(assertion) => self.program.push(Inst::Assert(*assertion)),
+            Node::Backref(n) => self.program.push(Inst::Backref(*n)),
             Node::Group(inner, number) => {
                 if let Some(number) = number {
                     self.program.push(Inst::Save(number * 2));
@@ -680,6 +807,7 @@ mod tests {
         let regex = Regex::new(pattern).unwrap();
         regex
             .find_all(text)
+            .unwrap()
             .iter()
             .map(|found| {
                 let (a, b) = found.groups[0].unwrap();
@@ -715,7 +843,7 @@ mod tests {
     fn captures_groups() {
         let regex = Regex::new(r"(?<year>\d{4})-(\d\d)(-(\d\d))?").unwrap();
         let text = "on 2026-11 and 2025-01-31";
-        let found = regex.find_all(text);
+        let found = regex.find_all(text).unwrap();
         assert_eq!(found[0].groups[1], Some((3, 7)));
         assert_eq!(found[0].groups[3], None);
         assert_eq!(expand(&regex, text, &found[1], "${year}/$2/$4 $$"), "2025/01/31 $");
@@ -725,7 +853,18 @@ mod tests {
     #[test]
     fn a_pattern_that_explodes_elsewhere_runs_fast() {
         let text = "a".repeat(5000);
-        assert!(Regex::new("(a*)*b").unwrap().find_at(&text, 0).is_none());
+        assert!(Regex::new("(a*)*b").unwrap().find_at(&text, 0).unwrap().is_none());
+    }
+
+    #[test]
+    fn back_references_find_repeated_parts() {
+        assert_eq!(all(r"\b(\w+) \1\b", "le le chat chat noir"), ["le le", "chat chat"]);
+        assert_eq!(all(r"<(\w+)>.*?</\1>", "<b>x</i></b> <i>y</i>"), ["<b>x</i></b>", "<i>y</i>"]);
+        assert_eq!(all(r"(?i)(a)\1", "aA ab"), ["aA"]);
+        assert_eq!(all(r#"(['"]).*?\1"#, r#"x = 'a' + "b""#), ["'a'", "\"b\""]);
+        assert!(Regex::new(r"(a)\2").is_err());
+        let slow = Regex::new(r"(a*)*\1b").unwrap();
+        assert!(slow.find_at(&"a".repeat(40), 0).is_err());
     }
 
     #[test]

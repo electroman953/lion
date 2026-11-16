@@ -26,4 +26,7 @@ if list != none:
 ;
 show(html.escape("<a href=\"x\">Léa & 'Max'</a>"))
 show(html.unescape("&lt;&#233;&#xE9;&eacute;&inconnu;"))
+show([e.text, e in page.select("a + span")])
+show([e.text, e in page.select("h1 ~ p")])
+show([e.text, e in page.select("h1 + ul > li:not(.hot) > a")])
 show(page.select("a:hover"))

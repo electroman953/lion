@@ -1,8 +1,11 @@
 // The network (§23, C104): web requests, and small HTTP servers.
 //
-// Requests go through the program `curl`, which brings HTTPS. A server answers one
-// request at a time; each `Response` closes its connection.
+// Requests go through the program `curl`, which brings HTTPS. A server reads its
+// requests on threads of its own, so that a slow client delays no one; `serve` answers
+// them one at a time, `serve_parallel` several at once (C106). Each `Response` closes
+// its connection.
 
+use files
 use json
 use text
 
@@ -17,6 +20,8 @@ struct Response:
     status in Int
     body in Text
     headers in List of Header
+    // A file sent as the body, of any kind: `net.file(path)`.
+    private file in Text = ""
 ;
 
 // A request received by a server. `path` is decoded (`/a%20b` gives `/a b`), without
@@ -26,8 +31,23 @@ struct Request:
     path in Text
     body in Text
     headers in List of Header
+    // The files sent with a form; they are deleted once the request has its answer.
+    uploads in List of Upload
     private query_text in Text
     private connection in Int
+    // The names and values taken from the path by a `Router` (`/users/:id`).
+    private params in List of Text = []
+;
+
+// A file sent with a form (`<input type=file name=photo>`): the name of its field, the
+// name of the file on the client, its type (`image/png`…), its size in bytes, and the
+// temporary file where the server keeps it. Move or copy it to keep it.
+struct Upload:
+    field in Text
+    filename in Text
+    kind in Text
+    path in Text
+    size in Int
 ;
 
 // ---------------------------------------------------------------- requests
@@ -45,7 +65,7 @@ fun post(url in Text, body in Text, headers in List of Header = [], timeout = 30
 
 // Any request: `method` is GET, POST, PUT, PATCH, DELETE…
 fun request(method in Text, url in Text, headers in List of Header, body in Text, timeout = 30.0) in Response or Error:
-    let answer = try fetch(method, url, flat(headers), body, timeout, false, "")
+    let answer = try fetch(method, url, flat(headers), body, [], timeout, false, "")
     return Response(number(answer[1]), answer[2], unflat(answer[4..answer.size]))
 ;
 
@@ -75,7 +95,7 @@ fun Session.post(var self, url in Text, body in Text, headers in List of Header 
 fun Session.request(var self, method in Text, url in Text, headers in List of Header, body in Text, timeout = 30.0) in Response or Error:
     var all = flat(self.headers)
     for word in flat(headers): all.add(word) ;
-    let answer = try fetch(method, url, all, body, timeout, true, self.cookies)
+    let answer = try fetch(method, url, all, body, [], timeout, true, self.cookies)
     self.cookies = answer[3]
     return Response(number(answer[1]), answer[2], unflat(answer[4..answer.size]))
 ;
@@ -84,6 +104,13 @@ fun Session.request(var self, method in Text, url in Text, headers in List of He
 // Error.
 fun download(url in Text, path in Text, timeout = 300.0) in None or Error:
     return save(url, path, timeout)
+;
+
+// Sends the file `path` in the field `field` of a form (`multipart/form-data`), as a
+// browser does; `form` holds the other fields, as `a=1&b=2`.
+fun upload(url in Text, field in Text, path in Text, form = "", headers in List of Header = [], timeout = 300.0) in Response or Error:
+    let answer = try fetch("POST", url, flat(headers), form, [field, path], timeout, false, "")
+    return Response(number(answer[1]), answer[2], unflat(answer[4..answer.size]))
 ;
 
 // The value of the header `name` of the answer, whatever its case, or `none`.
@@ -105,13 +132,39 @@ fun serve(port in Int, handle in fun(Request) in Response or Error, host = "127.
     let server = try listen(port, host)
     while true:
         let r = try server.next()
-        let answer = match handle(r):
-            in Response a then a
-            in Error e then plain(e.message(), 500)
-        ;
-        // A client that leaves before its answer does not stop the server.
-        let sent = r.respond(answer)
+        answer(handle, r)
     ;
+    return none
+;
+
+// As `serve`, but with up to `workers` requests answered at once, each by a task
+// (§19.1): a slow answer, such as one that asks another site, delays the others less.
+// The answers run at once only when `handle` reads nothing that can change, as any
+// task (C85): a `handle` that reads or changes a `var` global, or writes files, gives
+// the same answers, one after the other, as with `serve`. What a task shows appears
+// when the server waits for it.
+fun serve_parallel(port in Int, handle in fun(Request) in Response or Error, workers = 8, host = "127.0.0.1") in None or Error:
+    let server = try listen(port, host)
+    var running = [] in List of Task of None
+    while true:
+        let r = try server.next()
+        running.add(task answer(handle, r))
+        if running.size >= workers:
+            let done = wait running[1]
+            running = running[2..running.size]
+        ;
+    ;
+    return none
+;
+
+// Answers `r` with `handle`; an Error becomes an answer 500.
+private fun answer(handle in fun(Request) in Response or Error, r in Request) in None:
+    let a = match handle(r):
+        in Response a then a
+        in Error e then plain(e.message(), 500)
+    ;
+    // A client that leaves before its answer does not stop the server.
+    let sent = r.respond(a)
     return none
 ;
 
@@ -133,12 +186,15 @@ fun Server.port() in Int = server_port(self.id)
 // Waits for the next request.
 fun Server.next() in Request or Error:
     let r = try accept(self.id)
-    return Request(r[2], r[3], r[5], unflat(r[6..r.size]), r[4], number(r[1]))
+    let first = r[1]
+    let u = r[3]
+    let uploads = [Upload(u[5 * i - 4], u[5 * i - 3], u[5 * i - 2], u[5 * i - 1], number(u[5 * i])), i in 1..u.size div 5]
+    return Request(first[2], first[3], first[5], unflat(r[2]), uploads, first[4], number(first[1]))
 ;
 
 // Answers the request; a request has one answer.
 fun Request.respond(answer in Response) in None or Error:
-    return reply(self.connection, answer.status, flat(answer.headers), answer.body)
+    return reply(self.connection, answer.status, flat(answer.headers), answer.body, answer.file)
 ;
 
 // The value of the header `name`, whatever its case, or `none`.
@@ -151,6 +207,17 @@ fun Request.query(name in Text) in maybe Text = find_pair(pairs(self.query_text)
 // The value of the field `name` of a form sent by POST, decoded, or `none`.
 fun Request.form(name in Text) in maybe Text = find_pair(pairs(self.body), name)
 
+// The file sent in the field `field`, or `none`.
+fun Request.upload(field in Text) in maybe Upload:
+    for u in self.uploads:
+        if u.field == field: return u ;
+    ;
+    return none
+;
+
+// The part of the path that the `Router` took for `:name`, decoded, or `none`.
+fun Request.param(name in Text) in maybe Text = find_pair(self.params, name)
+
 // An answer in plain text.
 fun plain(body in Text, status = 200) in Response = Response(status, body, [Header("Content-Type", "text/plain; charset=utf-8")])
 
@@ -160,20 +227,134 @@ fun html(body in Text, status = 200) in Response = Response(status, body, [Heade
 // An answer that is data in JSON: `net.data(json.from(stats))`.
 fun data(v in json.Value, status = 200) in Response = Response(status, v.encode(), [Header("Content-Type", "application/json")])
 
+// An answer that is the file `path`, of any kind; its type comes from its extension
+// (`.png`, `.css`…). A file that cannot be read gives the answer 404.
+fun file(path in Text, status = 200) in Response = Response(status, "", [], path)
+
 // An answer that sends the client to `location`.
 fun redirect(location in Text, status = 303) in Response = Response(status, "", [Header("Location", location)])
+
+// ---------------------------------------------------------------- routes
+
+// The answers of a site, by method and path: `/users/:id` takes any segment as the
+// parameter `id` (`r.param("id")`), and `*` at the end takes the rest of the path. The
+// routes are tried in their order. A path known for other methods gives 405; an unknown
+// path, a file of a folder given by `files`, or else 404.
+//
+//     let app = net.router().get("/", home).get("/users/:id", user).files("/static", "public")
+//     try net.serve(8080, app.handle)
+struct Router:
+    private routes in List of Route
+    // The prefixes and folders of `files`.
+    private folders in List of Text
+;
+
+// A route of a `Router`.
+struct Route:
+    method in Text
+    pattern in List of Text
+    handle in fun(Request) in Response or Error
+;
+
+// A router without routes.
+fun router() in Router = Router([], [])
+
+fun Router.get(pattern in Text, handle in fun(Request) in Response or Error) in Router = self.route("GET", pattern, handle)
+fun Router.post(pattern in Text, handle in fun(Request) in Response or Error) in Router = self.route("POST", pattern, handle)
+fun Router.put(pattern in Text, handle in fun(Request) in Response or Error) in Router = self.route("PUT", pattern, handle)
+fun Router.delete(pattern in Text, handle in fun(Request) in Response or Error) in Router = self.route("DELETE", pattern, handle)
+
+// A route for any method, such as PATCH.
+fun Router.route(method in Text, pattern in Text, handle in fun(Request) in Response or Error) in Router:
+    var routes = self.routes
+    routes.add(Route(method, segments(pattern), handle))
+    return Router(routes, self.folders)
+;
+
+// Serves the files of `folder` under the path `prefix`: with `files("/static", "public")`,
+// `/static/css/a.css` gives `public/css/a.css`, and a folder its `index.html`. A path
+// with `..` is refused.
+fun Router.files(prefix in Text, folder in Text) in Router:
+    var folders = self.folders
+    folders.add(prefix)
+    folders.add(folder)
+    return Router(self.routes, folders)
+;
+
+// The answer of the site to `r`.
+fun Router.handle(r in Request) in Response or Error:
+    let path = segments(r.path)
+    var allowed = [] in List of Text
+    for route in self.routes:
+        let params = taken(route.pattern, path)
+        if params != none:
+            if route.method == r.method or (route.method == "GET" and r.method == "HEAD"):
+                return route.handle(Request(r.method, r.path, r.body, r.headers, r.uploads, r.query_text, r.connection, params))
+            ;
+            if not (route.method in allowed): allowed.add(route.method) ;
+        ;
+    ;
+    if allowed.size > 0:
+        return Response(405, "method not allowed\n", [Header("Allow", text.join(allowed, ", ")), Header("Content-Type", "text/plain; charset=utf-8")])
+    ;
+    for i in 1..self.folders.size div 2:
+        let found = in_folder(self.folders[2 * i - 1], self.folders[2 * i], path)
+        if found != none and (r.method == "GET" or r.method == "HEAD"): return file(found) ;
+    ;
+    return plain("no page at {r.path}\n", 404)
+;
+
+// The parameters that the pattern takes from the path, or `none` if it does not match.
+private fun taken(pattern in List of Text, path in List of Text) in maybe List of Text:
+    var params = [] in List of Text
+    for i in 1..pattern.size:
+        let part = pattern[i]
+        if part == "*" and i == pattern.size:
+            params.add("*")
+            params.add(text.join(path[i..path.size], "/"))
+            return params
+        ;
+        if i > path.size: return none ;
+        if text.starts_with(part, ":"):
+            params.add(part[2..part.size])
+            params.add(path[i])
+        elif part != path[i]:
+            return none
+        ;
+    ;
+    if path.size != pattern.size: return none ;
+    return params
+;
+
+// The file of `folder` that the path designates under `prefix`, if it exists.
+private fun in_folder(prefix in Text, folder in Text, path in List of Text) in maybe Text:
+    let start = segments(prefix)
+    if path.size < start.size or path[1..start.size] != start: return none ;
+    let rest = path[start.size + 1..path.size]
+    for part in rest:
+        if part == ".." or part == "." or text.contains(part, "\\"): return none ;
+    ;
+    var found = folder
+    for part in rest: found = "{found}/{part}" ;
+    if files.is_folder(found): found = "{found}/index.html" ;
+    if not files.exists(found) or files.is_folder(found): return none ;
+    return found
+;
+
+// The segments of a path, without the empty ones: `/a//b/` gives `["a", "b"]`.
+private fun segments(path in Text) in List of Text = [part, part in text.split(path, "/"), part != ""]
 
 // ---------------------------------------------------------------- inside
 
 // The status, the body, the cookies kept, then the names and values of the headers.
-private foreign "lion" fun fetch(method in Text, url in Text, headers in List of Text, body in Text, timeout in Float, session in Bool, cookies in Text) in List of Text or Error
+private foreign "lion" fun fetch(method in Text, url in Text, headers in List of Text, body in Text, files in List of Text, timeout in Float, session in Bool, cookies in Text) in List of Text or Error
 private foreign "lion" fun save(url in Text, path in Text, timeout in Float) in None or Error
 private foreign "lion" fun listen_on(host in Text, port in Int) in Int or Error
 private foreign "lion" fun server_port(server in Int) in Int
-// The connection, the method, the path, the query, the body, then the names and values
-// of the headers.
-private foreign "lion" fun accept(server in Int) in List of Text or Error
-private foreign "lion" fun reply(connection in Int, status in Int, headers in List of Text, body in Text) in None or Error
+// The connection, the method, the path, the query and the body; the names and values
+// of the headers; the field, file name, type, path and size of each upload.
+private foreign "lion" fun accept(server in Int) in List of List of Text or Error
+private foreign "lion" fun reply(connection in Int, status in Int, headers in List of Text, body in Text, file in Text) in None or Error
 // The names and the values of a query or a form, decoded.
 private foreign "lion" fun pairs(t in Text) in List of Text
 

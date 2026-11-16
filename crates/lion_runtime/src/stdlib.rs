@@ -140,3 +140,85 @@ mod tests {
         assert_eq!(text_lines("a\r\nb\n"), vec!["a".to_string(), "b".to_string()]);
     }
 }
+
+/// Whether `path` matches the glob `pattern` (C106): `*` any characters but `/`, `?` one,
+/// `**` any folders, `[abc]` or `[a-z]` one of them, `{jpg,png}` one of the words. A
+/// pattern without `/` looks at the name of the file only.
+pub fn glob_match(pattern: &str, path: &str) -> bool {
+    let target = if pattern.contains('/') { path } else { path.rsplit('/').next().unwrap_or(path) };
+    let target: Vec<char> = target.chars().collect();
+    expand_braces(pattern).iter().any(|pattern| {
+        let pattern: Vec<char> = pattern.chars().collect();
+        glob_here(&pattern, &target)
+    })
+}
+
+/// `a{b,c}d{e,f}` as `abde`, `abdf`, `acde`, `acdf`.
+fn expand_braces(pattern: &str) -> Vec<String> {
+    let Some(open) = pattern.find('{') else { return vec![pattern.to_string()] };
+    let Some(close) = pattern[open..].find('}').map(|p| p + open) else { return vec![pattern.to_string()] };
+    let (before, inside, after) = (&pattern[..open], &pattern[open + 1..close], &pattern[close + 1..]);
+    inside.split(',').flat_map(|word| expand_braces(&format!("{before}{word}{after}"))).collect()
+}
+
+fn glob_here(pattern: &[char], target: &[char]) -> bool {
+    match pattern.first() {
+        None => target.is_empty(),
+        // `**/`: no folder, or folders up to a `/`.
+        Some('*') if pattern.get(1) == Some(&'*') && pattern.get(2) == Some(&'/') => (0..=target.len())
+            .filter(|skip| *skip == 0 || target[skip - 1] == '/')
+            .any(|skip| glob_here(&pattern[3..], &target[skip..])),
+        Some('*') if pattern.get(1) == Some(&'*') => {
+            (0..=target.len()).any(|skip| glob_here(&pattern[2..], &target[skip..]))
+        }
+        Some('*') => (0..=target.len())
+            .take_while(|skip| *skip == 0 || target[skip - 1] != '/')
+            .any(|skip| glob_here(&pattern[1..], &target[skip..])),
+        Some('?') => target.first().is_some_and(|c| *c != '/') && glob_here(&pattern[1..], &target[1..]),
+        Some('[') => {
+            let Some(close) = pattern.iter().skip(1).position(|c| *c == ']').map(|p| p + 1) else {
+                return target.first() == Some(&'[') && glob_here(&pattern[1..], &target[1..]);
+            };
+            let Some(&c) = target.first() else { return false };
+            let set = &pattern[1..close];
+            let (negated, set) = match set.first() {
+                Some('!' | '^') => (true, &set[1..]),
+                _ => (false, set),
+            };
+            let mut found = false;
+            let mut i = 0;
+            while i < set.len() {
+                if i + 2 < set.len() && set[i + 1] == '-' {
+                    found |= set[i] <= c && c <= set[i + 2];
+                    i += 3;
+                } else {
+                    found |= set[i] == c;
+                    i += 1;
+                }
+            }
+            found != negated && c != '/' && glob_here(&pattern[close + 1..], &target[1..])
+        }
+        Some(&p) => target.first() == Some(&p) && glob_here(&pattern[1..], &target[1..]),
+    }
+}
+
+#[cfg(test)]
+mod glob_tests {
+    use super::glob_match;
+
+    #[test]
+    fn globs_match_as_shells_do() {
+        assert!(glob_match("*.jpg", "photos/2026/a.jpg"));
+        assert!(!glob_match("*.jpg", "a.jpeg"));
+        assert!(glob_match("*.{jpg,png}", "x/b.png"));
+        assert!(glob_match("photos/*.jpg", "photos/a.jpg"));
+        assert!(!glob_match("photos/*.jpg", "photos/2026/a.jpg"));
+        assert!(glob_match("photos/**/*.jpg", "photos/2026/11/a.jpg"));
+        assert!(glob_match("photos/**/*.jpg", "photos/a.jpg"));
+        assert!(glob_match("**/*.txt", "a.txt"));
+        assert!(glob_match("img_??.png", "img_01.png"));
+        assert!(glob_match("[a-c]*.txt", "b1.txt"));
+        assert!(!glob_match("[!a-c]*.txt", "b1.txt"));
+        assert!(glob_match("**", "a/b/c"));
+    }
+}

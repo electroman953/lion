@@ -18,6 +18,15 @@ Les décisions détaillées sont dans [docs/implementation-notes.md](docs/implem
   (SHA-256, MD5, HMAC), JSON de toute forme (`json.decode`, `v.path("a.b[1]")`, `json.from(x)`,
   `v.with`, `v.pretty()`), sessions avec cookies (`net.session()`) et `r.json()`.
 
+- Micro-serveurs complets (C106) : routes (`net.router().get("/users/:id", f)`), dossiers de
+  fichiers (`.files("/static", "public")`), `net.file(chemin)`, fichiers reçus par formulaire
+  (`r.upload("photo")`) et envoyés (`net.upload`), `net.serve_parallel` ; chaque requête est lue
+  sur son propre fil, si bien qu'un client lent ne bloque plus le serveur.
+- Scripts (C106) : `system.parse_args` (options de la ligne de commande), `system.confirm`,
+  `system.which`, `system.folder` ; `files.walk`, `files.find(dossier, "*.\{jpg,png\}")`,
+  `files.size`, `files.modified` ; le module `term` (couleurs) ; `time.every`.
+- `html` : sélecteurs `a + b`, `a ~ b`, `:not(…)` ; `regex` : références arrière `\1`.
+
 **Modifié**
 - `net.json(texte)` devient `net.data(valeur)`, qui prend une `json.Value`.
 - Une requête envoie `User-Agent: lion/0.1.0` si le programme n'en donne pas ; un POST redirigé

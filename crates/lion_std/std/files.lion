@@ -37,3 +37,26 @@ foreign "lion" fun copy(from in Text, to in Text) in None or Error
 
 // Moves or renames a file or a folder.
 foreign "lion" fun move(from in Text, to in Text) in None or Error
+
+// Every file inside the folder and its folders, as paths from it (`2026/a.jpg`), in
+// alphabetical order. A link to a folder is not followed.
+foreign "lion" fun walk(folder in Text) in List of Text or Error
+
+// The files inside the folder whose path matches the pattern, each with the folder before
+// it (`photos/2026/a.jpg`): `*` any characters but `/`, `?` one, `**` any folders,
+// `[a-z]` one of them, `{jpg,png}` one of the words. A pattern without `/` looks at the
+// names only: `files.find("photos", "*.\{jpg,png\}")` finds them in every folder.
+fun find(folder in Text, pattern in Text) in List of Text or Error:
+    let all = try walk(folder)
+    return ["{folder}/{path}", path in all, matches(pattern, path)]
+;
+
+// Whether the path matches the pattern, as `find` does.
+foreign "lion" fun matches(pattern in Text, path in Text) in Bool
+
+// The size of the file, in bytes.
+foreign "lion" fun size(path in Text) in Int or Error
+
+// When the file was last changed, in seconds since 1970-01-01 at 00:00 UTC, as
+// `time.now()`.
+foreign "lion" fun modified(path in Text) in Float or Error

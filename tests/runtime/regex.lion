@@ -28,4 +28,8 @@ show(regex.check("[a-"))
 show(regex.check("(?<n>a)"))
 // A pattern that explodes elsewhere stays fast here.
 show(regex.matches("(a*)*b", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+// Back references (C106).
+show(regex.all("\\b(\\w+) \\1\\b", "le le chat chat noir"))
+show(regex.replace("(['\"])(.*?)\\1", "x = 'a' + \"b\"", "<$2>"))
+show(regex.check("(a)\\2"))
 show(regex.all("(", "x"))

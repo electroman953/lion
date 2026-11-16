@@ -650,6 +650,14 @@ pub enum Native {
     JsonScalar,
     JsonWith,
     JsonPlus,
+    FilesWalk,
+    FilesGlob,
+    FilesSize,
+    FilesModified,
+    TermEnabled,
+    TermPaint,
+    SystemFolder,
+    SystemWhich,
 }
 
 impl Builtin {
@@ -662,9 +670,17 @@ impl Builtin {
             Builtin::Exit | Builtin::Fail => Some("stops the program"),
             Builtin::ExpectFailed => Some("records a failed test"),
             Builtin::Native(Native::FilesRead | Native::FilesExists) => Some("reads files"),
-            Builtin::Native(Native::FilesList | Native::FilesIsFolder | Native::HashFile) => {
-                Some("reads files")
-            }
+            Builtin::Native(
+                Native::FilesList
+                | Native::FilesIsFolder
+                | Native::HashFile
+                | Native::FilesWalk
+                | Native::FilesSize
+                | Native::FilesModified
+                | Native::SystemFolder
+                | Native::SystemWhich,
+            ) => Some("reads files"),
+            Builtin::Native(Native::TermEnabled | Native::TermPaint) => Some("looks at the terminal"),
             Builtin::Native(
                 Native::FilesWrite
                 | Native::FilesAppend
@@ -712,7 +728,8 @@ impl Native {
     /// Whether it leaves the world as it is. A foreign function that is not pure may
     /// change a global state: it does not run in parallel (§19.3, §21.2, D48). A web
     /// request changes no state of the program, as `show`: tasks and parallel loops may
-    /// make them (C104).
+    /// make them (C104). Answering a request writes only to its own connection: the
+    /// tasks of `net.serve_parallel` answer theirs (C106).
     pub fn is_pure(self) -> bool {
         !matches!(
             self,
@@ -726,7 +743,6 @@ impl Native {
                 | Native::NetSave
                 | Native::NetListen
                 | Native::NetAccept
-                | Native::NetReply
                 | Native::UiOpen
                 | Native::UiClear
                 | Native::UiFill
@@ -793,6 +809,14 @@ impl Native {
         ("json", "scalar", Native::JsonScalar),
         ("json", "with_member", Native::JsonWith),
         ("json", "with_item", Native::JsonPlus),
+        ("files", "walk", Native::FilesWalk),
+        ("files", "matches", Native::FilesGlob),
+        ("files", "size", Native::FilesSize),
+        ("files", "modified", Native::FilesModified),
+        ("term", "enabled", Native::TermEnabled),
+        ("term", "paint", Native::TermPaint),
+        ("system", "folder", Native::SystemFolder),
+        ("system", "which", Native::SystemWhich),
         ("text", "split", Native::TextSplit),
         ("text", "join", Native::TextJoin),
         ("text", "upper", Native::TextUpper),

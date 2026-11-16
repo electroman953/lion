@@ -5,7 +5,8 @@
 //! keeps its exact HTML; searching inside an element reads that HTML again. Supported
 //! selectors: `tag`, `*`, `#id`, `.class`, `[attr]`, `[attr=v]`, `[attr~=v]`,
 //! `[attr^=v]`, `[attr$=v]`, `[attr*=v]`, `:first-child`, `:last-child`,
-//! `:nth-child(n)`, the combinators ` ` (inside) and `>` (child), and `,`.
+//! `:nth-child(n)`, `:not(…)`, the combinators ` ` (inside), `>` (child), `+` (just
+//! after) and `~` (after), and `,`.
 
 use std::sync::Mutex;
 
@@ -364,10 +365,11 @@ enum Test {
     FirstChild,
     LastChild,
     NthChild(usize),
+    Not(Box<Compound>),
 }
 
 /// A selector: compounds from left to right, each with the combinator before it
-/// (`' '` or `'>'`).
+/// (`' '`, `'>'`, `'+'` or `'~'`).
 type Complex = Vec<(char, Compound)>;
 
 fn parse_selector(selector: &str) -> Result<Vec<Complex>, String> {
@@ -385,11 +387,11 @@ fn parse_selector(selector: &str) -> Result<Vec<Complex>, String> {
                 i += 1;
                 continue;
             }
-            if chars[i] == '>' {
-                if complex.is_empty() || combinator == '>' {
-                    return Err(format!("`>` in `{selector}` has nothing on its left"));
+            if matches!(chars[i], '>' | '+' | '~') {
+                if complex.is_empty() || combinator != ' ' {
+                    return Err(format!("`{}` in `{selector}` has nothing on its left", chars[i]));
                 }
-                combinator = '>';
+                combinator = chars[i];
                 i += 1;
                 continue;
             }
@@ -398,8 +400,8 @@ fn parse_selector(selector: &str) -> Result<Vec<Complex>, String> {
             combinator = ' ';
             i = next;
         }
-        if combinator == '>' {
-            return Err(format!("`>` in `{selector}` has nothing on its right"));
+        if combinator != ' ' {
+            return Err(format!("`{combinator}` in `{selector}` has nothing on its right"));
         }
         groups.push(complex);
     }
@@ -420,7 +422,7 @@ fn compound(chars: &[char], mut i: usize, selector: &str) -> Result<(Compound, u
             i += n;
         }
     }
-    while i < chars.len() && !chars[i].is_whitespace() && chars[i] != '>' {
+    while i < chars.len() && !chars[i].is_whitespace() && !matches!(chars[i], '>' | '+' | '~' | ')') {
         let kind = chars[i];
         i += 1;
         match kind {
@@ -467,6 +469,21 @@ fn compound(chars: &[char], mut i: usize, selector: &str) -> Result<(Compound, u
                 } else if let Some(after) = rest.strip_prefix("last-child") {
                     out.tests.push(Test::LastChild);
                     i = chars.len() - after.chars().count();
+                } else if let Some(after) = rest.strip_prefix("not(") {
+                    let inner: Vec<char> = after.chars().collect();
+                    let start = inner.iter().take_while(|c| c.is_whitespace()).count();
+                    if start >= inner.len() {
+                        return Err(format!("`:not(` in `{selector}` has no `)`"));
+                    }
+                    let (negated, next) = compound(&inner, start, selector)?;
+                    let close = next + inner[next..].iter().take_while(|c| c.is_whitespace()).count();
+                    if inner.get(close) != Some(&')') {
+                        return Err(format!(
+                            "`:not(…)` in `{selector}` takes one simple selector, such as `.ad`"
+                        ));
+                    }
+                    out.tests.push(Test::Not(Box::new(negated)));
+                    i = chars.len() - (inner.len() - close - 1);
                 } else if let Some(after) = rest.strip_prefix("nth-child(") {
                     let close = after.find(')').ok_or(format!("`:nth-child(` in `{selector}` has no `)`"))?;
                     let n: usize = after[..close]
@@ -479,7 +496,7 @@ fn compound(chars: &[char], mut i: usize, selector: &str) -> Result<(Compound, u
                     i = chars.len() - after[close + 1..].chars().count();
                 } else {
                     return Err(format!(
-                        "`:{rest}` is not supported: the pseudo-classes are :first-child, :last-child and :nth-child(n)"
+                        "`:{rest}` is not supported: the pseudo-classes are :first-child, :last-child, :nth-child(n) and :not(…)"
                     ));
                 }
             }
@@ -520,6 +537,7 @@ impl Document {
             Test::FirstChild => node.parent != 0 && siblings.first() == Some(&index),
             Test::LastChild => node.parent != 0 && siblings.last() == Some(&index),
             Test::NthChild(n) => node.parent != 0 && siblings.get(n - 1) == Some(&index),
+            Test::Not(inner) => !self.matches_compound(index, inner),
         })
     }
 
@@ -533,8 +551,13 @@ impl Document {
             return true;
         }
         let mut parent = self.nodes[index].parent;
-        if *combinator == '>' {
-            return self.matches(parent, complex, last - 1);
+        let siblings = &self.nodes[parent].children;
+        let position = siblings.iter().position(|n| *n == index).unwrap_or(0);
+        match combinator {
+            '>' => return self.matches(parent, complex, last - 1),
+            '+' => return position > 0 && self.matches(siblings[position - 1], complex, last - 1),
+            '~' => return siblings[..position].iter().any(|n| self.matches(*n, complex, last - 1)),
+            _ => {}
         }
         while parent != 0 {
             if self.matches(parent, complex, last - 1) {
@@ -720,6 +743,9 @@ mod tests {
         assert_eq!(tags("p"), ["Un texte à lire", "Encore"]);
         assert_eq!(tags("ul > li:first-child .price"), ["12 €"]);
         assert_eq!(tags("li:nth-child(2) a"), ["Deuxième"]);
+        assert_eq!(tags("a + span"), ["12 €"]);
+        assert_eq!(tags("h1 ~ p"), ["Un texte à lire", "Encore"]);
+        assert_eq!(tags("h1 + ul > li:not(.hot) > a"), ["Premier"]);
         assert_eq!(tags("title"), ["Les & nouvelles"]);
         assert_eq!(select(PAGE, "img", false).unwrap()[0].outer, r#"<img src="i.png">"#);
         let links = select(PAGE, "a", false).unwrap();
@@ -739,7 +765,9 @@ mod tests {
 
     #[test]
     fn refuses_what_is_not_a_selector() {
-        for bad in ["", "a,", "> a", "a >", "a:hover", "[x", ".", "a!"] {
+        for bad in
+            ["", "a,", "> a", "a >", "a:hover", "[x", ".", "a!", "a + + b", ":not(", ":not(a b)", "a ~"]
+        {
             assert!(parse_selector(bad).is_err(), "{bad}");
         }
     }

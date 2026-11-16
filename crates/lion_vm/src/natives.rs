@@ -113,9 +113,10 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
         Native::SystemWindows => Value::Bool(cfg!(windows)),
         Native::NetFetch => {
             let headers = pairs_of(&text_list(&args[2]));
-            let Value::Bool(session) = args[5] else { panic!("net.fetch expected a Bool") };
-            let jar = session.then(|| text(6));
-            match net::fetch(text(0), text(1), &headers, text(3), float(4), jar) {
+            let files = pairs_of(&text_list(&args[4]));
+            let Value::Bool(session) = args[6] else { panic!("net.fetch expected a Bool") };
+            let jar = session.then(|| text(7));
+            match net::fetch(text(0), text(1), &headers, text(3), &files, float(5), jar) {
                 Ok((response, jar)) => {
                     let mut words = vec![response.status.to_string(), response.body, jar.unwrap_or_default()];
                     flatten(response.headers, &mut words);
@@ -135,21 +136,32 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
         Native::NetPort => Value::Int(net::port(int(0))),
         Native::NetAccept => match net::accept(int(0)) {
             Ok(request) => {
-                let mut words = vec![
+                let first = texts(vec![
                     request.connection.to_string(),
                     request.method,
                     request.path,
                     request.query,
                     request.body,
-                ];
-                flatten(request.headers, &mut words);
-                texts(words)
+                ]);
+                let mut headers = Vec::new();
+                flatten(request.headers, &mut headers);
+                let mut uploads = Vec::new();
+                for upload in request.uploads {
+                    uploads.extend([
+                        upload.field,
+                        upload.filename,
+                        upload.content_type,
+                        upload.path,
+                        upload.size.to_string(),
+                    ]);
+                }
+                Value::List(Arc::new(vec![first, texts(headers), texts(uploads)]))
             }
             Err(message) => error(message),
         },
         Native::NetReply => {
             let headers = pairs_of(&text_list(&args[2]));
-            match net::respond(int(0), int(1), &headers, text(3)) {
+            match net::respond(int(0), int(1), &headers, text(3), text(4)) {
                 Ok(()) => Value::None,
                 Err(message) => error(message),
             }
@@ -160,14 +172,52 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
             texts(words)
         }
         Native::NetEncode => new_text(net::encode(text(0))),
+        Native::FilesWalk => {
+            let mut found = Vec::new();
+            match walk(std::path::Path::new(text(0)), "", &mut found) {
+                Ok(()) => {
+                    found.sort();
+                    texts(found)
+                }
+                Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => {
+                    error(format!("cannot list `{}`: the folder does not exist", text(0)))
+                }
+                Err(problem) => error(format!("cannot list `{}`: {}", text(0), describe(&problem))),
+            }
+        }
+        Native::FilesGlob => Value::Bool(stdlib::glob_match(text(0), text(1))),
+        Native::FilesSize | Native::FilesModified => match std::fs::metadata(text(0)) {
+            Ok(meta) if native == Native::FilesSize => Value::Int(meta.len() as i64),
+            Ok(meta) => match meta.modified().map(|time| time.duration_since(UNIX_EPOCH)) {
+                Ok(Ok(elapsed)) => Value::Float(elapsed.as_secs_f64()),
+                Ok(Err(before)) => Value::Float(-before.duration().as_secs_f64()),
+                Err(problem) => error(format!("cannot read the date of `{}`: {problem}", text(0))),
+            },
+            Err(problem) => error(format!("cannot read `{}`: {}", text(0), describe(&problem))),
+        },
+        Native::TermEnabled => Value::Bool(colors()),
+        Native::TermPaint => {
+            if colors() {
+                new_text(format!("\u{1b}[{}m{}\u{1b}[0m", int(1), text(0)))
+            } else {
+                new_text(text(0).to_string())
+            }
+        }
+        Native::SystemFolder => match std::env::current_dir() {
+            Ok(folder) => new_text(folder.to_string_lossy().into_owned()),
+            Err(problem) => error(format!("cannot read the current folder: {problem}")),
+        },
+        Native::SystemWhich => match which(text(0)) {
+            Some(path) => new_text(path),
+            None => Value::None,
+        },
         Native::RegexSearch | Native::RegexSubstitute | Native::RegexSplit => {
             let regex = pattern(text(0))?;
             let t = text(1);
             let all = |index: usize| matches!(args[index], Value::Bool(true));
             match native {
                 Native::RegexSearch => {
-                    let found =
-                        if all(2) { regex.find_all(t) } else { regex.find_at(t, 0).into_iter().collect() };
+                    let found = matches_of(&regex, t, all(2))?;
                     let piece = |range: Option<(usize, usize)>| {
                         range.map_or(String::new(), |(a, b)| t[a..b].to_string())
                     };
@@ -184,8 +234,7 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
                     ))
                 }
                 Native::RegexSubstitute => {
-                    let found =
-                        if all(3) { regex.find_all(t) } else { regex.find_at(t, 0).into_iter().collect() };
+                    let found = matches_of(&regex, t, all(3))?;
                     let mut out = String::new();
                     let mut last = 0;
                     for m in &found {
@@ -200,7 +249,7 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
                 _ => {
                     let mut parts = Vec::new();
                     let mut last = 0;
-                    for m in regex.find_all(t) {
+                    for m in matches_of(&regex, t, true)? {
                         let (start, end) = m.groups[0].expect("a match has a range");
                         if end == 0 || start == t.len() && end == start {
                             continue;
@@ -545,6 +594,61 @@ fn execute(program: &str, arguments: &[String], input: &str) -> Result<Vec<Strin
 fn pattern(source: &str) -> Result<Regex, BugKind> {
     Regex::new(source).map_err(|problem| BugKind::InvalidArgument {
         message: format!("`{source}` is not a pattern"),
+        details: problem,
+    })
+}
+
+/// The files inside `folder`, as paths from the first folder, `/` between their parts.
+/// A link to a folder is not followed, so that a loop of links ends.
+fn walk(folder: &std::path::Path, prefix: &str, found: &mut Vec<String>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(folder)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let relative = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            walk(&entry.path(), &relative, found)?;
+        } else if kind.is_file() || entry.path().is_file() {
+            found.push(relative);
+        }
+    }
+    Ok(())
+}
+
+/// Whether the output takes colors: a terminal, without `NO_COLOR`, and not `TERM=dumb`.
+fn colors() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal()
+        && std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty())
+        && std::env::var("TERM").is_ok_and(|term| term != "dumb")
+}
+
+/// The program that a command line would run under this name, found in `PATH`.
+fn which(program: &str) -> Option<String> {
+    let paths = std::env::var_os("PATH")?;
+    std::env::split_paths(&paths)
+        .map(|folder| folder.join(program))
+        .find(|candidate| executable(candidate))
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[cfg(unix)]
+fn executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata().is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn executable(path: &std::path::Path) -> bool {
+    path.is_file() || path.with_extension("exe").is_file()
+}
+
+/// The first match, or every match; a search that takes too many steps is a bug.
+fn matches_of(regex: &Regex, t: &str, all: bool) -> Result<Vec<lion_runtime::regex::Found>, BugKind> {
+    let found =
+        if all { regex.find_all(t) } else { regex.find_at(t, 0).map(|found| found.into_iter().collect()) };
+    found.map_err(|problem| BugKind::InvalidArgument {
+        message: "the search did not finish".to_string(),
         details: problem,
     })
 }
