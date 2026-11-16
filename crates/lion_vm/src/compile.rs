@@ -133,7 +133,7 @@ fn compile_function(
     // Omitted arguments take their default value, in the order of the parameters (§11.2).
     for (index, value) in &function.defaults {
         let skip = compiler.code.len();
-        compiler.emit(Instr::JumpIfArgs { count: index + 1, target: 0 }, None);
+        compiler.emit(Instr::JumpIfGiven { count: index + 1, register: *index, target: 0 }, None);
         compiler.expr_into(value, *index);
         compiler.patch(skip);
     }
@@ -633,6 +633,7 @@ impl Compiler<'_> {
                     let at = start + offset as u32;
                     match arg {
                         ir::Arg::Value(value) => self.expr_into(value, at),
+                        ir::Arg::Omitted => self.emit(Instr::LoadAbsent { dst: at }, span),
                         ir::Arg::Reference(ir::Place::Local(local)) if self.by_reference(*local) => {
                             self.emit(Instr::Move { dst: at, src: register(*local) }, span);
                         }
@@ -1039,7 +1040,7 @@ impl Compiler<'_> {
             Instr::Jump { target }
             | Instr::JumpIfFalse { target, .. }
             | Instr::JumpIfTrue { target, .. }
-            | Instr::JumpIfArgs { target, .. }
+            | Instr::JumpIfGiven { target, .. }
             | Instr::JumpUnlessInt { target, .. }
             | Instr::JumpUnlessIntImm { target, .. }
             | Instr::ForRange { target, .. }

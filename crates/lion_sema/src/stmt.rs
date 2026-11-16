@@ -30,6 +30,9 @@ impl Checker<'_> {
     pub(crate) fn stmt(&mut self, stmt: &ast::Stmt) -> Option<ir::Stmt> {
         match &stmt.kind {
             ast::StmtKind::Let(decl) => self.let_stmt(decl),
+            ast::StmtKind::Destructure { mutable, names, value } => {
+                self.destructure(*mutable, names, value, stmt.span)
+            }
             ast::StmtKind::Assign { target, op, value, .. } => self.assign(target, *op, value, stmt.span),
             ast::StmtKind::Expr(expr) => match &expr.kind {
                 // `l.add(value)` changes the list in place; a type may have its own `add`.

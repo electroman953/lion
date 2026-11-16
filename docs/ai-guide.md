@@ -53,7 +53,8 @@ b += 1                  // also -=, *=
 - Reserved words cannot name anything: `test`, `of`, `in`, `as`, `div`, `mod`, `over`,
   `task`, `wait`, `parallel`, `shared`, `synced`, `same`, `match`, `then`, `otherwise`,
   `maybe`, `use`, `private`, `compile`, `modifies`, `infix`, `foreign`, `pure`, `unsafe`,
-  `expect`, `self`, `union`, `inter`, `minus`, `subset`… There is no `_` name.
+  `expect`, `self`, `union`, `inter`, `minus`, `subset`…
+- `_` throws a value away: `let _ = f()`, `for _ in 1..3`, `let (a, _) = t`; it is never read.
 
 ## 3. Types
 
@@ -69,8 +70,13 @@ b += 1                  // also -=, *=
 - Lists and Texts are indexed **from 1**: `l[1]`, `l[l.size]`, slices `l[2..4]`
   (both ends included; `l[2..1]` is empty). `t[i]` is a one-character Text.
 - `l.size`, `l.first`, `l.last`, `l.add(x)` (on its own line), `x in l`, `sum(l)`,
-  `reverse(l)`. Maps: `var m = {} in Map of (Text, Int)`, `m["a"] = 1`, `"a" in m`,
-  `m.get("a")` (`maybe`), `for k in m`. There is no Map literal with values.
+  `reverse(l)`. Maps: `let m = {"a" -> 1, "b" -> 2}`, `var e = {} in Map of (Text, Int)`,
+  `m["a"] = 1`, `"a" in m`, `m.get("a")` (`maybe`), `for k in m`.
+- Tuples: `let t = (1, "a")`, `t[1]` (a position written in digits), `let (n, s) = t`,
+  `for (name, grade) in pairs: … ;`.
+- Sorting: `sets.sorted(l)` (numbers, enumerations), `text.sorted(names)` (dictionary
+  order), `sets.sorted_by(l, fun(p in Person) = p.age)`,
+  `sets.sorted_with(l, fun(a in P, b in P) = text.before(a.name, b.name))`.
 
 ## 4. Texts
 
@@ -81,9 +87,20 @@ show("Hello {who}, you have {n * 2} points")   // `{…}` inserts any expression
 
 - **There is no `+` on Texts**: build them with interpolation, `"{a}{b}"`, or
   `text.join(parts, ", ")`.
-- Escapes: `\n \t \\ \" \{ \}`. A literal brace is `\{`. A Text is one line.
-- So a regular expression `\d{4}` is written `"\\d\{4\}"`, and JSON in a literal needs
-  `\{ \" \}`. Prefer reading JSON or HTML from a file.
+- Escapes: `\n \t \\ \" \{ \}`. A literal brace is `\{`.
+- So a regular expression `\d{4}` is written `"\\d\{4\}"`.
+- Several lines: `"""` ends its line, the text follows, and `"""` closes on a line of its
+  own; its indentation is removed from every line. Quotes need no escape inside:
+
+  ```lion
+  let page = """
+      <p class="note">Hello {name}</p>
+      """
+  ```
+
+- Numbers in texts: `text.fixed(12.5, 2)` gives `12.50`; `math.round_to(x, 2)`;
+  `text.pad_left("7", 3, "0")` gives `007`; `text.repeat("-", 20)`.
+- A type shows itself with a method `fun T.text() in Text`: `show(x)` and `"{x}"` use it.
 
 ## 5. Functions
 
@@ -96,7 +113,7 @@ fun greet(name in Text, polite = true) in Text:   // defaults come last
 fun grow(var l in List of Int):                    // changes the caller's variable
     l.add(1)
 ;
-greet("Léa", polite: false)   // named arguments keep the order; none can be skipped
+greet("Léa", polite: false)   // named arguments, in any order, after the others; they may skip defaults
 let f = fun(x in Int) = x + 1 // a function value; `f(2)`
 ```
 
@@ -150,13 +167,14 @@ let label = match n:
 ;
 ```
 
-- **`try` covers the whole expression on its right**: `try a.get("x").text()` applies
-  `try` to `.text()`. Write `(try a.get("x")).text()` or `try (try a.get("x")).text()`.
+- **`try` covers the whole expression on its right**: `try a.get("x").int()` applies
+  `try` to `.int()`. Write `(try a.get("x")).int()` or `try (try a.get("x")).int()`.
   Same for comparisons: `(try json.load(p)) == v`.
 - `try` is allowed only in a function whose return type has `Error`, or at the top level
   of the script (it stops the script with the message).
 - A `maybe T` or `T or Error` value must be tested before use as a `T`
-  (`if x == none: return ;`, `if x in Error: … ;`, `match`). `x ?? y` does not exist.
+  (`if x == none: return ;`, `if x in Error: … ;`, `match`), or given a default:
+  `let page = r.query("page") otherwise "1"`.
 - `error("message")` makes an Error; `e.message()` reads it. A *bug* (overflow, index
   out of range, invalid pattern…) stops the program: it is not an Error.
 
@@ -241,24 +259,20 @@ use `net.download`, `net.file`, `r.upload("field").path`.
 
 Plan around these; `lion_gaps` gives the full, current list.
 
-- Texts have no order (`<`): `sets.sorted` sorts numbers, not Texts; there is no sort by
-  a key. Write a small sort when you need one.
-- No rounding to n decimals, no `pad` or `repeat` for Texts.
-- No access to the elements of a tuple (`t[1]`): use a structure.
-- No multi-line Text literal, no Map literal with values, no `_` name, no `??`.
-- No bytes type: binary data goes through files.
+- Texts have no `<`: sort them with `text.sorted` or `sets.sorted_with`.
+- `T.text()` applies to the value itself; inside a List the fields are shown.
+- A generic function leaving out a default before a named argument fixes the type of
+  the next parameters to those of their defaults.
 
 ## 14. Mistakes that the checker will report (avoid them)
 
 | You write | Write instead |
 | --- | --- |
 | `"a" + "b"` | `"{a}{b}"` |
-| `try x.get("a").text()` | `(try x.get("a")).text()` |
-| `f(a, workers: 4)` skipping a default | give every argument before it |
-| `let _ = f()` | `let ignored = f()` |
+| `try x.get("a").int()` | `(try x.get("a")).int()` |
 | `fun test()`, `fun of()` | another name: they are keywords |
-| `x ?? default` | `if x == none … ;` or `match` |
+| `x ?? default` | `x otherwise default` |
 | `[] ` without a type | `[] in List of Int`, or a parameter `l in List of T = []` |
-| a multi-line Text | `\n` inside one line, or a file |
+| a multi-line `"…"` | `"""` on its own lines |
 | `{4}` in a pattern | `\{4\}` |
 | changing a global in a function | add `modifies name` |

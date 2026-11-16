@@ -222,3 +222,44 @@ mod glob_tests {
         assert!(glob_match("**", "a/b/c"));
     }
 }
+
+/// The order of texts for people (C109): letters compared without their case and their
+/// accents (`é` as `e`, `œ` as `oe`), then, between texts equal so, by their characters.
+pub fn text_order(a: &str, b: &str) -> std::cmp::Ordering {
+    let key = |t: &str| -> String { t.chars().flat_map(fold).collect() };
+    key(a).cmp(&key(b)).then_with(|| a.cmp(b))
+}
+
+/// A character without its case and its accent.
+fn fold(c: char) -> Vec<char> {
+    let lower = c.to_lowercase().next().unwrap_or(c);
+    let base = match lower {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' => 'a',
+        'ç' | 'ć' | 'č' => 'c',
+        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ę' | 'ě' => 'e',
+        'ì' | 'í' | 'î' | 'ï' | 'ī' => 'i',
+        'ñ' | 'ń' | 'ň' => 'n',
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' => 'o',
+        'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'ů' => 'u',
+        'ý' | 'ÿ' => 'y',
+        'š' | 'ś' => 's',
+        'ž' | 'ź' | 'ż' => 'z',
+        'œ' => return vec!['o', 'e'],
+        'æ' => return vec!['a', 'e'],
+        'ß' => return vec!['s', 's'],
+        other => other,
+    };
+    vec![base]
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::text_order;
+
+    #[test]
+    fn texts_are_in_the_order_of_a_dictionary() {
+        let mut words = vec!["zèbre", "Été", "été", "ete", "Max", "léa", "Léa", "cœur", "coeur", "abc"];
+        words.sort_by(|a, b| text_order(a, b));
+        assert_eq!(words, ["abc", "coeur", "cœur", "ete", "Été", "été", "Léa", "léa", "Max", "zèbre"]);
+    }
+}

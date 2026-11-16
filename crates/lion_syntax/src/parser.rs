@@ -185,6 +185,15 @@ impl<'t> Parser<'t> {
     fn let_statement(&mut self) -> PResult<Stmt> {
         let keyword = self.bump().clone();
         let mutable = keyword.kind == TokenKind::Keyword(Keyword::Var);
+        if self.at(&TokenKind::LParen) {
+            let names = self.tuple_names()?;
+            if !self.eat(&TokenKind::Assign) {
+                return Err(self.expected("`=` and the tuple to take apart"));
+            }
+            let value = self.declaration_value()?;
+            let span = keyword.span.to(self.previous_span());
+            return Ok(Stmt { kind: StmtKind::Destructure { mutable, names, value }, span });
+        }
         let name = self.binding_name()?;
         let value = if self.eat(&TokenKind::Assign) { Some(self.declaration_value()?) } else { None };
         let annotation = if self.eat_keyword(Keyword::In) { Some(self.type_expr()?) } else { None };
@@ -200,6 +209,23 @@ impl<'t> Parser<'t> {
         }
         let span = keyword.span.to(self.previous_span());
         Ok(Stmt { kind: StmtKind::Let(LetStmt { private: None, mutable, name, value, annotation }), span })
+    }
+
+    /// `(a, b, _)`: the names of the elements of a tuple (C115).
+    fn tuple_names(&mut self) -> PResult<Vec<Ident>> {
+        let open = self.bump().span;
+        let mut names = vec![self.binding_name()?];
+        while self.eat(&TokenKind::Comma) {
+            names.push(self.binding_name()?);
+        }
+        self.expect(&TokenKind::RParen, "`,` or `)`")?;
+        if names.len() < 2 {
+            let error = Diagnostic::error("a tuple is taken apart into two names or more")
+                .with_primary(open.to(self.previous_span()), "")
+                .with_help("write `let (a, b) = t`, or `let a = t[1]` (C115)");
+            return Err(self.error(error));
+        }
+        Ok(names)
     }
 
     fn binding_name(&mut self) -> PResult<Ident> {
@@ -787,13 +813,26 @@ impl<'t> Parser<'t> {
         let parallel = if self.at_keyword(Keyword::Parallel) { Some(self.bump().span) } else { None };
         let index = self.pos;
         self.bump();
-        let var = self.binding_name()?;
+        // `for (a, b) in pairs`: each element taken apart at the start of its turn (C115).
+        let names = if self.at(&TokenKind::LParen) { Some(self.tuple_names()?) } else { None };
+        let var = match &names {
+            Some(names) => Ident {
+                name: format!("%element{index}"),
+                span: names[0].span.to(names[names.len() - 1].span),
+            },
+            None => self.binding_name()?,
+        };
         if !self.eat_keyword(Keyword::In) {
             return Err(self.expected("`in` and the values to go through"));
         }
         let iterable = self.nested(Self::expr)?;
         let opener = Opener { keyword: "for", index, branch: index };
-        let body = self.block(opener)?;
+        let mut body = self.block(opener)?;
+        if let Some(names) = names {
+            let value = Expr { kind: ExprKind::Name(var.name.clone()), span: var.span };
+            let span = var.span;
+            body.stmts.insert(0, Stmt { kind: StmtKind::Destructure { mutable: false, names, value }, span });
+        }
         let end = self.close_block(opener)?;
         Ok(Stmt { kind: StmtKind::For { parallel, var, iterable, body }, span: start.to(end) })
     }
@@ -1192,7 +1231,17 @@ impl<'t> Parser<'t> {
                 return Ok(Expr { span: start.to(value.span), kind: ExprKind::Compile(Box::new(value)) });
             }
         }
-        self.or_expr()
+        let value = self.or_expr()?;
+        // `value otherwise default`, the weakest operator (C113).
+        if self.eat_keyword(Keyword::Otherwise) {
+            let default = self.expr()?;
+            let span = value.span.to(default.span);
+            return Ok(Expr {
+                span,
+                kind: ExprKind::Otherwise { value: Box::new(value), default: Box::new(default) },
+            });
+        }
+        Ok(value)
     }
 
     /// `shared value` or `shared synced value` (§17.2, §19.3); `synced shared` is the
@@ -1549,6 +1598,9 @@ impl<'t> Parser<'t> {
         if !self.at(&TokenKind::RBrace) {
             loop {
                 elements.push(self.nested(Self::expr)?);
+                if elements.len() == 1 && self.at(&TokenKind::Arrow) {
+                    return self.map_rest(start, elements.pop().expect("one key"));
+                }
                 if !self.eat(&TokenKind::Comma) {
                     break;
                 }
@@ -1556,6 +1608,25 @@ impl<'t> Parser<'t> {
         }
         let end = self.expect(&TokenKind::RBrace, "`,` or `}`")?;
         Ok(Expr { kind: ExprKind::Set(elements), span: start.to(end) })
+    }
+
+    /// `{key -> value, …}`, after its first key (C112).
+    fn map_rest(&mut self, start: Span, first: Expr) -> PResult<Expr> {
+        let mut entries = Vec::new();
+        let mut key = first;
+        loop {
+            if !self.eat(&TokenKind::Arrow) {
+                return Err(self.expected("`->` and the value of this key"));
+            }
+            let value = self.nested(Self::expr)?;
+            entries.push((key, value));
+            if !self.eat(&TokenKind::Comma) || self.at(&TokenKind::RBrace) {
+                break;
+            }
+            key = self.nested(Self::expr)?;
+        }
+        let end = self.expect(&TokenKind::RBrace, "`,` or `}`")?;
+        Ok(Expr { kind: ExprKind::Map(entries), span: start.to(end) })
     }
 
     fn parenthesized(&mut self) -> PResult<Expr> {

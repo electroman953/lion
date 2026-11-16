@@ -7,10 +7,10 @@ error("at `role`: `chef` is not a value of Role")
 Node(label: "r", children: [Node(label: "a", children: [])])
 [1, 2, 3]
 error("at `[2]`: \"2.5\" is not an Int: it is not a whole number")
-{"a": 1, "b": 2}
+{"a" -> 1, "b" -> 2}
 none
 x
-Value(source: "true")
+true
 a
 error("invalid Positive: age = -3 does not satisfy age >= 0")
 Positive(age: 3)

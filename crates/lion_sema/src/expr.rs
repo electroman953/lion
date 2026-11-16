@@ -52,6 +52,8 @@ impl Checker<'_> {
             ast::ExprKind::Binary { op, op_span, lhs, rhs } => self.binary(*op, *op_span, lhs, rhs, span),
             ast::ExprKind::Compare { first, rest } => self.compare(first, rest, span),
             ast::ExprKind::As { value, ty } => self.convert(value, ty, span),
+            ast::ExprKind::Map(entries) => self.map_literal(entries, span, None),
+            ast::ExprKind::Otherwise { value, default } => self.otherwise(value, default, span, None),
             ast::ExprKind::Call { callee, args } => self.call(callee, args, span),
             ast::ExprKind::Field { object, name } => match &object.kind {
                 ast::ExprKind::TypeName(type_name) => self.enum_member(type_name, object.span, name),
@@ -199,7 +201,10 @@ impl Checker<'_> {
                 ast::TextPart::Interpolation(value) => match self.expr(value) {
                     Some(value) if value.ty == Type::Text => pieces.push(value),
                     Some(value) if !self.check_not_domain(&value) => valid = false,
-                    Some(value) => pieces.push(convert(ir::Conversion::ToText, value, Type::Text)),
+                    Some(value) => match self.own_text(&value) {
+                        Some(text) => pieces.push(text),
+                        None => pieces.push(convert(ir::Conversion::ToText, value, Type::Text)),
+                    },
                     None => valid = false,
                 },
             }
@@ -1426,6 +1431,7 @@ impl Checker<'_> {
         if !self.check_not_domain(&value) {
             return None;
         }
+        let value = self.own_text(&value).unwrap_or(value);
         let kind = ir::ExprKind::CallBuiltin { builtin: ir::Builtin::Show, args: vec![value] };
         Some(typed(kind, Type::None, span))
     }

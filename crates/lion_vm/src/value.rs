@@ -93,13 +93,14 @@ impl Value {
                 let elements: Vec<String> = set.items().iter().map(Value::literal).collect();
                 format!("{{{}}}", elements.join(", "))
             }
-            // `{"a": 1, "b": 2}`; the empty Map is `{:}`, the empty Set being `{}` (C79).
+            // `{"a" -> 1, "b" -> 2}`, as it is written (C112); the empty Map is `{:}`, the empty
+            // Set being `{}` (C79).
             Value::Map(map) if map.is_empty() => "{:}".to_string(),
             Value::Map(map) => {
                 let entries: Vec<String> = map
                     .entries()
                     .iter()
-                    .map(|(key, value)| format!("{}: {}", key.literal(), value.literal()))
+                    .map(|(key, value)| format!("{} -> {}", key.literal(), value.literal()))
                     .collect();
                 format!("{{{}}}", entries.join(", "))
             }

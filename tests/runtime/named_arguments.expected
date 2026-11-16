@@ -1,0 +1,11 @@
+exit: 0
+----- stdout
+1 2 3 d1
+1 2 30 d1
+1 20 3 x
+5 2 7 d5
+eval 3
+eval 2
+1 2 3 d1
+915
+----- stderr

@@ -1,0 +1,10 @@
+// What the forms of 2026-11-16 refuse (C110–C116).
+let t = (1, 2)
+show(t[3])
+let (a, b, c) = t
+let x = 3 otherwise 4
+show(_)
+fun f(a in Int, b = 2) in Int = a + b
+show(f(b: 1))
+show(f(1, b: 2, b: 3))
+show(f(1, c: 2))

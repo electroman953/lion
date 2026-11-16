@@ -144,6 +144,10 @@ impl Checker<'_> {
             ast::ExprKind::If { branches, otherwise } => {
                 self.if_expr(branches, otherwise.as_deref(), expr.span, Some(expected))
             }
+            ast::ExprKind::Map(entries) => self.map_literal(entries, expr.span, Some(expected)),
+            ast::ExprKind::Otherwise { value, default } => {
+                self.otherwise(value, default, expr.span, Some(expected))
+            }
             // A function value takes the types of the function type expected (§11).
             ast::ExprKind::Fun(decl) => self.anonymous_function(decl, expr.span, Some(expected)),
             ast::ExprKind::Name(name)
@@ -463,8 +467,17 @@ impl Checker<'_> {
     }
 
     /// `l[i]`, `l[a..b]`, `t[i]` (§16.2).
-    pub(crate) fn index(&mut self, object: &ast::Expr, index: &ast::Expr, span: Span) -> Option<ir::Expr> {
+    pub(crate) fn index(
+        &mut self,
+        object: &ast::Expr,
+        index_expr: &ast::Expr,
+        span: Span,
+    ) -> Option<ir::Expr> {
         let object = self.expr(object);
+        if let Some(tuple) = object.as_ref().filter(|object| matches!(object.ty, Type::Tuple(_))) {
+            return self.tuple_element(tuple.clone(), index_expr, span);
+        }
+        let index = index_expr;
         let index = self.expr(index);
         let (object, index) = (object?, index?);
         // `m[k]`: the value of the key, which must be there (C79).

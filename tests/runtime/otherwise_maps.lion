@@ -1,0 +1,24 @@
+// Maps written with their values (C112), and `otherwise` (C113).
+use text
+let prix = {"pomme" -> 2, "poire" -> 3, "pomme" -> 5}
+show(prix)
+show(prix["poire"])
+let vide = {"x" -> 1.5, "y" -> 2}
+show(vide)
+var m = {1 -> "un"} in Map of (Int, Text)
+m[2] = "deux"
+show(m)
+let n = text.find("abc", "z") otherwise 0
+show(n + 1)
+let q = text.find("abc", "c") otherwise 0
+show(q)
+fun noisy() in Int:
+    show("computed")
+    return 9
+;
+show(text.find("abc", "a") otherwise noisy())
+show(text.find("abc", "q") otherwise noisy())
+let label = prix.get("kiwi") otherwise -1
+show(label)
+let mixed = text.find("x", "y") otherwise "absent"
+show(mixed)

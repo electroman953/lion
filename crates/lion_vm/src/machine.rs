@@ -13,6 +13,9 @@ use crate::bytecode::{Chunk, Instr, ParallelInfo, Program, Reg, Target, TaskInfo
 use crate::map::MapValue;
 use crate::set::SetValue;
 use crate::shared::{self, Comparer, Stop};
+/// The mark of an argument left out by name, which no register reference uses (C111).
+const ABSENT: u32 = u32::MAX;
+
 use crate::value::{Closure, Event, Finished, Record, TaskCell, Value, lock};
 
 /// Why execution stopped before the end of the program.
@@ -668,11 +671,14 @@ impl<'a> Machine<'a> {
                     }
                     code = &self.chunk.code;
                 }
-                Instr::JumpIfArgs { count, target } => {
-                    if self.frames.last().expect("a frame runs").args >= count {
+                Instr::JumpIfGiven { count, register, target } => {
+                    let given = self.frames.last().expect("a frame runs").args >= count
+                        && !matches!(self.stack[self.base + register as usize], Value::Ref(ABSENT));
+                    if given {
                         pc = target as usize;
                     }
                 }
+                Instr::LoadAbsent { dst } => self.set(dst, Value::Ref(ABSENT)),
                 Instr::LoadGlobal { dst, global } => {
                     let value = self.stack[global as usize].clone();
                     self.set(dst, value);
@@ -917,6 +923,8 @@ impl<'a> Machine<'a> {
                 Instr::GetField { dst, object, field } => {
                     let value = match &self.stack[self.base + object as usize] {
                         Value::Struct(record) => record.fields[field as usize].clone(),
+                        // An element of a tuple (C115).
+                        Value::Tuple(elements) => elements[field as usize].clone(),
                         other => self.mismatch("structure", other),
                     };
                     self.set(dst, value);

@@ -24,3 +24,6 @@ fun max(a, b) = if b > a then b else a
 
 // The mean of a list of numbers; NaN for an empty list, with an alert (§8.2).
 fun mean(values) in Float = sum(values) / values.size
+
+// `x` rounded to `digits` decimals: `math.round_to(3.14159, 2)` gives `3.14` (C109).
+foreign "lion" fun round_to(x in Float, digits in Int) in Float

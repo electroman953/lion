@@ -1,0 +1,20 @@
+// Texts of several lines (C114).
+let nom = "Léa"
+let page = """
+    <h1>Bonjour {nom}</h1>
+      <p class="note">indenté \{ok\}</p>
+
+    fin
+    """
+show(page)
+show("[{page.size}]")
+fun f() in Text:
+    return """
+        dans une fonction
+        """
+;
+show(f())
+let vide = """
+    """
+show("[{vide}]")
+show("après")

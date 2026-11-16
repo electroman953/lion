@@ -1,0 +1,20 @@
+// Sorting texts, sorting by a key, rounding, padding (C109).
+use text
+use math
+use sets
+show(text.sorted(["zèbre", "Été", "abc", "Léa", "max"]))
+show(text.before("Léa", "Max"))
+show(text.pad_left("7", 3, "0"))
+show("[{text.pad_right("ab", 5)}]")
+show(text.repeat("-=", 3))
+show(text.fixed(12.5, 2))
+show(text.fixed(2.0 / 3.0, 0))
+show(math.round_to(3.14159, 2))
+struct Person:
+    name in Text
+    age in Int
+;
+let people = [Person("Max", 30), Person("léa", 25), Person("Zoé", 25)]
+show([p.name, p in sets.sorted_by(people, fun(p in Person) = p.age)])
+show([p.name, p in sets.sorted_with(people, fun(a in Person, b in Person) = text.before(a.name, b.name))])
+show(sets.sorted_by([3, 1, 2], fun(x in Int) = -x))

@@ -1,6 +1,6 @@
 exit: 0
 ----- stdout
-Url(scheme: "https", user: "moi", host: "site.fr", port: 8080, path: "/a/b", query: "q=l%C3%A9a+m&n=2", fragment: "top")
+https://moi@site.fr:8080/a/b?q=l%C3%A9a+m&n=2#top
 léa m 2 none
 /
 error("`/relative` is not an absolute address, such as https://site.fr/page")

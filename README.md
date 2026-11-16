@@ -138,7 +138,7 @@ for p in page.select("li.produit"):
 ;
 
 let api = try (try net.get("https://api.github.com/repos/rust-lang/rust")).json()
-show(try (try api.path("owner.login")).text())
+show(try (try api.path("owner.login")) as Text)
 show(json.object().with("nom", json.from("Léa")).with("notes", json.from([12, 15])).pretty())
 
 struct Repo:

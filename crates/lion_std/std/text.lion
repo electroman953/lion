@@ -25,3 +25,35 @@ foreign "lion" fun find(t in Text, part in Text) in maybe Int
 
 // The lines, without their ends (`\n` or `\r\n`).
 foreign "lion" fun lines(t in Text) in List of Text
+
+// The texts in the order of a dictionary (C109): without regard to case and accents
+// (`é` as `e`), then by their characters: `["zèbre", "Été", "abc"]` gives
+// `["abc", "Été", "zèbre"]`.
+foreign "lion" fun sorted(l in List of Text) in List of Text
+
+// -1, 0 or 1, as `a` comes before `b`, is equal to it, or comes after, in the order of
+// `sorted`.
+foreign "lion" fun compare(a in Text, b in Text) in Int
+
+// Whether `a` comes before `b` in the order of `sorted`.
+fun before(a in Text, b in Text) in Bool = compare(a, b) < 0
+
+// `t` written `n` times: `text.repeat("-", 3)` gives `---`. A negative count is a bug.
+foreign "lion" fun repeat(t in Text, n in Int) in Text
+
+// `t` with `fill` before it up to `width` characters: `text.pad_left("7", 3, "0")` gives
+// `007`. A longer text stays as it is.
+fun pad_left(t in Text, width in Int, fill = " ") in Text:
+    if t.size >= width or fill == "": return t ;
+    return "{repeat(fill, width - t.size)}{t}"
+;
+
+// `t` with `fill` after it up to `width` characters.
+fun pad_right(t in Text, width in Int, fill = " ") in Text:
+    if t.size >= width or fill == "": return t ;
+    return "{t}{repeat(fill, width - t.size)}"
+;
+
+// A number written with `digits` decimals: `text.fixed(12.5, 2)` gives `12.50`.
+// The rounding is that of the nearest value, on the exact Float (2.675 is 2.67499…).
+foreign "lion" fun fixed(x in Float, digits in Int) in Text

@@ -22,6 +22,15 @@ fun parse(address in Text) in Url or Error:
     return Url(p[1], p[2], p[3], port, p[5], p[6], p[7])
 ;
 
+// The address written back, as `show(u)` and `"{u}"` give it (C116).
+fun Url.text() in Text:
+    let user = if self.user == "" then "" else "{self.user}@"
+    let port = if self.port == none then "" else ":{self.port}"
+    let query = if self.query == "" then "" else "?{self.query}"
+    let fragment = if self.fragment == "" then "" else "#{self.fragment}"
+    return "{self.scheme}://{user}{self.host}{port}{self.path}{query}{fragment}"
+;
+
 // The value of the parameter `name` of the query, decoded, or `none`.
 fun Url.param(name in Text) in maybe Text:
     let words = pairs(self.query)

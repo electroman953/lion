@@ -26,6 +26,6 @@ true
 true
 5
 true
-{"odd": {1, 3, 5}, "even": {2, 4}}
+{"odd" -> {1, 3, 5}, "even" -> {2, 4}}
 {Student(name: "Léa", grade: 14), Student(name: "Ana", grade: 14)}
 ----- stderr

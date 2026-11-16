@@ -740,6 +740,8 @@ pub fn map(value: &Value) -> &MapValue {
 pub fn field(value: &Value, position: usize) -> Value {
     match value {
         Value::Struct(record) => record.fields[position].clone(),
+        // An element of a tuple (C115).
+        Value::Tuple(elements) => elements[position].clone(),
         other => mismatch("structure", other),
     }
 }

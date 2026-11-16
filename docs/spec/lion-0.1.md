@@ -88,6 +88,8 @@ La syntaxe de Lion est entièrement ASCII ; l'Unicode n'apparaît que dans les t
 - Identifiants, mots-clés et opérateurs sont en ASCII. Un identifiant commence par une lettre, suivie de lettres, chiffres ou `_` \[D57\].
 - Les mots-clés sont en anglais.
 
+- `_` seul nomme une valeur jetée : il peut être déclaré plusieurs fois et ne se lit jamais (`let _ = f()`, `for _ in 1..3`) \[C110\].
+
 ### 4.2 La casse a un sens
 
 | Première lettre | Désigne | Exemples |
@@ -116,12 +118,14 @@ Pour les acronymes, seule la première lettre compte : on écrit `HttpClient` \[
 | Entier | `42`, `1_000_000`, `0xFF`, `0b1010` | `_` sépare les chiffres \[D43\] ; hexadécimal et binaire \[D59\] |
 | Flottant | `3.14`, `2.5e-3` | un chiffre de chaque côté du point \[D59\] |
 | Texte | `"Bonjour {name}"` | `{expr}` insère une valeur \[D24\] ; échappements `\n` `\t` `\\` `\"` `\{` `\}` \[D60\] |
+| Texte sur plusieurs lignes | `"""` à la fin d'une ligne, le texte, puis `"""` seul sur sa ligne | l'indentation de la ligne fermante est retirée de chaque ligne ; ni le premier ni le dernier saut de ligne n'en font partie \[C114\] |
+| Map | `{"pomme" -> 2, "poire" -> 3}` | une clé écrite deux fois garde sa dernière valeur \[C112\] |
 | Booléen | `true`, `false` | `Bool = {true, false}` \[D45\] |
 | Vide | `none` | unique valeur du type `None` |
 | Liste | `[1, 2, 3]` | ordonnée (§16) |
 | Ensemble | `{1, 2, 3}` | sans ordre, sans doublon (§16) |
 | Intervalle | `1..9` | entiers, bornes incluses (§16) |
-| Couple | `("Léa", 12)`, `(x,)` | un seul élément : virgule finale \[D56\] |
+| Couple | `("Léa", 12)`, `(x,)` | un seul élément : virgule finale \[D56\] ; `t[1]` lit un élément, à une position écrite ; `let (a, b) = t` et `for (a, b) in l` les séparent \[C115\] |
 
 ## 5. Structure du code : lignes et blocs
 
@@ -356,6 +360,7 @@ Du plus fort au plus faible.
 | 11 | `not` | préfixe |
 | 12 | `and` | gauche |
 | 13 | `or` | gauche |
+| 13 bis | `x otherwise d` : `x`, ou `d` si `x` vaut `none` ; `d` n'est calculé que dans ce cas \[C113\] | droite |
 | 14 | `try`, `task`, `wait`, `compile`, `shared`, `synced`, `parallel`, `if…then…else`, `match…then` | couvrent toute l'expression à leur droite \[D49\] |
 
 Exemples de lecture :
@@ -506,8 +511,8 @@ add_grade([1, 2], 15)        // correct : valeur temporaire, modification perdue
 ```
 
 - Écrire `var` à l'appel devant un paramètre qui n'est pas `var` est une erreur de compilation.
-- Les valeurs par défaut vont en fin de liste : `fun f(a, c = 1, d = 2)`. On ne peut pas en sauter une : pour changer `d`, on écrit `f(1, 1, 5)`.
-- On peut nommer les arguments pour la lisibilité, `area(width: 3, height: 4)`, mais l'ordre reste obligatoire.
+- Les valeurs par défaut vont en fin de liste : `fun f(a, c = 1, d = 2)`.
+- On peut nommer les arguments, `area(width: 3, height: 4)`. Après les arguments sans nom, les arguments nommés viennent dans n'importe quel ordre et peuvent sauter des valeurs par défaut : `f(1, d: 5)` \[C111, décision de l'auteur du 2026-11-16\]. Ils sont évalués dans l'ordre écrit (§9.2).
 
 ### 11.3 Curryfication
 
@@ -616,6 +621,8 @@ fun Student.add_bonus(var self, n): ... ;
 - `self` n'apparaît dans la liste des paramètres que sous la forme `var self`, pour une méthode qui modifie l'objet.
 - La mutabilité dépend de la variable qui tient l'objet : sur un `let`, appeler une méthode `var self` est une erreur de compilation.
 - On peut ajouter des méthodes à n'importe quel type, depuis n'importe quel fichier : `fun Text.shout() = ...`. Elles ne sont visibles que là où ce fichier est importé.
+
+- Un type qui a une méthode `fun T.text() in Text` s'affiche par elle dans `show(x)` et `"{x}"` ; dans le corps de cette méthode, `{self}` garde l'affichage des champs \[C116\].
 
 ### 12.5 Égalité
 

@@ -92,8 +92,11 @@ pub enum Instr {
     Call { function: u32, dst: Reg, args: Reg, count: u32 },
     Return { src: Reg },
     ReturnNone,
-    /// Jumps when the call gave at least `count` arguments (default values, §11.2).
-    JumpIfArgs { count: u32, target: u32 },
+    /// Jumps when the call gave the argument of `register`, the `count`-th: at least
+    /// `count` arguments, and not one left out by name (default values, §11.2, C111).
+    JumpIfGiven { count: u32, register: Reg, target: u32 },
+    /// The mark of an argument left out before a named one (C111).
+    LoadAbsent { dst: Reg },
     /// Globals are the registers of the script's frame, at the bottom of the stack.
     LoadGlobal { dst: Reg, global: u32 },
     StoreGlobal { global: u32, src: Reg },

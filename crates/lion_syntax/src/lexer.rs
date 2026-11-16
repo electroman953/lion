@@ -36,11 +36,23 @@ pub fn lex(source: SourceId, text: &str) -> Lexed {
 }
 
 /// What the lexer is inside of. The bottom frame is always `Code`.
+/// A text between `"""` (C114).
+struct Block {
+    /// The indentation of the closing line, taken from each line.
+    indent: String,
+    /// Where the closing line starts, and its `"""`.
+    close_line: usize,
+    close: usize,
+    /// Whether the next character starts a line of the text.
+    line_start: bool,
+}
+
 enum Frame {
     /// Ordinary code; `depth` counts the brackets opened and not yet closed.
     Code { depth: usize },
-    /// The characters of a text literal whose opening `"` is at byte `open`.
-    Text { open: usize },
+    /// The characters of a text literal whose opening `"` is at byte `open`; for a text
+    /// between `"""`, where it closes and how its lines are indented (C114).
+    Text { open: usize, block: Option<Block> },
     /// The code between `{` and `}` inside a text literal.
     Interpolation { depth: usize },
 }
@@ -86,10 +98,11 @@ impl Lexer<'_> {
             }
             '/' if self.peek_second() == Some('/') => self.skip_line_comment(),
             '/' if self.peek_second() == Some('*') => self.block_comment(),
+            '"' if self.text[start..].starts_with("\"\"\"") => self.block_text(start),
             '"' => {
                 self.pos += 1;
                 self.push(TokenKind::TextStart, start, self.pos);
-                self.frames.push(Frame::Text { open: start });
+                self.frames.push(Frame::Text { open: start, block: None });
             }
             '0'..='9' => self.number(),
             c if c.is_alphabetic() || c == '_' => self.word(),
@@ -111,7 +124,7 @@ impl Lexer<'_> {
     /// lines, and reports the innermost literal as unterminated.
     fn interrupt_text(&mut self, at: usize) {
         let innermost = self.frames.iter().rev().find_map(|frame| match frame {
-            Frame::Text { open } => Some(*open),
+            Frame::Text { open, block: None } => Some(*open),
             _ => None,
         });
         let Some(open) = innermost else { return };
@@ -132,6 +145,9 @@ impl Lexer<'_> {
     }
 
     fn text_step(&mut self) {
+        if let Some(Frame::Text { block: Some(_), .. }) = self.frames.last() {
+            return self.block_step();
+        }
         let chunk_start = self.pos;
         let mut chunk = String::new();
         while let Some(c) = self.peek() {
@@ -175,6 +191,130 @@ impl Lexer<'_> {
         }
         // End of file: `run` reports the unterminated text.
         self.flush_chunk(chunk, chunk_start);
+    }
+
+    /// `"""` opens a text of several lines (C114): the rest of its line stays empty, and
+    /// the closing `"""` stands on its own line, whose indentation is taken from each line.
+    fn block_text(&mut self, start: usize) {
+        let after = start + 3;
+        let line_end = self.text[after..].find('\n').map_or(self.text.len(), |p| after + p);
+        let close = self.text[line_end..].find("\"\"\"").map(|p| line_end + p);
+        let fail = |lexer: &mut Self, message: &str, help: &str| {
+            lexer.diagnostics.push(
+                Diagnostic::error(message.to_string())
+                    .with_primary(lexer.span(start, after), "")
+                    .with_help(help.to_string()),
+            );
+            lexer.pos = after;
+        };
+        if !self.text[after..line_end].trim().is_empty() {
+            return fail(
+                self,
+                "a text between `\"\"\"` starts on the next line",
+                "write the text from the line after `\"\"\"` (C114)",
+            );
+        }
+        let Some(close) = close.filter(|_| line_end < self.text.len()) else {
+            self.pos = self.text.len();
+            self.diagnostics.push(
+                Diagnostic::error("unterminated text")
+                    .with_primary(self.span(start, after), "this text is never closed")
+                    .with_help("close it with `\"\"\"` on a line of its own"),
+            );
+            return;
+        };
+        let close_line = self.text[..close].rfind('\n').map_or(0, |p| p + 1);
+        let indent = &self.text[close_line..close];
+        if !indent.chars().all(|c| c == ' ' || c == '\t') {
+            self.pos = close + 3;
+            self.diagnostics.push(
+                Diagnostic::error("the closing `\"\"\"` stands on a line of its own")
+                    .with_primary(self.span(close, close + 3), "")
+                    .with_note("its indentation is taken from each line of the text (C114)"),
+            );
+            return;
+        }
+        self.push(TokenKind::TextStart, start, after);
+        self.pos = line_end + 1;
+        let block = Block { indent: indent.to_string(), close_line, close, line_start: true };
+        self.frames.push(Frame::Text { open: start, block: Some(block) });
+    }
+
+    /// The characters of a text between `"""`, up to an interpolation or its end.
+    fn block_step(&mut self) {
+        let chunk_start = self.pos;
+        let mut chunk = String::new();
+        loop {
+            let Some(Frame::Text { block: Some(block), .. }) = self.frames.last_mut() else { unreachable!() };
+            let (close_line, close) = (block.close_line, block.close);
+            // The newline before the closing line is not part of the text.
+            if self.pos >= close_line.saturating_sub(1)
+                && self.text[self.pos..close_line].chars().all(|c| c == '\n')
+            {
+                self.flush_chunk(chunk, chunk_start);
+                self.pos = close + 3;
+                self.push(TokenKind::TextEnd, close, self.pos);
+                self.frames.pop();
+                return;
+            }
+            if block.line_start {
+                block.line_start = false;
+                let indent = block.indent.clone();
+                let rest = &self.text[self.pos..];
+                if rest.starts_with(&indent) {
+                    self.pos += indent.len();
+                } else {
+                    let blank = rest.chars().take_while(|c| *c != '\n').all(|c| c == ' ' || c == '\t');
+                    let spaces = rest.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+                    if !blank {
+                        self.diagnostics.push(
+                            Diagnostic::error("this line is less indented than the closing `\"\"\"`")
+                                .with_primary(self.span(self.pos, self.pos + spaces.max(1)), "")
+                                .with_note(
+                                    "each line starts with the indentation of the closing `\"\"\"` (C114)",
+                                ),
+                        );
+                    }
+                    self.pos += spaces;
+                }
+                continue;
+            }
+            let Some(c) = self.peek() else {
+                self.flush_chunk(chunk, chunk_start);
+                return;
+            };
+            let start = self.pos;
+            match c {
+                '{' => {
+                    self.flush_chunk(chunk, chunk_start);
+                    self.pos += 1;
+                    self.push(TokenKind::InterpStart, start, self.pos);
+                    self.frames.push(Frame::Interpolation { depth: 0 });
+                    return;
+                }
+                '\n' => {
+                    self.pos += 1;
+                    chunk.push('\n');
+                    if let Some(Frame::Text { block: Some(block), .. }) = self.frames.last_mut() {
+                        block.line_start = true;
+                    }
+                }
+                '\\' => self.escape(&mut chunk),
+                '}' => {
+                    self.pos += 1;
+                    self.diagnostics.push(
+                        Diagnostic::error("unescaped `}` in a text")
+                            .with_primary(self.span(start, self.pos), "")
+                            .with_help("write `\\}` for a literal brace; `{` and `}` delimit interpolations"),
+                    );
+                    chunk.push('}');
+                }
+                c => {
+                    self.pos += c.len_utf8();
+                    chunk.push(c);
+                }
+            }
+        }
     }
 
     fn flush_chunk(&mut self, chunk: String, start: usize) {
@@ -248,11 +388,11 @@ impl Lexer<'_> {
                     .with_primary(self.span(start, self.pos), "")
                     .with_note("names use the letters a-z and A-Z, digits and `_`; other characters may appear only in texts and comments (§4.1)"),
             );
-        } else if word.starts_with('_') {
+        } else if word.starts_with('_') && word != "_" {
             self.diagnostics.push(
                 Diagnostic::error("a name must start with a letter")
                     .with_primary(self.span(start, self.pos), "")
-                    .with_note("a name is a letter followed by letters, digits or `_` (§4.1)"),
+                    .with_note("a name is a letter followed by letters, digits or `_`, or `_` alone for a value thrown away (§4.1, C110)"),
             );
         }
         let kind = if let Some(keyword) = Keyword::from_word(word) {
@@ -390,6 +530,7 @@ impl Lexer<'_> {
             ('+', Some('=')) => (PlusAssign, 2),
             ('+', _) => (Plus, 1),
             ('-', Some('=')) => (MinusAssign, 2),
+            ('-', Some('>')) => (Arrow, 2),
             ('-', _) => (Minus, 1),
             ('*', Some('=')) => (StarAssign, 2),
             ('*', _) => (Star, 1),

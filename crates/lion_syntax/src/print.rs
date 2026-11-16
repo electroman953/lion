@@ -30,6 +30,10 @@ pub fn print_stmt(stmt: &Stmt) -> String {
             }
             out + ")"
         }
+        StmtKind::Destructure { mutable, names, value } => {
+            let names: Vec<&str> = names.iter().map(|name| name.name.as_str()).collect();
+            format!("({} ({}) {})", if *mutable { "var" } else { "let" }, names.join(" "), print_expr(value))
+        }
         StmtKind::Assign { target, op, value, .. } => {
             format!("({} {} {})", op.as_str(), print_expr(target), print_expr(value))
         }
@@ -286,6 +290,14 @@ pub fn print_expr(expr: &Expr) -> String {
         ExprKind::Fun(decl) => print_fun(decl),
         ExprKind::Task(value) => format!("(task {})", print_expr(value)),
         ExprKind::Wait(value) => format!("(wait {})", print_expr(value)),
+        ExprKind::Otherwise { value, default } => {
+            format!("(otherwise {} {})", print_expr(value), print_expr(default))
+        }
+        ExprKind::Map(entries) => {
+            let entries: Vec<String> =
+                entries.iter().map(|(k, v)| format!("({} -> {})", print_expr(k), print_expr(v))).collect();
+            format!("(map {})", entries.join(" "))
+        }
         ExprKind::Set(elements) => {
             let elements: Vec<String> = elements.iter().map(print_expr).collect();
             if elements.is_empty() { "(set)".to_string() } else { format!("(set {})", elements.join(" ")) }

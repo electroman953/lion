@@ -1,0 +1,16 @@
+// Named arguments in any order, leaving out defaults (C111).
+fun f(a in Int, b = 2, c = 3, d in Text = "d{a}") in Text = "{a} {b} {c} {d}"
+show(f(1))
+show(f(1, c: 30))
+show(f(1, d: "x", b: 20))
+show(f(c: 7, a: 5))
+fun loud(n in Int) in Int:
+    show("eval {n}")
+    return n
+;
+show(f(1, c: loud(3), b: loud(2)))
+struct K:
+    n in Int
+;
+fun K.m(x = 1, y = 2) in Int = self.n + x * 10 + y * 100
+show(K(5).m(y: 9))

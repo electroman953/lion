@@ -1,0 +1,11 @@
+exit: 0
+----- stdout
+<h1>Bonjour Léa</h1>
+  <p class="note">indenté {ok}</p>
+
+fin
+[60]
+dans une fonction
+[]
+après
+----- stderr

@@ -1,0 +1,12 @@
+exit: 1
+----- stdout
+----- stderr
+error: this line is less indented than the closing `"""`
+  --> tests/errors/block_text_indent.lion:4:1
+   |
+ 4 |   moins indentée
+   | ^^
+   |
+   = each line starts with the indentation of the closing `"""` (C114)
+
+1 error found

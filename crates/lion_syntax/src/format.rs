@@ -20,6 +20,26 @@ pub fn format(text: &str, tokens: &[Token], block_comments: &[(usize, usize)]) -
             *flag = true;
         }
     }
+    // The lines of a text between `"""` are part of its value: they stay as they are
+    // (C114).
+    let mut in_text = vec![false; lines.len() + 2];
+    let mut opened = Vec::new();
+    for token in tokens {
+        match token.kind {
+            TokenKind::TextStart => {
+                opened.push((token.line as usize, text[token.span.start as usize..].starts_with("\"\"\"")))
+            }
+            TokenKind::TextEnd => {
+                if let Some((first, true)) = opened.pop() {
+                    let last = (token.line as usize).min(lines.len());
+                    for flag in &mut in_text[first + 1..=last] {
+                        *flag = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     // The indentation of each line comes from the blocks and brackets open before it.
     let mut indent = vec![None; lines.len() + 2];
     let (mut blocks, mut brackets) = (0usize, 0usize);
@@ -92,6 +112,15 @@ pub fn format(text: &str, tokens: &[Token], block_comments: &[(usize, usize)]) -
     let mut blank_before = false;
     for (index, content) in lines.iter().enumerate() {
         let number = index + 1;
+        if in_text[number] {
+            if blank_before {
+                out.push('\n');
+                blank_before = false;
+            }
+            out.push_str(content.trim_end_matches('\r'));
+            out.push('\n');
+            continue;
+        }
         if in_comment[number] {
             out.push_str(content.trim_end());
             out.push('\n');

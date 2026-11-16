@@ -80,6 +80,8 @@ pub enum TokenKind {
     MinusAssign,
     StarAssign,
     DotDot,
+    /// `->`, between a key and its value in a Map (C112).
+    Arrow,
     Dot,
     Comma,
     Colon,
@@ -114,6 +116,7 @@ impl TokenKind {
             MinusAssign => "-=",
             StarAssign => "*=",
             DotDot => "..",
+            Arrow => "->",
             Dot => ".",
             Comma => ",",
             Colon => ":",

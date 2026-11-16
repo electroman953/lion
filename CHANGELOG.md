@@ -29,11 +29,19 @@ Les décisions détaillées sont dans [docs/implementation-notes.md](docs/implem
 - `lion mcp` (C108) : un serveur MCP pour que les assistants écrivent du Lion (guide, API des
   modules, check, run, test, fmt, build), et `docs/manques.md`, la liste de ce qui manque, que
   les assistants remplissent par `lion_report_gap`.
+- Ce qui manquait au langage, d'après `docs/manques.md` (décisions de l'auteur du 2026-11-16) :
+  `_` (C110) ; les arguments nommés dans n'importe quel ordre, qui sautent des valeurs par
+  défaut (C111) ; les Map écrites `{"a" -> 1}` (C112) ; `x otherwise d` (C113) ; les textes
+  `"""` sur plusieurs lignes (C114) ; `t[1]` et `let (a, b) = t` (C115) ; `fun T.text()` pour
+  l'affichage (C116). Et dans la bibliothèque : `text.sorted`, `sets.sorted_by`,
+  `sets.sorted_with`, `text.fixed`, `math.round_to`, `text.pad_left`, `text.repeat` (C109).
 - `v as T` lit une `json.Value` comme une structure, une liste, une Map… de Lion (C107, décision
   de l'auteur) : `let user = try v as User`. L'Error dit où la valeur ne convient pas
   (`at \`tags[2].name\`: …`).
 
 **Modifié**
+- `show` écrit les Map `{"a" -> 1}` ; `json.Value.text()` affiche le JSON, et la lecture d'un
+  texte JSON s'écrit `v as Text` ; `show(d)` d'une date écrit `2026-11-16`.
 - `net.json(texte)` devient `net.data(valeur)`, qui prend une `json.Value`.
 - Une requête envoie `User-Agent: lion/0.1.0` si le programme n'en donne pas ; un POST redirigé
   par 303 continue en GET, comme dans un navigateur.

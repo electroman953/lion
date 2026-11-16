@@ -172,6 +172,8 @@ pub(crate) enum Pending {
     Element(Path, Vec<ir::Stmt>),
     /// Any other value given to a `var` parameter: the modification is lost (§11.2).
     Temporary(ir::Expr),
+    /// A parameter left out before a named argument, of this type (C111).
+    Omitted(Type),
 }
 
 impl Pending {
@@ -180,6 +182,7 @@ impl Pending {
             Pending::Value(value) | Pending::Temporary(value) => value.ty,
             Pending::Place(_, ty) => *ty,
             Pending::Element(path, _) => path.ty(),
+            Pending::Omitted(ty) => *ty,
         }
     }
 }
@@ -315,6 +318,10 @@ impl<'a> Checker<'a> {
             }
         }
         for decl in &declarations {
+            // `_` is never read: each one is a local of its own (C110).
+            if decl.name.name == "_" {
+                continue;
+            }
             let count = declarations.iter().filter(|other| other.name.name == decl.name.name).count();
             if self.tables.globals.contains_key(&decl.name.name) {
                 continue;
@@ -801,7 +808,9 @@ impl<'a> Checker<'a> {
         }
         let mut defaults_started = false;
         for (position, param) in decl.params.iter().enumerate() {
-            if let Some(previous) = decl.params[..position].iter().find(|p| p.name.name == param.name.name) {
+            if let Some(previous) =
+                decl.params[..position].iter().find(|p| p.name.name == param.name.name && p.name.name != "_")
+            {
                 self.diagnostics.push(
                     Diagnostic::error(format!("the parameter `{}` is declared twice", param.name.name))
                         .with_primary(param.name.span, "")
@@ -1131,8 +1140,10 @@ impl<'a> Checker<'a> {
                 }
             }
             self.index_parameter(*id, param.span);
-            let scope = self.ctx.scopes.first_mut().expect("the outermost block");
-            scope.names.insert(param.name.clone(), *id);
+            if param.name != "_" {
+                let scope = self.ctx.scopes.first_mut().expect("the outermost block");
+                scope.names.insert(param.name.clone(), *id);
+            }
         }
         let param_types: Vec<Type> =
             ids.iter().map(|id| self.ctx.locals[id.index()].ty.unwrap_or(Type::None)).collect();
@@ -1368,6 +1379,15 @@ impl<'a> Checker<'a> {
             params.remove(0);
             pending.push(Some(receiver));
         }
+        // Named arguments out of the order of the parameters (C111).
+        let reordered = args.iter().enumerate().any(|(position, arg)| {
+            arg.name
+                .as_ref()
+                .is_some_and(|name| params.get(position).is_none_or(|param| param.name != name.name))
+        });
+        if reordered {
+            return self.call_by_names(index, pending.pop().flatten(), after, callee, args, &params, span);
+        }
         let required = params.iter().filter(|param| !param.has_default).count();
         if args.len() > params.len() || args.is_empty() && required > 0 {
             let expected = if required == params.len() {
@@ -1426,6 +1446,162 @@ impl<'a> Checker<'a> {
             }
         }
         Some(self.build_call(instance, pending, after, ret, span))
+    }
+
+    /// A call whose named arguments come in another order than the parameters, or leave
+    /// out some with a default value (C111). Positional arguments come first; the
+    /// arguments are evaluated in the order written (§9.2); a parameter left out before
+    /// a given one takes its default value in the function.
+    #[allow(clippy::too_many_arguments)]
+    fn call_by_names(
+        &mut self,
+        index: usize,
+        receiver: Option<Pending>,
+        after: Vec<ir::Stmt>,
+        callee: Span,
+        args: &[ast::Arg],
+        params: &[ParamInfo],
+        span: Span,
+    ) -> Option<ir::Expr> {
+        let name = self.functions[index].decl.name.name.clone();
+        let decl_span = self.functions[index].decl.name.span;
+        let mut slots: Vec<Option<usize>> = vec![None; params.len()];
+        let mut valid = true;
+        let mut unknown = false;
+        let mut named_seen = false;
+        for (position, arg) in args.iter().enumerate() {
+            let target = match &arg.name {
+                None if named_seen => {
+                    self.diagnostics.push(
+                        Diagnostic::error("an argument without a name comes after a named one")
+                            .with_primary(arg.value.span, "")
+                            .with_note("the arguments without a name come first, in the order of the parameters (§11.2, C111)"),
+                    );
+                    valid = false;
+                    continue;
+                }
+                None => position,
+                Some(given) => {
+                    named_seen = true;
+                    match params.iter().position(|param| param.name == given.name) {
+                        Some(target) => target,
+                        None => {
+                            let names: Vec<&str> = params.iter().map(|param| param.name.as_str()).collect();
+                            let mut error =
+                                Diagnostic::error(format!("`{name}` has no parameter `{}`", given.name))
+                                    .with_primary(given.span, "")
+                                    .with_secondary(decl_span, "declared here")
+                                    .with_note(format!("its parameters: {}", names.join(", ")));
+                            if let Some(close) = crate::names::closest(&given.name, names.iter().copied())
+                                .filter(|_| given.name.chars().count() >= 3)
+                            {
+                                error = error.with_help(format!("did you mean `{close}`?"));
+                            }
+                            self.diagnostics.push(error);
+                            unknown = true;
+                            valid = false;
+                            continue;
+                        }
+                    }
+                }
+            };
+            if target >= params.len() {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("`{name}` takes {} arguments, not more", params.len()))
+                        .with_primary(arg.value.span, "")
+                        .with_secondary(decl_span, "declared here"),
+                );
+                valid = false;
+                continue;
+            }
+            if let Some(previous) = slots[target] {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("the parameter `{}` is given twice", params[target].name))
+                        .with_primary(arg.value.span, "")
+                        .with_secondary(args[previous].value.span, "given here first"),
+                );
+                valid = false;
+                continue;
+            }
+            slots[target] = Some(position);
+        }
+        let last = slots.iter().rposition(Option::is_some).map_or(0, |last| last + 1);
+        // A misspelled name already explains a missing parameter.
+        for (param, slot) in params.iter().zip(&slots).filter(|_| !unknown) {
+            if slot.is_none() && !param.has_default {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("the call of `{name}` gives no `{}`", param.name))
+                        .with_primary(span, "")
+                        .with_secondary(param.span, "this parameter has no default value"),
+                );
+                valid = false;
+            }
+        }
+        // Each argument is checked, and stored in the order written.
+        let mut checked: Vec<Option<Pending>> = (0..params.len()).map(|_| None).collect();
+        let mut before = Vec::new();
+        for (position, arg) in args.iter().enumerate() {
+            let Some(target) = slots.iter().position(|slot| *slot == Some(position)) else {
+                self.expr(&arg.value);
+                continue;
+            };
+            let Some(value) = self.argument(&name, arg, &params[target]) else {
+                valid = false;
+                continue;
+            };
+            checked[target] = Some(match value {
+                Pending::Value(value) => {
+                    let temp = self.temporary(value.ty, value.span);
+                    let read = typed(ir::ExprKind::Local(temp), value.ty, value.span);
+                    before.push(ir::Stmt::Assign { place: ir::Place::Local(temp), value });
+                    Pending::Value(read)
+                }
+                other => other,
+            });
+        }
+        if !valid {
+            return None;
+        }
+        let offset = usize::from(receiver.is_some());
+        let mut pending = Vec::new();
+        pending.extend(receiver);
+        for (target, value) in checked.into_iter().enumerate().take(last) {
+            pending.push(value.unwrap_or_else(|| Pending::Omitted(params[target].ty.unwrap_or(Type::None))));
+        }
+        let first_gap = slots[..last].iter().position(Option::is_none);
+        let instance = match (self.functions[index].instance, first_gap) {
+            (Some(instance), _) => instance,
+            (None, None) => self.instantiate(index, pending.iter().map(Pending::ty).collect(), callee)?,
+            // A generic function: the version for the arguments before the first one left
+            // out, whose next parameters have the types of their default values (C1); the
+            // arguments named after take those types.
+            (None, Some(gap)) => {
+                let prefix = pending[..offset + gap].iter().map(Pending::ty).collect();
+                let instance = self.instantiate(index, prefix, callee)?;
+                self.check_instance(instance);
+                let types = self.instances[instance].checked.as_ref().map(|body| body.params.clone())?;
+                for position in offset + gap..pending.len() {
+                    let Pending::Value(value) = &pending[position] else { continue };
+                    let wanted = *types.get(position)?;
+                    let param = &params[position - offset];
+                    let context = (
+                        param.span,
+                        format!("`{}` is {} here, as its default value", param.name, article(wanted)),
+                    );
+                    let value = self.coerce(value.clone(), wanted, Some(context))?;
+                    pending[position] = Pending::Value(value);
+                }
+                instance
+            }
+        };
+        let ret = self.return_type_of(instance, callee)?;
+        self.ctx.calls.push(instance);
+        self.record_early_call(instance, span);
+        let call = self.build_call(instance, pending, after, ret, span);
+        if before.is_empty() {
+            return Some(call);
+        }
+        Some(typed(ir::ExprKind::Block { stmts: before, value: Box::new(call) }, ret, span))
     }
 
     /// The instance of a generic function for the types of the given arguments (C1).
@@ -1657,6 +1833,7 @@ impl<'a> Checker<'a> {
                 }
                 Pending::Value(value) => args.push(ir::Arg::Value(value)),
                 Pending::Place(place, _) => args.push(ir::Arg::Reference(place)),
+                Pending::Omitted(_) => args.push(ir::Arg::Omitted),
                 Pending::Temporary(value) => {
                     let temp = self.temporary(value.ty, value.span);
                     args.push(ir::Arg::Reference(ir::Place::Local(temp)));

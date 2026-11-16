@@ -10,15 +10,15 @@ show((try api.get("next")).is_null())
 let items = try api.path("data.items")
 show(items.size())
 for item in items.items():
-    let name = try (try item.get("name")).text()
+    let name = try (try item.get("name")) as Text
     let score = try (try item.get("score")).float()
     show("{name}: {score}, tags: {item.has("tags")}")
 ;
-show(try (try api.path("data.items[1].tags[2]")).text())
+show(try (try api.path("data.items[1].tags[2]")) as Text)
 show(api.path("data.items[3]"))
 show(api.path("data.items[1].name.first"))
 show(api.get("missing"))
-show((try api.get("total")).text())
+show((try api.get("total")) as Text)
 show((try api.get("data")).items()[1].kind())
 show(json.decode("\{\"a\": \}"))
 

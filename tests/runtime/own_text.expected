@@ -1,0 +1,10 @@
+exit: 0
+----- stdout
+12.50 € (raw Money(cents: 1250))
+prix : 12.50 € (raw Money(cents: 1250))
+[Money(cents: 1250)]
+{"a":[1,2]}
+v = {"a":[1,2]}
+https://moi@site.fr:8080/a?x=1#top
+rouge
+----- stderr

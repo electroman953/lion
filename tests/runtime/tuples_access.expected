@@ -1,0 +1,12 @@
+exit: 0
+----- stdout
+1
+a
+5.0
+1 a
+8
+Léa: 12
+Max: 9
+10
+("sept", 7)
+----- stderr

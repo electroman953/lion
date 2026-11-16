@@ -19,34 +19,34 @@ error: a generator cannot go through a Domain of Int
     |
   5 | show(sets.min(positives))
     |           ^^^ `min` is checked for (Domain of Int) because of this call
-   ::: <std>/sets.lion:42:21
+   ::: <std>/sets.lion:87:21
     |
- 42 |     let items = [x, x in s]
+ 87 |     let items = [x, x in s]
     |                     ------
     |
     = a generator goes through an interval or a list (§16.4)
 
 error: the parameter `s` is Set of T, which does not fit a List of Int
-   --> tests/errors/std_sets.lion:6:11
-    |
-  6 | show(sets.powerset([1, 2]))
-    |           ^^^^^^^^
-   ::: <std>/sets.lion:63:14
-    |
- 63 | fun powerset(s in Set of T) in Set of Set of T, T in Type:
-    |              - parameter declared here
+    --> tests/errors/std_sets.lion:6:11
+     |
+   6 | show(sets.powerset([1, 2]))
+     |           ^^^^^^^^
+    ::: <std>/sets.lion:108:14
+     |
+ 108 | fun powerset(s in Set of T) in Set of Set of T, T in Type:
+     |              - parameter declared here
 
 error: `p` is not a function
-   --> tests/errors/std_sets.lion:7:11
-    |
-  7 | show(sets.any({1, 2}, 3))
-    |           ^^^ `any` is checked for (Set of Int, Int) because of this call
-   ::: <std>/sets.lion:84:12
-    |
- 82 | fun any(s, p) in Bool:
-    |            - declared here
-   ...
- 84 |         if p(x): return true ;
-    |            - `p` is an Int
+    --> tests/errors/std_sets.lion:7:11
+     |
+   7 | show(sets.any({1, 2}, 3))
+     |           ^^^ `any` is checked for (Set of Int, Int) because of this call
+    ::: <std>/sets.lion:129:12
+     |
+ 127 | fun any(s, p) in Bool:
+     |            - declared here
+    ...
+ 129 |         if p(x): return true ;
+     |            - `p` is an Int
 
 4 errors found

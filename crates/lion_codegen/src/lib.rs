@@ -1447,7 +1447,7 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
             .iter()
             .filter_map(|arg| match arg {
                 Arg::Value(value) => Some(value),
-                Arg::Reference(_) => None,
+                Arg::Reference(_) | Arg::Omitted => None,
             })
             .collect();
         let mut codes = Vec::new();
@@ -1472,6 +1472,8 @@ impl<'g, 'p> FunctionGen<'g, 'p> {
                         codes.push(code);
                     }
                 }
+                // The function computes the default value (C111).
+                Arg::Omitted => codes.push("None".to_string()),
                 Arg::Reference(place) => {
                     let Storage::Pointer(repr) = Storage::of(param) else {
                         panic!("a variable given to a parameter that is not `var`")

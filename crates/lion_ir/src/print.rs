@@ -164,6 +164,7 @@ impl Printer<'_> {
                     match arg {
                         Arg::Value(value) => out.push_str(&print(value)),
                         Arg::Reference(place) => out.push_str(&format!("&{}", self.place(*place))),
+                        Arg::Omitted => out.push_str("default"),
                     }
                 }
                 out + ")"

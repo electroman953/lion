@@ -405,6 +405,9 @@ pub enum Arg {
     Value(Expr),
     /// For a `var` parameter: the variable itself (§11.2).
     Reference(Place),
+    /// A parameter with a default value, left out before an argument named after it: the
+    /// function computes its default (C111).
+    Omitted,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -651,6 +654,11 @@ pub enum Native {
     JsonWith,
     JsonPlus,
     JsonNest,
+    TextSorted,
+    TextCompare,
+    TextRepeat,
+    TextFixed,
+    MathRoundTo,
     FilesWalk,
     FilesGlob,
     FilesSize,
@@ -811,6 +819,11 @@ impl Native {
         ("json", "with_member", Native::JsonWith),
         ("json", "with_item", Native::JsonPlus),
         ("json", "nest", Native::JsonNest),
+        ("text", "sorted", Native::TextSorted),
+        ("text", "compare", Native::TextCompare),
+        ("text", "repeat", Native::TextRepeat),
+        ("text", "fixed", Native::TextFixed),
+        ("math", "round_to", Native::MathRoundTo),
         ("files", "walk", Native::FilesWalk),
         ("files", "matches", Native::FilesGlob),
         ("files", "size", Native::FilesSize),

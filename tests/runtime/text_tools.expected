@@ -1,0 +1,14 @@
+exit: 0
+----- stdout
+["abc", "Été", "Léa", "max", "zèbre"]
+true
+007
+[ab   ]
+-=-=-=
+12.50
+1
+3.14
+["léa", "Zoé", "Max"]
+["léa", "Max", "Zoé"]
+[3, 2, 1]
+----- stderr

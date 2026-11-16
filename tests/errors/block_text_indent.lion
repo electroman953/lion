@@ -1,0 +1,5 @@
+// A line of a text between `"""` is indented at least as its closing line (C114).
+let page = """
+    ligne
+  moins indentée
+    """

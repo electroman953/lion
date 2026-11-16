@@ -4,7 +4,7 @@ Les assistants qui écrivent du Lion notent ici, par l'outil `lion_report_gap` d
 
 Les premières entrées ont été constatées par Claude en écrivant les modules web, le 2026-11-16 ; celles qui touchent au langage demandent une décision de l'auteur.
 
-## 2026-11-16 — Trier des Text, et trier selon une clé
+## ~~2026-11-16 — Trier des Text, et trier selon une clé~~ — fait (C109)
 
 - **Besoin** : `sets.sorted(["b", "a"])` est refusé, car Text n'a pas `<` (R3) ; et rien ne trie une liste de structures selon un champ.
 - **Contournement** : aucun simple : écrire un tri à la main avec une fonction de comparaison.
@@ -15,7 +15,7 @@ let noms = sets.sorted(["Max", "Léa"])
 let par_age = sets.sorted_by(personnes, fun(p) = p.age)
 ```
 
-## 2026-11-16 — Arrondir ou écrire un Float avec n décimales
+## ~~2026-11-16 — Arrondir ou écrire un Float avec n décimales~~ — fait (C109)
 
 - **Besoin** : afficher un prix `12.50` ou une moyenne à deux décimales ; `round` ne prend qu'un argument et `x as Text` écrit tous les chiffres.
 - **Contournement** : `round(x * 100) / 100`, qui n'écrit pas les zéros finaux.
@@ -26,7 +26,7 @@ show(text.fixed(prix, 2))     // "12.50"
 show(round(moyenne, 2))
 ```
 
-## 2026-11-16 — Compléter ou répéter un texte
+## ~~2026-11-16 — Compléter ou répéter un texte~~ — fait (C109)
 
 - **Besoin** : aligner des colonnes, écrire `007` ; il n'y a ni `pad` ni `repeat`.
 - **Contournement** : une boucle qui ajoute des espaces.
@@ -37,17 +37,17 @@ show(text.pad_left("7", 3, "0"))    // "007"
 show(text.repeat("-", 20))
 ```
 
-## 2026-11-16 — Lire un élément d'un n-uplet
+## ~~2026-11-16 — Lire un élément d'un n-uplet~~ — fait (C115)
 
 - **Besoin** : `let t = (1, "a")` se construit et se compare, mais `t[1]` est refusé (C53 : la spec ne dit pas comment).
 - **Contournement** : une structure à la place du n-uplet.
 
-## 2026-11-16 — Texte sur plusieurs lignes
+## ~~2026-11-16 — Texte sur plusieurs lignes~~ — fait (C114)
 
 - **Besoin** : écrire une page HTML, une requête SQL ou un JSON dans le code ; un texte tient sur une ligne.
 - **Contournement** : `\n` dans une seule ligne, ou un fichier lu par `files.read`.
 
-## 2026-11-16 — Valeur par défaut d'un `maybe`
+## ~~2026-11-16 — Valeur par défaut d'un `maybe`~~ — fait (C113)
 
 - **Besoin** : `r.query("page")` rend `maybe Text` ; il faut un `if` ou un `match` pour donner une valeur par défaut.
 - **Exemple souhaité** : `let page = r.query("page") otherwise "1"` (à concevoir : `??` n'existe pas).
@@ -57,20 +57,20 @@ show(text.repeat("-", 20))
 - **Besoin** : lire une image en mémoire, calculer sur des données binaires, recevoir un corps qui n'est pas du texte. Un `Text` est toujours de l'UTF-8.
 - **Contournement** : passer par des fichiers (`net.download`, `net.file`, `r.upload(...).path`, `hash.file_sha256`).
 
-## 2026-11-16 — Ignorer une valeur
+## ~~2026-11-16 — Ignorer une valeur~~ — fait (C110)
 
 - **Besoin** : `let _ = r.respond(a)` est refusé : `_` n'est pas un nom.
 - **Contournement** : `let ignored = …`.
 
-## 2026-11-16 — Map écrite avec ses valeurs
+## ~~2026-11-16 — Map écrite avec ses valeurs~~ — fait (C112)
 
 - **Besoin** : `{"a": 1}` n'existe pas (C79) ; une Map se remplit clé par clé.
 
-## 2026-11-16 — Sauter un argument par défaut
+## ~~2026-11-16 — Sauter un argument par défaut~~ — fait (C111)
 
 - **Besoin** : `f(a, workers: 4)` est refusé quand un autre paramètre par défaut précède `workers` (§11.2) ; il faut écrire tous ceux d'avant.
 
-## 2026-11-16 — `show` d'une `json.Value`
+## ~~2026-11-16 — `show` d'une `json.Value`~~ — fait (C116)
 
 - **Besoin** : `show(v)` affiche `Value(source: "…")`, la structure interne, au lieu du JSON. Il faudrait une façon pour un type de dire comment il s'affiche.
 - **Contournement** : `show(v.encode())` ou `v.pretty()`.
@@ -78,3 +78,8 @@ show(text.repeat("-", 20))
 ## 2026-11-16 — Effets d'une fonction passée en paramètre à une tâche
 
 - **Besoin** : `net.serve_parallel(port, f)` avec un `f` qui modifie une globale n'est pas refusé : le vérificateur ne suit pas une fonction passée en paramètre jusqu'à la tâche. Les réponses restent justes (elles passent l'une après l'autre), mais le programmeur ne le sait pas.
+
+## 2026-11-16 — `T.text()` dans une liste
+
+- **Besoin** : `show([m])` d'une liste de valeurs qui ont `text()` affiche leurs champs : la règle C116 ne s'applique qu'à la valeur elle-même, car l'affichage d'une liste est fait par le runtime, qui n'appelle pas de fonction du programme.
+- **Contournement** : `text.join([x.text(), x in l], ", ")`.

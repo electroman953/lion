@@ -24,6 +24,7 @@ mod generic_structs;
 mod generic_traits;
 mod index;
 mod json_as;
+mod literals;
 mod matching;
 mod methods;
 mod modules;
@@ -402,6 +403,12 @@ impl<'a> Checker<'a> {
         mutable: bool,
         initialized: bool,
     ) -> ir::LocalId {
+        // `_` holds a value thrown away: it may be declared again, and is never read (C110).
+        if name.name == "_" {
+            let id = self.push_local(LocalInfo::variable(name, ty, mutable, initialized));
+            self.ctx.flow.set(id, if initialized { Assigned::Yes } else { Assigned::No });
+            return id;
+        }
         self.check_hiding(name);
         let info = LocalInfo::variable(name, ty, mutable, initialized);
         // A global of the script uses the local allocated for it in advance.

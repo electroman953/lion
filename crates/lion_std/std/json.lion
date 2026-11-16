@@ -41,9 +41,9 @@ fun Row.get(name in Text) in Text or Error:
 // ---------------------------------------------------------------- any JSON (C105)
 
 // A JSON value of any shape: an object, a list, a text, a number, a Bool or `null`.
-// `v.get("name")`, `v.at(1)` and `v.path("data.items[1].name")` go inside it; `v.text()`,
-// `v.int()`, `v.float()` and `v.bool()` read it; `json.from(x)` makes one from a value of
-// Lion, and `v.encode()` writes it.
+// `v.get("name")`, `v.at(1)` and `v.path("data.items[1].name")` go inside it; `v as Text`,
+// `v as User` (C107), `v.int()`, `v.float()` and `v.bool()` read it; `json.from(x)` makes
+// one from a value of Lion, and `v.encode()` writes it.
 struct Value:
     private source in Text
 ;
@@ -78,6 +78,9 @@ fun object() in Value = Value("\{\}")
 
 // The JSON text, on one line.
 fun Value.encode() in Text = self.source
+
+// What `show(v)` and `"{v}"` write: the JSON text, on one line (C116).
+fun Value.text() in Text = self.source
 
 // The JSON text, indented by two spaces.
 fun Value.pretty() in Text = pretty_text(self.source)
@@ -116,12 +119,6 @@ fun Value.names() in List of Text = names_of(self.source)
 
 // The number of elements of a list or of members of an object; 0 for the others.
 fun Value.size() in Int = parts(self.source).size
-
-// The text of a JSON text.
-fun Value.text() in Text or Error:
-    if self.kind() != "text": return error("the value is a {self.kind()}, not a text") ;
-    return scalar(self.source)
-;
 
 // A number without a fraction, as an Int.
 fun Value.int() in Int or Error:

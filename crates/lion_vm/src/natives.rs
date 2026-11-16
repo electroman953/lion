@@ -185,6 +185,44 @@ pub fn call(native: Native, args: &[Value]) -> Result<Value, BugKind> {
                 Err(problem) => error(format!("cannot list `{}`: {}", text(0), describe(&problem))),
             }
         }
+        Native::TextSorted => {
+            let mut words = text_list(&args[0]);
+            words.sort_by(|a, b| stdlib::text_order(a, b));
+            texts(words)
+        }
+        Native::TextCompare => Value::Int(match stdlib::text_order(text(0), text(1)) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }),
+        Native::TextRepeat => {
+            let count = int(1);
+            let size = usize::try_from(count).ok().and_then(|n| n.checked_mul(text(0).len()));
+            match size {
+                Some(size) if size <= 1 << 30 => new_text(text(0).repeat(count as usize)),
+                _ => {
+                    return Err(BugKind::InvalidArgument {
+                        message: "cannot repeat a text this many times".to_string(),
+                        details: format!("{count} is not a count from 0 up, or the text would be too long"),
+                    });
+                }
+            }
+        }
+        Native::TextFixed | Native::MathRoundTo => {
+            let (x, digits) = (float(0), int(1));
+            if !(0..=17).contains(&digits) {
+                return Err(BugKind::InvalidArgument {
+                    message: "cannot keep this many decimals".to_string(),
+                    details: format!("{digits} is not a number of decimals from 0 to 17"),
+                });
+            }
+            let written = format!("{x:.*}", digits as usize);
+            if native == Native::TextFixed {
+                new_text(written)
+            } else {
+                Value::Float(written.parse().unwrap_or(x))
+            }
+        }
         Native::FilesGlob => Value::Bool(stdlib::glob_match(text(0), text(1))),
         Native::FilesSize | Native::FilesModified => match std::fs::metadata(text(0)) {
             Ok(meta) if native == Native::FilesSize => Value::Int(meta.len() as i64),

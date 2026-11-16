@@ -1,0 +1,10 @@
+// `_` (C110).
+fun f(_ in Int, _ in Int) in Int = 3
+let _ = f(1, 2)
+let _ = "x"
+for _ in 1..2: show("tour") ;
+fun g():
+    let _ = 1
+    let _ = 2
+;
+g()

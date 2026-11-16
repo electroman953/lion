@@ -899,6 +899,14 @@ fn names_in(expr: &ast::Expr, names: &mut Vec<String>) {
         Paren(inner) | Try(inner) | Parallel(inner) | Task(inner) | Wait(inner) => names_in(inner, names),
         Shared { value, .. } | Compile(value) => names_in(value, names),
         Fun(_) => {}
+        Otherwise { value, default } => {
+            names_in(value, names);
+            names_in(default, names);
+        }
+        Map(entries) => entries.iter().for_each(|(key, value)| {
+            names_in(key, names);
+            names_in(value, names);
+        }),
         List(elements) | Set(elements) => elements.iter().for_each(|element| names_in(element, names)),
         Tuple(elements) => elements.iter().for_each(|element| names_in(&element.value, names)),
         Unary { operand, .. } => names_in(operand, names),

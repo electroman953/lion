@@ -1,0 +1,70 @@
+exit: 1
+----- stdout
+----- stderr
+error: a tuple of 2 elements is indexed by a number from 1 to 2
+  --> tests/errors/new_forms.lion:3:8
+   |
+ 3 | show(t[3])
+   |        ^
+   |
+   = the position is written in the program, so that the type of the element is known (C115)
+
+error: this tuple has 2 elements, for 3 names
+  --> tests/errors/new_forms.lion:4:17
+   |
+ 4 | let (a, b, c) = t
+   |      -------
+   |                 ^ this is a tuple (Int, Int)
+
+error: this value is never `none`: it is an Int
+  --> tests/errors/new_forms.lion:5:9
+   |
+ 5 | let x = 3 otherwise 4
+   |         ^
+   |
+   = `otherwise` gives a value in place of `none` (C113)
+   = help: remove `otherwise` and its value
+
+error: `_` cannot be read
+  --> tests/errors/new_forms.lion:6:6
+   |
+ 6 | show(_)
+   |      ^
+   |
+   = `_` names a value that is thrown away (C110)
+
+warning: `f` is never called, so it is not checked
+  --> tests/errors/new_forms.lion:7:5
+   |
+ 7 | fun f(a in Int, b = 2) in Int = a + b
+   |     ^
+   |
+   = a function with parameters without a type is checked for the types of each call (§15.3)
+
+error: the call of `f` gives no `a`
+  --> tests/errors/new_forms.lion:8:6
+   |
+ 7 | fun f(a in Int, b = 2) in Int = a + b
+   |       - this parameter has no default value
+ 8 | show(f(b: 1))
+   |      ^^^^^^^
+
+error: the parameter `b` is given twice
+  --> tests/errors/new_forms.lion:9:20
+   |
+ 9 | show(f(1, b: 2, b: 3))
+   |              - given here first
+   |                    ^
+
+error: `f` has no parameter `c`
+   --> tests/errors/new_forms.lion:10:11
+    |
+  7 | fun f(a in Int, b = 2) in Int = a + b
+    |     - declared here
+   ...
+ 10 | show(f(1, c: 2))
+    |           ^
+    |
+    = its parameters: a, b
+
+7 errors found

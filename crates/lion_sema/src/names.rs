@@ -134,6 +134,11 @@ impl Checker<'_> {
 
     /// "cannot find `x`", with a suggestion when a close name exists.
     pub(crate) fn unknown_name_error(&self, name: &str, span: Span) -> Diagnostic {
+        if name == "_" {
+            return Diagnostic::error("`_` cannot be read")
+                .with_primary(span, "")
+                .with_note("`_` names a value that is thrown away (C110)");
+        }
         let mut visible: Vec<&str> =
             self.ctx.scopes.iter().flat_map(|scope| scope.names.keys().map(String::as_str)).collect();
         visible.extend(self.tables.function_names.keys().map(String::as_str));

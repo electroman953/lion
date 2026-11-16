@@ -1,0 +1,19 @@
+// The text of a value, given by its type (C116).
+use json
+use url
+struct Money:
+    cents in Int
+;
+fun Money.text() in Text = "{self.cents div 100}.{self.cents mod 100} € (raw {self})"
+let m = Money(1250)
+show(m)
+show("prix : {m}")
+show([m])
+let v = try json.decode("\{\"a\": [1, 2]\}")
+show(v)
+show("v = {v}")
+let u = try url.parse("https://moi@site.fr:8080/a?x=1#top")
+show(u)
+Color = {red, blue}
+fun Color.text() in Text = if self == red then "rouge" else "bleu"
+show(Color.red)

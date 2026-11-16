@@ -37,6 +37,51 @@ fun sorted(s):
     return source
 ;
 
+// The elements in the order that `less` gives, a function that tells whether its first
+// argument comes before its second (C109); equal elements keep their order. For Texts:
+// `sets.sorted_with(people, fun(a in Person, b in Person) = text.before(a.name, b.name))`.
+fun sorted_with(s, less):
+    var source = [x, x in s]
+    var target = source
+    let n = source.size
+    var width = 1
+    while width < n:
+        var start = 1
+        while start <= n:
+            let middle = if start + width <= n then start + width else n + 1
+            let stop = if start + 2 * width <= n then start + 2 * width else n + 1
+            var i = start
+            var j = middle
+            var k = start
+            while k < stop:
+                if j >= stop or (i < middle and not less(source[j], source[i])):
+                    target[k] = source[i]
+                    i += 1
+                else:
+                    target[k] = source[j]
+                    j += 1
+                ;
+                k += 1
+            ;
+            start = stop
+        ;
+        let merged = target
+        target = source
+        source = merged
+        width *= 2
+    ;
+    return source
+;
+
+// The elements in the increasing order of `key(x)`, which is computed once per element
+// and has `<`: `sets.sorted_by(people, fun(p in Person) = p.age)` (C109).
+fun sorted_by(s, key):
+    let items = [x, x in s]
+    let keys = [key(x), x in items]
+    let order = sorted_with(1..items.size, fun(a in Int, b in Int) = keys[a] < keys[b])
+    return [items[i], i in order]
+;
+
 // The smallest element, or `none` when there is none.
 fun min(s):
     let items = [x, x in s]

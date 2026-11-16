@@ -577,6 +577,7 @@ fn names_in_stmts(stmts: &[ast::Stmt], names: &mut Vec<(String, Span)>) {
                 names_in_expr(target, names);
                 names_in_expr(value, names);
             }
+            ast::StmtKind::Destructure { value, .. } => names_in_expr(value, names),
             ast::StmtKind::Expr(expr) => names_in_expr(expr, names),
             ast::StmtKind::If { branches, otherwise } => {
                 for branch in branches {
@@ -683,5 +684,13 @@ pub(crate) fn names_in_expr(expr: &ast::Expr, names: &mut Vec<(String, Span)>) {
             }
         }
         Fun(decl) => free_names_of_function(decl, names),
+        Otherwise { value, default } => {
+            names_in_expr(value, names);
+            names_in_expr(default, names);
+        }
+        Map(entries) => entries.iter().for_each(|(key, value)| {
+            names_in_expr(key, names);
+            names_in_expr(value, names);
+        }),
     }
 }

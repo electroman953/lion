@@ -1,0 +1,19 @@
+// Elements of tuples (C115).
+let t = (1, "a", 2.5)
+show(t[1])
+show(t[2])
+show(t[3] * 2)
+let (n, s, _) = t
+show("{n} {s}")
+var (x, y) = (3, 4)
+x += 1
+show(x + y)
+let paires = [("Léa", 12), ("Max", 9)]
+for (nom, note) in paires:
+    show("{nom}: {note}")
+;
+for (a, b) in [(1, 2)]:
+    for (c, d) in [(3, 4)]: show(a + b + c + d) ;
+;
+fun swap(p in (Int, Text)) in (Text, Int) = (p[2], p[1])
+show(swap((7, "sept")))

@@ -24,6 +24,13 @@ pub struct Stmt {
 pub enum StmtKind {
     /// `let x = value`, `var x = value in T`, `var x in T` (§6.1).
     Let(LetStmt),
+    /// `let (a, b) = value`: the elements of a tuple in variables (C115). `for (a, b) in
+    /// l` declares them so at the start of each turn.
+    Destructure {
+        mutable: bool,
+        names: Vec<Ident>,
+        value: Expr,
+    },
     /// `place = value`, `place += value`, ... (§6.3).
     Assign {
         target: Expr,
@@ -350,6 +357,13 @@ pub enum ExprKind {
     Task(Box<Expr>),
     /// `wait t`: the result of a task (§19.1).
     Wait(Box<Expr>),
+    /// `value otherwise default`: the value, or `default` when it is `none` (C113).
+    Otherwise {
+        value: Box<Expr>,
+        default: Box<Expr>,
+    },
+    /// `{"a" -> 1, "b" -> 2}`: a Map with its keys and values (C112).
+    Map(Vec<(Expr, Expr)>),
 }
 
 /// An element of a tuple, named or not (§26: `element`).

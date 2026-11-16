@@ -19,27 +19,17 @@ error: `area` takes 2 arguments, not 3
  5 | area(1, 2, 3)
    | ^^^^^^^^^^^^^
 
-error: this argument is named `heigth`, but the parameter at this position is `width`
+error: `area` has no parameter `heigth`
   --> tests/errors/function_calls.lion:6:6
    |
  1 | fun area(width in Float, height in Float) in Float = width * height
-   |          ----- parameter declared here
+   |     ---- declared here
   ...
  6 | area(heigth: 1, width: 2)
    |      ^^^^^^
    |
-   = named arguments keep the order of the parameters (§11.2)
-
-error: this argument is named `width`, but the parameter at this position is `height`
-  --> tests/errors/function_calls.lion:6:17
-   |
- 1 | fun area(width in Float, height in Float) in Float = width * height
-   |                          ------ parameter declared here
-  ...
- 6 | area(heigth: 1, width: 2)
-   |                 ^^^^^
-   |
-   = named arguments keep the order of the parameters (§11.2)
+   = its parameters: width, height
+   = help: did you mean `height`?
 
 error: the parameter `width` of `area` is not `var`
   --> tests/errors/function_calls.lion:7:6
@@ -95,4 +85,4 @@ error: mismatched types
     = expected: Float
     = found: Text
 
-9 errors found
+8 errors found
